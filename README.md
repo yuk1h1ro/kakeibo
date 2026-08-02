@@ -1,0 +1,118 @@
+# 家計簿 (kakeibo)
+
+自分専用のシンプルな家計簿 PWA です。カテゴリ別の支出記録、月次レポート、そして彼女から預かったお金の残高管理ができます。スマホのホーム画面に追加すれば、ネイティブアプリのように使えます。
+
+- データは [Supabase](https://supabase.com/)(無料枠)に保存されます
+- ホスティングは GitHub Pages(無料)で、main ブランチへの push で自動デプロイされます
+- Row Level Security (RLS) により、ログインした本人以外はデータに一切アクセスできません
+
+## 機能
+
+| タブ | 説明 |
+| --- | --- |
+| 入力 | 日付・種別・金額・カテゴリ・メモを入力して支出を記録します。食事などを支払ったとき、そのうち「彼女の負担分」を入力すると、預かり金残高から自動で差し引かれます。 |
+| 履歴 | 記録した取引の一覧を確認・編集・削除できます。 |
+| レポート | 月ごとの支出合計とカテゴリ別の内訳を確認できます。自分の実質支出(彼女の負担分を除いた額)で集計されます。 |
+| 彼女 | 預かり金の残高と入出金の履歴を確認できます。 |
+
+### 預かり金の仕組み
+
+1. 彼女から先にまとまったお金(例: 3 万円)を預かり、「預かり金」として記録します
+2. 食事などを支払ったとき、支出の入力時に「彼女の負担分」(例: 1,500 円)を入力します
+3. 負担分が預かり金残高から自動で差し引かれ、現在の残高がいつでも確認できます
+
+## セットアップ手順
+
+初めての方でも順番どおりに進めれば 15 分ほどで動かせます。
+
+### 1. Supabase プロジェクトを作成する
+
+1. [supabase.com](https://supabase.com/) にアクセスし、GitHub アカウントなどで無料サインアップします
+2. 「New project」から新しいプロジェクトを作成します(リージョンは Tokyo がおすすめ。データベースパスワードは控えておいてください)
+3. プロジェクトが起動したら、左メニューの **SQL Editor** を開きます
+4. このリポジトリの [`supabase/schema.sql`](supabase/schema.sql) の中身をすべてコピーして貼り付け、**Run** をクリックします(テーブルとセキュリティ設定が作成されます)
+5. 認証まわりを設定します:
+   - **Authentication → Sign In / Providers** で Email が有効になっていることを確認します
+   - 同じ画面の **Confirm email** を **オフ** にすると、確認メールなしですぐログインできて楽です(自分専用アプリなのでオフ推奨)
+   - **Authentication → Users** から自分のユーザーを作るか、アプリの画面からサインアップします
+   - 自分のアカウントを作成し終えたら、**Sign up を無効化**(Authentication 設定の「Allow new users to sign up」をオフ)しておくと、他人が勝手にアカウントを作れなくなるので安心です
+6. あとで使う接続情報を控えます: **Settings → API** にある
+   - **Project URL**(例: `https://xxxx.supabase.co`)
+   - **anon public** キー
+
+### 2. GitHub Pages を有効化する
+
+1. このリポジトリを自分のアカウントに用意します(fork またはテンプレートから作成)
+2. リポジトリの **Settings → Pages** を開きます
+3. **Source** を **GitHub Actions** に変更します
+
+### 3. リポジトリ secrets を設定する(任意)
+
+ビルド時に Supabase の接続情報を埋め込みたい場合は、リポジトリの **Settings → Secrets and variables → Actions → New repository secret** で次の 2 つを登録します。
+
+| Name | Value |
+| --- | --- |
+| `VITE_SUPABASE_URL` | 手順 1-6 で控えた Project URL |
+| `VITE_SUPABASE_ANON_KEY` | 手順 1-6 で控えた anon public キー |
+
+**設定しなくても動きます。** その場合は、デプロイされたアプリに初めてアクセスしたときに表示される設定画面で URL と anon キーを入力してください(ブラウザの localStorage に保存されます)。
+
+なお anon キーは「公開してよい」種類のキーです。データの保護は RLS(本人しか読み書きできないルール)で行われているため、キーが見えても他人はあなたのデータにアクセスできません。
+
+### 4. デプロイする
+
+main ブランチに push(またはマージ)すると、GitHub Actions が自動でビルドして GitHub Pages に公開します。手動で実行したい場合は **Actions → Deploy to GitHub Pages → Run workflow** からも実行できます。
+
+公開 URL: `https://<あなたのGitHubユーザー名>.github.io/kakeibo/`
+
+(リポジトリ名を `kakeibo` 以外にした場合は、`vite.config.ts` の `base` をそのリポジトリ名に合わせて変更してください)
+
+### 5. スマホのホーム画面に追加する(PWA)
+
+**iOS (Safari)**
+
+1. Safari で公開 URL を開きます
+2. 画面下の共有ボタン(四角から上矢印)をタップします
+3. 「ホーム画面に追加」を選び、「追加」をタップします
+
+**Android (Chrome)**
+
+1. Chrome で公開 URL を開きます
+2. 右上のメニュー(︙)をタップします
+3. 「ホーム画面に追加」(または「アプリをインストール」)を選びます
+
+以降はホーム画面のアイコンから、アプリのように全画面で起動できます。
+
+## ローカル開発
+
+```bash
+npm install
+npm run dev
+```
+
+`http://localhost:5173` で開発サーバーが起動します。Supabase の接続情報は、初回アクセス時の設定画面で入力するか、プロジェクト直下に `.env.local` を作って指定します。
+
+```bash
+# .env.local (git にはコミットしないでください)
+VITE_SUPABASE_URL=https://xxxx.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJ...
+```
+
+本番同等のビルドを確認するには:
+
+```bash
+npm run build
+npm run preview
+```
+
+## 技術スタック
+
+- **React 18 + TypeScript** — UI
+- **Vite** — ビルドツール
+- **vite-plugin-pwa** — PWA 対応(マニフェスト生成・Service Worker・オフラインキャッシュ)
+- **Supabase** — 認証 + PostgreSQL データベース(無料枠)
+- **GitHub Pages + GitHub Actions** — ホスティングと自動デプロイ(無料)
+
+## データの保存場所とセキュリティ
+
+記録したデータはすべて自分の Supabase プロジェクト(無料枠)の PostgreSQL に保存されます。`transactions` テーブルには Row Level Security (RLS) が設定されており、**ログインした本人の行しか読み書きできません**。anon キーが公開されていても、他人があなたのデータを参照・変更することはできない仕組みです。
