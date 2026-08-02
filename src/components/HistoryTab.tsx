@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { Transaction } from '../lib/types'
 import { ownAmount } from '../lib/types'
 import { formatDate, formatMonth, monthKey, monthKeyOffset, todayISO, yen } from '../lib/format'
 import { categoryEmoji, categoryLabel } from '../lib/categories'
 import type { useTransactions } from '../hooks/useTransactions'
+import { WEEKDAY_LABELS, defaultSelectedDate, monthWeeks } from '../lib/calendar'
+import '../calendar.css'
 
 type Store = ReturnType<typeof useTransactions>
 
@@ -12,41 +14,68 @@ interface Props {
   onEdit: (t: Transaction) => void
 }
 
+interface DaySummary {
+  own: number
+  deposit: number
+}
+
 export default function HistoryTab({ store, onEdit }: Props) {
-  const currentMonth = monthKey(todayISO())
+  const today = todayISO()
+  const currentMonth = monthKey(today)
   const [month, setMonth] = useState(currentMonth)
+  const [selected, setSelected] = useState(today)
   const canNext = month < currentMonth
 
-  const monthTx = store.transactions.filter((t) => monthKey(t.date) === month)
-
-  // 既に日付降順・作成降順で並んでいるので、順に日付でグループ化する
-  const groups: { date: string; items: Transaction[] }[] = []
-  for (const t of monthTx) {
-    const last = groups[groups.length - 1]
-    if (last && last.date === t.date) {
-      last.items.push(t)
-    } else {
-      groups.push({ date: t.date, items: [t] })
-    }
+  const changeMonth = (offset: number) => {
+    const next = monthKeyOffset(month, offset)
+    setMonth(next)
+    setSelected(
+      defaultSelectedDate(
+        next,
+        store.transactions.map((t) => t.date),
+        today
+      )
+    )
   }
+
+  const monthTx = useMemo(
+    () => store.transactions.filter((t) => monthKey(t.date) === month),
+    [store.transactions, month]
+  )
+
+  // 日ごとの集計: 自分の実質支出合計と預かり合計
+  const byDay = useMemo(() => {
+    const map = new Map<string, DaySummary>()
+    for (const t of monthTx) {
+      const entry = map.get(t.date) ?? { own: 0, deposit: 0 }
+      if (t.type === 'partner_deposit') {
+        entry.deposit += t.amount
+      } else {
+        entry.own += ownAmount(t)
+      }
+      map.set(t.date, entry)
+    }
+    return map
+  }, [monthTx])
 
   const expenseTotal = monthTx.reduce((sum, t) => sum + ownAmount(t), 0)
   const depositTotal = monthTx
     .filter((t) => t.type === 'partner_deposit')
     .reduce((sum, t) => sum + t.amount, 0)
 
+  const weeks = useMemo(() => monthWeeks(month), [month])
+
+  const dayTx = monthTx.filter((t) => t.date === selected)
+  const dayTotal = dayTx.reduce((sum, t) => sum + ownAmount(t), 0)
+
   return (
     <>
       <div className="month-nav">
-        <button onClick={() => setMonth(monthKeyOffset(month, -1))} aria-label="前の月">
+        <button onClick={() => changeMonth(-1)} aria-label="前の月">
           ←
         </button>
         <span className="title">{formatMonth(month)}</span>
-        <button
-          onClick={() => setMonth(monthKeyOffset(month, 1))}
-          disabled={!canNext}
-          aria-label="次の月"
-        >
+        <button onClick={() => changeMonth(1)} disabled={!canNext} aria-label="次の月">
           →
         </button>
       </div>
@@ -57,22 +86,65 @@ export default function HistoryTab({ store, onEdit }: Props) {
         {depositTotal > 0 && <div className="delta">彼女からの預かり +{yen(depositTotal)}</div>}
       </div>
 
-      {monthTx.length === 0 ? (
-        <div className="card">
-          <p className="muted">記録がありません</p>
-        </div>
-      ) : (
-        <div className="card">
-          {groups.map((g) => (
-            <div key={g.date}>
-              <div className="tx-group-date">{formatDate(g.date)}</div>
-              {g.items.map((t) => (
-                <TxRow key={t.id} tx={t} onEdit={onEdit} />
-              ))}
-            </div>
+      <div className="card cal-card">
+        <div className="cal-weekdays">
+          {WEEKDAY_LABELS.map((w, i) => (
+            <span key={w} className={i === 0 ? 'cal-sun' : i === 6 ? 'cal-sat' : undefined}>
+              {w}
+            </span>
           ))}
         </div>
-      )}
+        <div className="cal-grid">
+          {weeks.flat().map((cell, i) => {
+            if (cell === null) {
+              return <span key={`empty-${i}`} className="cal-cell cal-empty" />
+            }
+            const summary = byDay.get(cell.iso)
+            const isToday = cell.iso === today
+            const isSelected = cell.iso === selected
+            const amountText =
+              summary && summary.own > 0 ? summary.own.toLocaleString('ja-JP') : null
+            const cls = [
+              'cal-cell',
+              isToday ? 'cal-today' : '',
+              isSelected ? 'cal-selected' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')
+            return (
+              <button
+                key={cell.iso}
+                className={cls}
+                onClick={() => setSelected(cell.iso)}
+                aria-label={`${formatDate(cell.iso)}を選択`}
+                aria-pressed={isSelected}
+              >
+                <span className="cal-day">{cell.day}</span>
+                {amountText !== null && (
+                  <span
+                    className={`cal-amount${amountText.length > 6 ? ' cal-amount-long' : ''}`}
+                  >
+                    {amountText}
+                  </span>
+                )}
+                {summary && summary.deposit > 0 && <span className="cal-dot" />}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="cal-day-heading">
+          <span>{formatDate(selected)}</span>
+          <span className="cal-day-total">合計 {yen(dayTotal)}</span>
+        </div>
+        {dayTx.length === 0 ? (
+          <p className="cal-day-empty">この日の記録はありません</p>
+        ) : (
+          dayTx.map((t) => <TxRow key={t.id} tx={t} onEdit={onEdit} />)
+        )}
+      </div>
     </>
   )
 }

@@ -1,0 +1,143 @@
+/* ---------- 履歴タブ: 月間カレンダー ----------
+   styles.css は変更禁止のため、カレンダー専用スタイルはここに置く。
+   既存のCSS変数のみ使用(ライト/ダーク両対応)。 */
+
+.cal-card {
+  padding: 12px 8px 8px;
+}
+
+/* 曜日ヘッダー(日曜始まり) */
+.cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.cal-weekdays .cal-sun {
+  color: var(--critical);
+  opacity: 0.72;
+}
+
+.cal-weekdays .cal-sat {
+  color: var(--accent);
+  opacity: 0.78;
+}
+
+/* 週グリッド */
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  row-gap: 2px;
+  column-gap: 1px;
+}
+
+.cal-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 1px;
+  min-height: 48px;
+  min-width: 0;
+  padding: 5px 1px 4px;
+  border-radius: 9px;
+  color: var(--text-primary);
+  transition: background-color 0.08s ease;
+}
+
+/* 当月外の空セル */
+.cal-cell.cal-empty {
+  cursor: default;
+}
+
+.cal-cell .cal-day {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+
+/* その日の自分の実質支出(¥なしカンマ区切り) */
+.cal-cell .cal-amount {
+  font-size: 9.5px;
+  line-height: 1.2;
+  font-weight: 500;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+/* 金額が長い日でも折り返さずフォントを縮める */
+.cal-cell .cal-amount.cal-amount-long {
+  font-size: 8.5px;
+  letter-spacing: -0.3px;
+}
+
+/* 彼女からの預かりがある日 */
+.cal-cell .cal-dot {
+  width: 4px;
+  height: 4px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: var(--good);
+  flex-shrink: 0;
+}
+
+/* 今日: 控えめな枠線(box-shadow でレイアウトを揺らさない) */
+.cal-cell.cal-today {
+  box-shadow: inset 0 0 0 1px var(--baseline);
+}
+
+/* 選択中の日: アクセント色の背景 */
+.cal-cell.cal-selected {
+  background: var(--accent);
+  box-shadow: none;
+  color: #fff;
+}
+
+.cal-cell.cal-selected .cal-amount {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.cal-cell.cal-selected .cal-dot {
+  background: #fff;
+}
+
+.cal-cell:not(.cal-empty):not(.cal-selected):active {
+  background: var(--accent-soft);
+}
+
+/* ---------- 選択日の明細 ---------- */
+
+.cal-day-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  padding-bottom: 8px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.cal-day-heading .cal-day-total {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.cal-day-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 12px 0 4px;
+  text-align: center;
+}
