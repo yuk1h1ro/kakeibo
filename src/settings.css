@@ -34,13 +34,6 @@
   border-bottom: none;
 }
 
-.cat-emoji {
-  font-size: 20px;
-  width: 28px;
-  text-align: center;
-  flex-shrink: 0;
-}
-
 .cat-name {
   flex: 1;
   min-width: 0;
@@ -70,22 +63,17 @@
 
 .cat-edit-form {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  gap: 8px;
   width: 100%;
+  padding: 4px 0;
+  min-width: 0;
 }
 
-.cat-emoji-input {
-  width: 56px;
-  min-height: 44px;
-  padding: 8px;
-  text-align: center;
-  font-size: 18px;
-  border: 1px solid var(--baseline);
-  border-radius: var(--radius-btn);
-  background: var(--surface);
-  color: var(--text-primary);
-  flex-shrink: 0;
+.cat-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .cat-label-input {
@@ -130,4 +118,42 @@
   padding: 10px 18px;
   font-size: 14px;
   flex-shrink: 0;
+}
+
+/* ---------- アイコン選択グリッド(追加・編集共用) ---------- */
+
+.icon-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
+  gap: 4px;
+  width: 100%;
+}
+
+/* 追加フォーム側は入力行との間に余白を取る(編集フォームは gap で確保済み) */
+.cat-add .icon-picker {
+  margin-top: 8px;
+}
+
+.icon-pick {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 44px;
+  padding: 4px;
+  border-radius: var(--radius-btn);
+  transition: background-color 0.08s ease;
+}
+
+.icon-pick:active:not(:disabled) {
+  background: var(--fill);
+}
+
+/* 選択中: アイコンの丸背景にアクセントのリング */
+.icon-pick.selected {
+  background: var(--accent-soft);
+}
+
+.icon-pick.selected .cat-icon {
+  box-shadow: 0 0 0 2px var(--accent);
 }

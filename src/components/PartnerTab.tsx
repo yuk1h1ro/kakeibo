@@ -1,7 +1,8 @@
 import TransactionForm from './TransactionForm'
 import type { Transaction } from '../lib/types'
 import { formatDate, yen } from '../lib/format'
-import { categoryEmoji, categoryLabel } from '../lib/categories'
+import { categoryLabel, resolveCategoryVisual } from '../lib/categories'
+import { CategoryVisualBadge } from './categoryIcons'
 import type { useTransactions } from '../hooks/useTransactions'
 
 type Store = ReturnType<typeof useTransactions>
@@ -57,7 +58,9 @@ export default function PartnerTab({ store, onEdit }: Props) {
 
 function MovementRow({ tx, onEdit }: { tx: Transaction; onEdit: (t: Transaction) => void }) {
   const isDeposit = tx.type === 'partner_deposit'
-  const emoji = isDeposit ? '💰' : categoryEmoji(tx.category)
+  const visual = isDeposit
+    ? ({ kind: 'icon', icon: 'wallet' } as const)
+    : resolveCategoryVisual(tx.category)
   const title = isDeposit ? '彼女から預かり' : tx.memo || categoryLabel(tx.category)
 
   const subParts: string[] = [formatDate(tx.date)]
@@ -69,7 +72,7 @@ function MovementRow({ tx, onEdit }: { tx: Transaction; onEdit: (t: Transaction)
 
   return (
     <button className="tx-row" onClick={() => onEdit(tx)}>
-      <span className="tx-emoji">{emoji}</span>
+      <CategoryVisualBadge visual={visual} size={34} />
       <span className="tx-body">
         <span className="tx-title" style={{ display: 'block' }}>
           {title}

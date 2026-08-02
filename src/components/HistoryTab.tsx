@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react'
 import type { Transaction } from '../lib/types'
 import { ownAmount } from '../lib/types'
 import { formatDate, formatMonth, monthKey, monthKeyOffset, todayISO, yen } from '../lib/format'
-import { categoryEmoji, categoryLabel } from '../lib/categories'
+import { categoryLabel, resolveCategoryVisual } from '../lib/categories'
+import { CategoryVisualBadge } from './categoryIcons'
 import type { useTransactions } from '../hooks/useTransactions'
 import { WEEKDAY_LABELS, defaultSelectedDate, monthWeeks } from '../lib/calendar'
 import '../calendar.css'
@@ -157,7 +158,9 @@ export default function HistoryTab({ store, onEdit }: Props) {
 
 function TxRow({ tx, onEdit }: { tx: Transaction; onEdit: (t: Transaction) => void }) {
   const isDeposit = tx.type === 'partner_deposit'
-  const emoji = isDeposit ? '💰' : categoryEmoji(tx.category)
+  const visual = isDeposit
+    ? ({ kind: 'icon', icon: 'wallet' } as const)
+    : resolveCategoryVisual(tx.category)
   const title = isDeposit ? '彼女から預かり' : tx.memo || categoryLabel(tx.category)
 
   const subParts: string[] = []
@@ -170,7 +173,7 @@ function TxRow({ tx, onEdit }: { tx: Transaction; onEdit: (t: Transaction) => vo
 
   return (
     <button className="tx-row" onClick={() => onEdit(tx)}>
-      <span className="tx-emoji">{emoji}</span>
+      <CategoryVisualBadge visual={visual} size={34} />
       <span className="tx-body">
         <span className="tx-title" style={{ display: 'block' }}>
           {title}

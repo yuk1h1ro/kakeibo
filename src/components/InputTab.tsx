@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import TransactionForm, { type FormPrefill } from './TransactionForm'
 import { yen } from '../lib/format'
-import { categoryEmoji, categoryLabel, useCategories } from '../lib/categories'
+import { categoryLabel, resolveCategoryVisual, useCategories } from '../lib/categories'
+import { CategoryVisualBadge } from './categoryIcons'
 import type { Transaction } from '../lib/types'
 import type { useTransactions } from '../hooks/useTransactions'
 
@@ -90,7 +91,7 @@ export default function InputTab({ store }: { store: Store }) {
           <div className="recent-chips">
             {recentEntries.map((t) => (
               <button key={t.id} type="button" className="recent-chip" onClick={() => applyRecent(t)}>
-                <span className="emoji">{categoryEmoji(t.category)}</span>
+                <CategoryVisualBadge visual={resolveCategoryVisual(t.category)} size={28} />
                 <span className="recent-label">{t.memo || categoryLabel(t.category)}</span>
                 <span className="recent-amount">{yen(t.amount)}</span>
               </button>

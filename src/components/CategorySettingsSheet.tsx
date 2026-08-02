@@ -6,8 +6,15 @@ import {
   moveCategory,
   updateCategory,
   useCategories,
+  visualFromEmojiValue,
   type Category,
 } from '../lib/categories'
+import {
+  CATEGORY_ICON_IDS,
+  CategoryIcon,
+  CategoryVisualBadge,
+  categoryIconLabel,
+} from './categoryIcons'
 import '../settings.css'
 
 interface Props {
@@ -15,32 +22,50 @@ interface Props {
   onClose: () => void
 }
 
-// 絵文字入力欄の文字数(書記素)カウント。ZWJ 絵文字等もなるべく1文字として数える
-// (Intl.Segmenter は ES2020 の型定義に無いため型キャストで参照する)
-type SegmenterCtor = new (
-  locale?: string,
-  options?: { granularity?: 'grapheme' | 'word' | 'sentence' }
-) => { segment(input: string): Iterable<unknown> }
+// emoji カラムの生値から、ピッカーで選択済みにするアイコンIDを求める。
+// 旧絵文字カテゴリ(既定8種以外)は対応アイコンが無いため box を初期選択にする
+function iconIdFromValue(raw: string): string {
+  const visual = visualFromEmojiValue(raw)
+  if (visual.kind === 'icon' && CATEGORY_ICON_IDS.includes(visual.icon)) return visual.icon
+  return 'box'
+}
 
-function graphemeCount(s: string): number {
-  const Segmenter = (Intl as unknown as { Segmenter?: SegmenterCtor }).Segmenter
-  try {
-    if (Segmenter) {
-      return [...new Segmenter('ja', { granularity: 'grapheme' }).segment(s)].length
-    }
-  } catch {
-    // フォールバックへ
-  }
-  return [...s].length
+function IconPicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string
+  onChange: (id: string) => void
+  disabled: boolean
+}) {
+  return (
+    <div className="icon-picker" role="radiogroup" aria-label="アイコンを選択">
+      {CATEGORY_ICON_IDS.map((id) => (
+        <button
+          key={id}
+          type="button"
+          role="radio"
+          aria-checked={value === id}
+          aria-label={categoryIconLabel(id)}
+          className={`icon-pick ${value === id ? 'selected' : ''}`}
+          disabled={disabled}
+          onClick={() => onChange(id)}
+        >
+          <CategoryIcon icon={id} size={32} />
+        </button>
+      ))}
+    </div>
+  )
 }
 
 export default function CategorySettingsSheet({ supabase, onClose }: Props) {
   const categories = useCategories()
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [editLabel, setEditLabel] = useState('')
-  const [editEmoji, setEditEmoji] = useState('')
+  const [editIcon, setEditIcon] = useState('box')
   const [newLabel, setNewLabel] = useState('')
-  const [newEmoji, setNewEmoji] = useState('')
+  const [newIcon, setNewIcon] = useState('box')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -62,30 +87,23 @@ export default function CategorySettingsSheet({ supabase, onClose }: Props) {
     }
   }
 
-  const validate = (label: string, emoji: string): string | null => {
-    if (!label.trim()) return 'カテゴリ名を入力してください'
-    const n = graphemeCount(emoji.trim())
-    if (n < 1 || n > 2) return '絵文字は1〜2文字で入力してください'
-    return null
-  }
-
   const startEdit = (c: Category) => {
     setEditingKey(c.catKey)
     setEditLabel(c.label)
-    setEditEmoji(c.emoji)
+    setEditIcon(iconIdFromValue(c.emoji))
     setError(null)
   }
 
   const saveEdit = (catKey: string) => {
-    const msg = validate(editLabel, editEmoji)
-    if (msg) {
-      setError(msg)
+    if (!editLabel.trim()) {
+      setError('カテゴリ名を入力してください')
       return
     }
     void run(async () => {
+      // 旧絵文字カテゴリを編集した場合も 'icon:xxx' 形式に更新される
       await updateCategory(supabase, catKey, {
         label: editLabel.trim(),
-        emoji: editEmoji.trim(),
+        emoji: `icon:${editIcon}`,
       })
       setEditingKey(null)
     })
@@ -100,15 +118,14 @@ export default function CategorySettingsSheet({ supabase, onClose }: Props) {
   }
 
   const add = () => {
-    const msg = validate(newLabel, newEmoji)
-    if (msg) {
-      setError(msg)
+    if (!newLabel.trim()) {
+      setError('カテゴリ名を入力してください')
       return
     }
     void run(async () => {
-      await addCategory(supabase, newLabel.trim(), newEmoji.trim())
+      await addCategory(supabase, newLabel.trim(), `icon:${newIcon}`)
       setNewLabel('')
-      setNewEmoji('')
+      setNewIcon('box')
     })
   }
 
@@ -129,41 +146,35 @@ export default function CategorySettingsSheet({ supabase, onClose }: Props) {
             <li key={c.catKey} className="cat-row">
               {editingKey === c.catKey ? (
                 <div className="cat-edit-form">
-                  <input
-                    className="cat-emoji-input"
-                    type="text"
-                    maxLength={8}
-                    aria-label="絵文字"
-                    placeholder="📦"
-                    value={editEmoji}
-                    onChange={(e) => setEditEmoji(e.target.value)}
-                  />
-                  <input
-                    className="cat-label-input"
-                    type="text"
-                    aria-label="カテゴリ名"
-                    placeholder="カテゴリ名"
-                    value={editLabel}
-                    onChange={(e) => setEditLabel(e.target.value)}
-                  />
-                  <button
-                    className="btn-ghost cat-action"
-                    disabled={busy}
-                    onClick={() => saveEdit(c.catKey)}
-                  >
-                    保存
-                  </button>
-                  <button
-                    className="btn-ghost cat-action"
-                    disabled={busy}
-                    onClick={() => setEditingKey(null)}
-                  >
-                    キャンセル
-                  </button>
+                  <div className="cat-edit-row">
+                    <input
+                      className="cat-label-input"
+                      type="text"
+                      aria-label="カテゴリ名"
+                      placeholder="カテゴリ名"
+                      value={editLabel}
+                      onChange={(e) => setEditLabel(e.target.value)}
+                    />
+                    <button
+                      className="btn-ghost cat-action"
+                      disabled={busy}
+                      onClick={() => saveEdit(c.catKey)}
+                    >
+                      保存
+                    </button>
+                    <button
+                      className="btn-ghost cat-action"
+                      disabled={busy}
+                      onClick={() => setEditingKey(null)}
+                    >
+                      キャンセル
+                    </button>
+                  </div>
+                  <IconPicker value={editIcon} onChange={setEditIcon} disabled={busy} />
                 </div>
               ) : (
                 <>
-                  <span className="cat-emoji">{c.emoji}</span>
+                  <CategoryVisualBadge visual={visualFromEmojiValue(c.emoji)} size={32} />
                   <span className="cat-name">{c.label}</span>
                   <button
                     className="btn-ghost cat-move"
@@ -201,15 +212,6 @@ export default function CategorySettingsSheet({ supabase, onClose }: Props) {
           <h3>+ カテゴリを追加</h3>
           <div className="cat-add-form">
             <input
-              className="cat-emoji-input"
-              type="text"
-              maxLength={8}
-              aria-label="絵文字"
-              placeholder="📦"
-              value={newEmoji}
-              onChange={(e) => setNewEmoji(e.target.value)}
-            />
-            <input
               className="cat-label-input"
               type="text"
               aria-label="カテゴリ名"
@@ -219,12 +221,13 @@ export default function CategorySettingsSheet({ supabase, onClose }: Props) {
             />
             <button
               className="btn-primary cat-add-btn"
-              disabled={busy || !newLabel.trim() || !newEmoji.trim()}
+              disabled={busy || !newLabel.trim()}
               onClick={add}
             >
               追加
             </button>
           </div>
+          <IconPicker value={newIcon} onChange={setNewIcon} disabled={busy} />
         </div>
       </div>
     </div>
