@@ -107,11 +107,14 @@ input,
 select,
 textarea {
   font: inherit;
+  /* iOS Safari のフォーカス時自動ズーム防止(16px 未満だとズームされる) */
+  font-size: 16px;
   color: var(--text-primary);
   background: var(--surface);
   border: 1px solid var(--baseline);
   border-radius: 8px;
   padding: 10px 12px;
+  min-height: 44px;
   width: 100%;
 }
 
@@ -123,14 +126,14 @@ textarea:focus {
   border-color: transparent;
 }
 
-label.field {
+.field {
   display: block;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
 }
 
-label.field > span {
+.field > span {
   display: block;
   margin-bottom: 6px;
 }
@@ -158,6 +161,46 @@ label.field > span {
   color: var(--text-secondary);
   font-size: 13px;
   background: var(--surface);
+  min-height: 44px;
+}
+
+/* ---------- タップフィードバック ---------- */
+
+.btn-primary,
+.btn-ghost,
+.category-chip,
+.partner-toggle,
+.pad-btn,
+.amount-clear,
+.date-chip,
+.recent-chip,
+.tab-bar button {
+  transition: transform 0.08s ease, filter 0.08s ease, background-color 0.08s ease;
+}
+
+.btn-primary:active:not(:disabled),
+.btn-ghost:active:not(:disabled),
+.category-chip:active,
+.partner-toggle:active,
+.pad-btn:active,
+.amount-clear:active,
+.date-chip:active,
+.recent-chip:active {
+  transform: scale(0.97);
+  filter: brightness(0.92);
+}
+
+@media (prefers-color-scheme: dark) {
+  .btn-primary:active:not(:disabled),
+  .btn-ghost:active:not(:disabled),
+  .category-chip:active,
+  .partner-toggle:active,
+  .pad-btn:active,
+  .amount-clear:active,
+  .date-chip:active,
+  .recent-chip:active {
+    filter: brightness(1.25);
+  }
 }
 
 .error-text {
@@ -190,10 +233,12 @@ label.field > span {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 2px;
   padding: 9px 0 7px;
   font-size: 10.5px;
   color: var(--text-muted);
+  min-height: 50px;
 }
 
 .tab-bar button.active {
@@ -214,6 +259,158 @@ label.field > span {
   text-align: right;
 }
 
+.amount-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.amount-row .amount-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.amount-clear {
+  flex-shrink: 0;
+  width: 52px;
+  min-height: 44px;
+  border: 1px solid var(--baseline);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.amount-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.pad-btn {
+  min-height: 44px;
+  border: 1px solid var(--baseline);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 日付クイック選択 ---------- */
+
+.date-quick {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.date-chip {
+  flex: 1;
+  min-height: 44px;
+  border: 1px solid var(--baseline);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.date-chip.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* ---------- 彼女の預かり残高カード ---------- */
+
+.balance-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+}
+
+.balance-card .label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.balance-card .balance-values {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.balance-card .value {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.balance-card .balance-after {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.balance-card .balance-after span {
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 最近の記録から入力 ---------- */
+
+.recent-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recent-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--baseline);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 14px;
+  text-align: left;
+}
+
+.recent-chip .emoji {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.recent-chip .recent-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-chip .recent-amount {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
 .category-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -225,12 +422,14 @@ label.field > span {
   flex-direction: column;
   align-items: center;
   gap: 3px;
+  justify-content: center;
   padding: 9px 2px;
   border-radius: 10px;
   border: 1px solid var(--baseline);
   background: var(--surface);
   font-size: 11px;
   color: var(--text-secondary);
+  min-height: 44px;
 }
 
 .category-chip.selected {
@@ -433,7 +632,8 @@ label.field > span {
   width: 100%;
   max-width: 560px;
   border-radius: 16px 16px 0 0;
-  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  /* キーボード表示時に送信ボタンが隠れにくいよう下部に余白を確保 */
+  padding: 16px 16px calc(48px + env(safe-area-inset-bottom));
   max-height: 88dvh;
   overflow-y: auto;
 }

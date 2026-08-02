@@ -1,8 +1,17 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { CATEGORIES } from '../lib/categories'
-import { todayISO } from '../lib/format'
+import { daysAgoISO, todayISO } from '../lib/format'
 import type { Transaction } from '../lib/types'
 import type { TransactionInput } from '../hooks/useTransactions'
+
+// 「最近の記録から入力」などの外部プリフィル。nonce が変わるたびに適用される(日付は現在の選択を維持)
+export interface FormPrefill {
+  nonce: number
+  amount: number
+  category: string | null
+  memo: string
+  partner_amount: number
+}
 
 interface Props {
   initial?: Transaction
@@ -11,9 +20,23 @@ interface Props {
   onDelete?: () => Promise<void>
   // 新規入力タブでは type 固定の支出フォームとして使う
   fixedType?: 'expense' | 'partner_deposit'
+  // 任意: 外部からのプリフィル(編集モーダルでは使わない)
+  prefill?: FormPrefill
+  // 任意: 「彼女の負担分」の現在入力値を親に通知(トグルOFF・非支出時は 0)
+  onPartnerAmountChange?: (amount: number) => void
 }
 
-export default function TransactionForm({ initial, submitLabel, onSubmit, onDelete, fixedType }: Props) {
+const AMOUNT_STEPS = [10000, 5000, 1000, 500, 100, 10]
+
+export default function TransactionForm({
+  initial,
+  submitLabel,
+  onSubmit,
+  onDelete,
+  fixedType,
+  prefill,
+  onPartnerAmountChange,
+}: Props) {
   const type = fixedType ?? initial?.type ?? 'expense'
   const isExpense = type === 'expense'
 
@@ -28,13 +51,43 @@ export default function TransactionForm({ initial, submitLabel, onSubmit, onDele
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // 外部プリフィル適用(日付は触らない)
+  useEffect(() => {
+    if (!prefill) return
+    setAmount(String(prefill.amount))
+    setCategory(prefill.category)
+    setMemo(prefill.memo)
+    setWithPartner(prefill.partner_amount > 0)
+    setPartnerAmount(prefill.partner_amount > 0 ? String(prefill.partner_amount) : '')
+  }, [prefill])
+
   const amountNum = Number(amount)
   const partnerNum = withPartner ? Number(partnerAmount || 0) : 0
+
+  // 彼女の負担分の入力値を親に通知(残高カードの「差引後」表示用)
+  useEffect(() => {
+    if (!onPartnerAmountChange) return
+    const n = isExpense && withPartner ? Number(partnerAmount || 0) : 0
+    onPartnerAmountChange(Number.isFinite(n) && n > 0 ? n : 0)
+  }, [isExpense, withPartner, partnerAmount, onPartnerAmountChange])
+
   const valid =
     Number.isInteger(amountNum) &&
     amountNum > 0 &&
     (!isExpense || !withPartner || (Number.isInteger(partnerNum) && partnerNum >= 0 && partnerNum <= amountNum)) &&
     (!isExpense || category !== null)
+
+  const addAmount = (step: number) => {
+    const cur = Number(amount)
+    const base = amount !== '' && Number.isFinite(cur) ? cur : 0
+    setAmount(String(base + step))
+  }
+
+  const dateChips = [
+    { label: '今日', value: daysAgoISO(0) },
+    { label: '昨日', value: daysAgoISO(1) },
+    { label: '一昨日', value: daysAgoISO(2) },
+  ]
 
   const submit = async () => {
     setBusy(true)
@@ -64,18 +117,35 @@ export default function TransactionForm({ initial, submitLabel, onSubmit, onDele
 
   return (
     <div className="form-col">
-      <label className="field">
+      <div className="field">
         <span>{isExpense ? '支払い金額(円)' : '預かり金額(円)'}</span>
-        <input
-          className="amount-input"
-          type="number"
-          inputMode="numeric"
-          min={1}
-          placeholder="0"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-        />
-      </label>
+        <div className="amount-row">
+          <input
+            className="amount-input"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            placeholder="0"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+          <button
+            type="button"
+            className="amount-clear"
+            aria-label="金額をクリア"
+            onClick={() => setAmount('')}
+          >
+            C
+          </button>
+        </div>
+        <div className="amount-pad">
+          {AMOUNT_STEPS.map((step) => (
+            <button key={step} type="button" className="pad-btn" onClick={() => addAmount(step)}>
+              +{step.toLocaleString('ja-JP')}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {isExpense && (
         <div>
@@ -145,10 +215,22 @@ export default function TransactionForm({ initial, submitLabel, onSubmit, onDele
         </div>
       )}
 
-      <label className="field">
+      <div className="field">
         <span>日付</span>
+        <div className="date-quick">
+          {dateChips.map((c) => (
+            <button
+              key={c.label}
+              type="button"
+              className={`date-chip ${date === c.value ? 'selected' : ''}`}
+              onClick={() => setDate(c.value)}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-      </label>
+      </div>
 
       <label className="field">
         <span>メモ(任意)</span>

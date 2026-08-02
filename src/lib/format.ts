@@ -20,6 +20,13 @@ export function todayISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+// ローカルタイムで n 日前の日付を 'YYYY-MM-DD' で返す(タイムゾーンのずれを避けるため年月日から組み立てる)
+export function daysAgoISO(n: number): string {
+  const now = new Date()
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - n)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 // 'YYYY-MM' 形式の月キー
 export function monthKey(isoDate: string): string {
   return isoDate.slice(0, 7)
