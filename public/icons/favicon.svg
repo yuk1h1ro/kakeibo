@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- 角丸正方形の背景 -->
+  <rect width="512" height="512" rx="112" fill="#2a78d6"/>
+  <!-- 白い「¥」記号 -->
+  <g stroke="#ffffff" stroke-width="44" stroke-linecap="round" fill="none">
+    <path d="M170 134 L256 260 L342 134"/>
+    <path d="M256 260 L256 392"/>
+    <path d="M186 292 L326 292"/>
+    <path d="M186 344 L326 344"/>
+  </g>
+</svg>

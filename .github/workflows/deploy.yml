@@ -1,0 +1,65 @@
+# GitHub Pages への自動デプロイ
+# main への push で dist をビルドし、GitHub Pages に公開する。
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# GitHub Pages へのデプロイに必要な権限
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# デプロイの同時実行を防ぐ (進行中のものは完了させ、待機中のものだけキャンセル)
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Supabase の接続情報はリポジトリ secrets から渡す。
+      # secrets が未設定でもビルドは成功する
+      # (その場合はアプリの初回アクセス時に画面上で接続情報を入力する)。
+      - name: Build
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      # SPA のため、存在しないパスへの直アクセスで GitHub Pages が返す
+      # 404 ページとしても index.html を配信する (リロード対策)。
+      - name: Copy index.html to 404.html (SPA fallback)
+        run: cp dist/index.html dist/404.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
