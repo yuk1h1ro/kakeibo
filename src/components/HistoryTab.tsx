@@ -80,10 +80,16 @@ export default function HistoryTab({ store, onEdit }: Props) {
         </button>
       </div>
 
-      <div className="card stat-tile">
-        <div className="label">支出合計</div>
-        <div className="value">{yen(expenseTotal)}</div>
-        {depositTotal > 0 && <div className="delta">彼女からの預かり +{yen(depositTotal)}</div>}
+      <div className="card month-summary">
+        <div className="ms-item">
+          <span className="ms-label">支出</span>
+          <span className="ms-value ms-expense">{yen(expenseTotal)}</span>
+        </div>
+        <div className="ms-divider" />
+        <div className="ms-item">
+          <span className="ms-label">預かり</span>
+          <span className="ms-value ms-income">{yen(depositTotal)}</span>
+        </div>
       </div>
 
       <div className="card cal-card">

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <!-- 角丸正方形の背景 -->
-  <rect width="512" height="512" rx="112" fill="#2a78d6"/>
+  <rect width="512" height="512" rx="112" fill="#4460ef"/>
   <!-- 白い「¥」記号 -->
   <g stroke="#ffffff" stroke-width="44" stroke-linecap="round" fill="none">
     <path d="M170 134 L256 260 L342 134"/>

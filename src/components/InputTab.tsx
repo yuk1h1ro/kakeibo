@@ -53,14 +53,14 @@ export default function InputTab({ store }: { store: Store }) {
     <>
       <div className="card balance-card">
         <span className="label">彼女の預かり残高</span>
-        <span className="balance-values">
+        <div className="balance-values">
           <span className={`value ${partnerBalance < 0 ? 'negative' : ''}`}>{yen(partnerBalance)}</span>
           {pendingPartner > 0 && (
             <span className="balance-after">
               差引後 <span className={balanceAfter < 0 ? 'negative' : ''}>{yen(balanceAfter)}</span>
             </span>
           )}
-        </span>
+        </div>
       </div>
 
       <div className="card">

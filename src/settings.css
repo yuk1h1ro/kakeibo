@@ -1,23 +1,14 @@
 /* ============================================================
    カテゴリ設定シート用スタイル
-   (styles.css は別担当が作業中のため、このファイルに分離)
-   既存の CSS 変数のみを使用し、ライト/ダーク両テーマに追従します。
+   デザイントークン(styles.css の :root)のみを使用し、
+   ライト/ダーク両テーマに追従します。
    ============================================================ */
 
-/* ヘッダー右側のボタン群(歯車+ログアウト) */
+/* ヘッダー右側のボタン群(歯車+ログアウト)。ボタン自体は .icon-btn */
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-/* 歯車ボタン。タップ領域 44px 以上を確保 */
-.settings-btn {
-  min-width: 44px;
-  min-height: 44px;
-  padding: 8px;
-  font-size: 18px;
-  line-height: 1;
+  gap: 2px;
 }
 
 /* ---------- カテゴリ一覧 ---------- */
@@ -72,7 +63,7 @@
 }
 
 .cat-delete {
-  color: var(--critical);
+  color: var(--expense);
 }
 
 /* ---------- インライン編集フォーム ---------- */
@@ -90,8 +81,8 @@
   padding: 8px;
   text-align: center;
   font-size: 18px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 1px solid var(--baseline);
+  border-radius: var(--radius-btn);
   background: var(--surface);
   color: var(--text-primary);
   flex-shrink: 0;
@@ -103,8 +94,8 @@
   min-height: 44px;
   padding: 8px 10px;
   font-size: 14px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 1px solid var(--baseline);
+  border-radius: var(--radius-btn);
   background: var(--surface);
   color: var(--text-primary);
 }
@@ -118,9 +109,10 @@
 }
 
 .cat-add h3 {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
   margin: 0 0 8px;
 }
 

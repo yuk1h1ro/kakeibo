@@ -26,8 +26,8 @@ export default function PartnerTab({ store, onEdit }: Props) {
 
   return (
     <>
-      <div className="card">
-        <h2>彼女の預かり残高</h2>
+      <div className="card hero-card">
+        <div className="label">彼女の預かり残高</div>
         <div className={`hero-value ${balance < 0 ? 'negative' : ''}`}>{balanceText}</div>
         {balance < 0 && <p className="muted">立て替え超過です</p>}
       </div>

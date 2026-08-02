@@ -1,6 +1,52 @@
 /* ---------- 履歴タブ: 月間カレンダー ----------
-   styles.css は変更禁止のため、カレンダー専用スタイルはここに置く。
-   既存のCSS変数のみ使用(ライト/ダーク両対応)。 */
+   デザイントークン(styles.css の :root)のみを参照する。ライト/ダーク両対応。 */
+
+/* 月サマリーバー: 支出 / 預かり を横並びで表示 */
+.month-summary {
+  display: flex;
+  align-items: stretch;
+  padding: 12px 16px;
+}
+
+.month-summary .ms-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.month-summary .ms-divider {
+  width: 1px;
+  background: var(--gridline);
+  margin: 2px 16px;
+  flex-shrink: 0;
+}
+
+.month-summary .ms-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.month-summary .ms-value {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.month-summary .ms-value.ms-expense {
+  color: var(--expense);
+}
+
+.month-summary .ms-value.ms-income {
+  color: var(--income);
+}
 
 .cal-card {
   padding: 12px 8px 8px;
@@ -20,13 +66,12 @@
 }
 
 .cal-weekdays .cal-sun {
-  color: var(--critical);
+  color: var(--expense);
   opacity: 0.72;
 }
 
 .cal-weekdays .cal-sat {
-  color: var(--accent);
-  opacity: 0.78;
+  color: var(--text-muted);
 }
 
 /* 週グリッド */
@@ -45,7 +90,7 @@
   gap: 1px;
   min-height: 48px;
   min-width: 0;
-  padding: 5px 1px 4px;
+  padding: 4px 1px 4px;
   border-radius: 9px;
   color: var(--text-primary);
   transition: background-color 0.08s ease;
@@ -59,7 +104,11 @@
 .cal-cell .cal-day {
   font-size: 13px;
   font-weight: 600;
-  line-height: 1.25;
+  line-height: 22px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  text-align: center;
   font-variant-numeric: tabular-nums;
 }
 
@@ -86,32 +135,29 @@
   height: 4px;
   margin-top: 1px;
   border-radius: 50%;
-  background: var(--good);
+  background: var(--income);
   flex-shrink: 0;
 }
 
-/* 今日: 控えめな枠線(box-shadow でレイアウトを揺らさない) */
-.cal-cell.cal-today {
-  box-shadow: inset 0 0 0 1px var(--baseline);
-}
-
-/* 選択中の日: アクセント色の背景 */
-.cal-cell.cal-selected {
+/* 今日: 日付数字をアクセント色の丸囲みに */
+.cal-cell.cal-today .cal-day {
   background: var(--accent);
-  box-shadow: none;
-  color: #fff;
+  color: var(--on-accent);
+  font-weight: 700;
 }
 
-.cal-cell.cal-selected .cal-amount {
-  color: rgba(255, 255, 255, 0.88);
+/* 選択中の日: 薄いアクセント背景 */
+.cal-cell.cal-selected {
+  background: var(--accent-soft);
 }
 
-.cal-cell.cal-selected .cal-dot {
-  background: #fff;
+.cal-cell.cal-selected:not(.cal-today) .cal-day {
+  color: var(--accent);
+  font-weight: 700;
 }
 
 .cal-cell:not(.cal-empty):not(.cal-selected):active {
-  background: var(--accent-soft);
+  background: var(--fill);
 }
 
 /* ---------- 選択日の明細 ---------- */

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { useTransactions } from '../hooks/useTransactions'
 import { initCategories } from '../lib/categories'
@@ -9,16 +9,17 @@ import ReportTab from './ReportTab'
 import PartnerTab from './PartnerTab'
 import TransactionForm from './TransactionForm'
 import CategorySettingsSheet from './CategorySettingsSheet'
+import { IconCalendar, IconChart, IconGear, IconHeart, IconLogout, IconPen } from './icons'
 import '../offline.css'
 import '../settings.css'
 
 type Tab = 'input' | 'history' | 'report' | 'partner'
 
-const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'input', label: '入力', icon: '✏️' },
-  { id: 'history', label: '履歴', icon: '📋' },
-  { id: 'report', label: 'レポート', icon: '📊' },
-  { id: 'partner', label: '彼女', icon: '💰' },
+const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
+  { id: 'input', label: '入力', icon: <IconPen /> },
+  { id: 'history', label: '履歴', icon: <IconCalendar /> },
+  { id: 'report', label: 'レポート', icon: <IconChart /> },
+  { id: 'partner', label: '彼女', icon: <IconHeart /> },
 ]
 
 export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
@@ -38,20 +39,24 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
         <h1>家計簿</h1>
         <div className="header-actions">
           <button
-            className="btn-ghost settings-btn"
+            className="icon-btn"
             aria-label="カテゴリ設定"
             onClick={() => setShowSettings(true)}
           >
-            ⚙️
+            <IconGear />
           </button>
-          <button className="btn-ghost" onClick={() => supabase.auth.signOut()}>
-            ログアウト
+          <button
+            className="icon-btn"
+            aria-label="ログアウト"
+            onClick={() => supabase.auth.signOut()}
+          >
+            <IconLogout />
           </button>
         </div>
       </header>
       {!store.isOnline ? (
         <div className="sync-banner offline">
-          📡 オフライン — 記録は保存され、通信回復時に自動同期されます
+          オフライン — 記録は保存され、通信回復時に自動同期されます
           {store.pendingCount > 0 && `(保留 ${store.pendingCount}件)`}
         </div>
       ) : store.pendingCount > 0 && store.syncing ? (

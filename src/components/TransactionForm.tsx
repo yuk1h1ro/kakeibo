@@ -26,7 +26,7 @@ interface Props {
   onPartnerAmountChange?: (amount: number) => void
 }
 
-const AMOUNT_STEPS = [10000, 5000, 1000, 500, 100, 10]
+const AMOUNT_STEPS = [5000, 1000, 500, 100, 10, 1]
 
 export default function TransactionForm({
   initial,
@@ -177,7 +177,7 @@ export default function TransactionForm({
             onClick={() => setWithPartner(!withPartner)}
           >
             <span>彼女の分もまとめて払った</span>
-            <span>{withPartner ? '✓' : ''}</span>
+            <span className="toggle-check">{withPartner ? '✓' : ''}</span>
           </button>
           {withPartner && (
             <>
@@ -250,7 +250,7 @@ export default function TransactionForm({
       </button>
 
       {onDelete && (
-        <button className="btn-ghost" style={{ color: 'var(--critical)' }} disabled={busy} onClick={onDelete}>
+        <button className="btn-ghost" style={{ color: 'var(--expense)' }} disabled={busy} onClick={onDelete}>
           削除する
         </button>
       )}
