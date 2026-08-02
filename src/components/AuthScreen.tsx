@@ -1,7 +1,20 @@
 import { useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { clearConfig, getConfiguredUrl, hasStoredConfig } from '../lib/supabaseClient'
 
 export default function AuthScreen({ supabase }: { supabase: SupabaseClient }) {
+  const configuredUrl = getConfiguredUrl()
+  const canReset = hasStoredConfig()
+
+  const resetConfig = () => {
+    const ok = window.confirm(
+      'Supabaseの接続設定を消して初期設定からやり直しますか?(家計簿のデータは消えません)',
+    )
+    if (!ok) return
+    clearConfig()
+    window.location.reload()
+  }
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -99,6 +112,16 @@ export default function AuthScreen({ supabase }: { supabase: SupabaseClient }) {
           初めての方はこちら(新規登録)
         </button>
       </div>
+      {(configuredUrl || canReset) && (
+        <div className="auth-footer">
+          {configuredUrl && <span className="muted">接続先: {configuredUrl}</span>}
+          {canReset && (
+            <button className="btn-ghost" onClick={resetConfig}>
+              接続設定をやり直す
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
