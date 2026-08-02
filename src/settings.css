@@ -1,0 +1,141 @@
+/* ============================================================
+   カテゴリ設定シート用スタイル
+   (styles.css は別担当が作業中のため、このファイルに分離)
+   既存の CSS 変数のみを使用し、ライト/ダーク両テーマに追従します。
+   ============================================================ */
+
+/* ヘッダー右側のボタン群(歯車+ログアウト) */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 歯車ボタン。タップ領域 44px 以上を確保 */
+.settings-btn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* ---------- カテゴリ一覧 ---------- */
+
+.cat-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cat-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  min-height: 56px;
+}
+
+.cat-row:last-child {
+  border-bottom: none;
+}
+
+.cat-emoji {
+  font-size: 20px;
+  width: 28px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.cat-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 並べ替え・編集・削除ボタン(44px 以上のタップ領域) */
+.cat-move,
+.cat-action {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.cat-delete {
+  color: var(--critical);
+}
+
+/* ---------- インライン編集フォーム ---------- */
+
+.cat-edit-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.cat-emoji-input {
+  width: 56px;
+  min-height: 44px;
+  padding: 8px;
+  text-align: center;
+  font-size: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+.cat-label-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+/* ---------- カテゴリ追加 ---------- */
+
+.cat-add {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--baseline);
+}
+
+.cat-add h3 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin: 0 0 8px;
+}
+
+.cat-add-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* .btn-primary は幅100%指定のため、行内で使う分は上書きする */
+.cat-add-btn {
+  display: inline-block;
+  width: auto;
+  min-height: 44px;
+  padding: 10px 18px;
+  font-size: 14px;
+  flex-shrink: 0;
+}

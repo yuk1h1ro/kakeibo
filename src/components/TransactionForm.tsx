@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CATEGORIES } from '../lib/categories'
+import { useCategories } from '../lib/categories'
 import { daysAgoISO, todayISO } from '../lib/format'
 import type { Transaction } from '../lib/types'
 import type { TransactionInput } from '../hooks/useTransactions'
@@ -39,6 +39,7 @@ export default function TransactionForm({
 }: Props) {
   const type = fixedType ?? initial?.type ?? 'expense'
   const isExpense = type === 'expense'
+  const categories = useCategories()
 
   const [amount, setAmount] = useState(initial ? String(initial.amount) : '')
   const [category, setCategory] = useState<string | null>(initial?.category ?? null)
@@ -153,7 +154,7 @@ export default function TransactionForm({
             <span>カテゴリ</span>
           </label>
           <div className="category-grid">
-            {CATEGORIES.map((c) => (
+            {categories.map((c) => (
               <button
                 key={c.id}
                 type="button"

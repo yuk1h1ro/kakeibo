@@ -1,13 +1,16 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { useTransactions } from '../hooks/useTransactions'
+import { initCategories } from '../lib/categories'
 import type { Transaction } from '../lib/types'
 import InputTab from './InputTab'
 import HistoryTab from './HistoryTab'
 import ReportTab from './ReportTab'
 import PartnerTab from './PartnerTab'
 import TransactionForm from './TransactionForm'
+import CategorySettingsSheet from './CategorySettingsSheet'
 import '../offline.css'
+import '../settings.css'
 
 type Tab = 'input' | 'history' | 'report' | 'partner'
 
@@ -22,14 +25,29 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
   const store = useTransactions(supabase)
   const [tab, setTab] = useState<Tab>('input')
   const [editing, setEditing] = useState<Transaction | null>(null)
+  const [showSettings, setShowSettings] = useState(false)
+
+  // カテゴリをSupabaseから読み込む(初回は既定カテゴリを移行)。失敗時はキャッシュで継続
+  useEffect(() => {
+    void initCategories(supabase)
+  }, [supabase])
 
   return (
     <>
       <header className="app-header">
         <h1>家計簿</h1>
-        <button className="btn-ghost" onClick={() => supabase.auth.signOut()}>
-          ログアウト
-        </button>
+        <div className="header-actions">
+          <button
+            className="btn-ghost settings-btn"
+            aria-label="カテゴリ設定"
+            onClick={() => setShowSettings(true)}
+          >
+            ⚙️
+          </button>
+          <button className="btn-ghost" onClick={() => supabase.auth.signOut()}>
+            ログアウト
+          </button>
+        </div>
       </header>
       {!store.isOnline ? (
         <div className="sync-banner offline">
@@ -58,6 +76,9 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
           </button>
         ))}
       </nav>
+      {showSettings && (
+        <CategorySettingsSheet supabase={supabase} onClose={() => setShowSettings(false)} />
+      )}
       {editing && (
         <div className="modal-backdrop" onClick={() => setEditing(null)}>
           <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
