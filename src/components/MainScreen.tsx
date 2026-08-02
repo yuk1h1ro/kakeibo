@@ -7,6 +7,7 @@ import HistoryTab from './HistoryTab'
 import ReportTab from './ReportTab'
 import PartnerTab from './PartnerTab'
 import TransactionForm from './TransactionForm'
+import '../offline.css'
 
 type Tab = 'input' | 'history' | 'report' | 'partner'
 
@@ -30,6 +31,14 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
           ログアウト
         </button>
       </header>
+      {!store.isOnline ? (
+        <div className="sync-banner offline">
+          📡 オフライン — 記録は保存され、通信回復時に自動同期されます
+          {store.pendingCount > 0 && `(保留 ${store.pendingCount}件)`}
+        </div>
+      ) : store.pendingCount > 0 && store.syncing ? (
+        <div className="sync-banner syncing">同期中… ({store.pendingCount}件)</div>
+      ) : null}
       <main className="app-main">
         {store.error && <p className="error-text">データ取得エラー: {store.error}</p>}
         {tab === 'input' && <InputTab store={store} />}
