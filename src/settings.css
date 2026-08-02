@@ -157,3 +157,40 @@
 .icon-pick.selected .cat-icon {
   box-shadow: 0 0 0 2px var(--accent);
 }
+
+/* ---------- Discord通知設定(彼女タブ) ---------- */
+
+.discord-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.discord-status {
+  margin-top: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--income);
+}
+
+/* 伏せた Webhook URL(折り返して表示崩れを防ぐ) */
+.discord-url {
+  margin-top: 2px;
+  word-break: break-all;
+}
+
+.discord-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.discord-actions .btn-ghost {
+  flex: 1;
+  min-width: 0;
+}
+
+.discord-result {
+  margin-top: 8px;
+}

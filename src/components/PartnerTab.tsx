@@ -1,9 +1,17 @@
+import { useState } from 'react'
 import TransactionForm from './TransactionForm'
 import type { Transaction } from '../lib/types'
 import { formatDate, yen } from '../lib/format'
 import { categoryLabel, resolveCategoryVisual } from '../lib/categories'
 import { CategoryVisualBadge } from './categoryIcons'
 import type { useTransactions } from '../hooks/useTransactions'
+import {
+  clearWebhookUrl,
+  getWebhookUrl,
+  isValidWebhookUrl,
+  saveWebhookUrl,
+  sendTestMessage,
+} from '../lib/discordNotify'
 
 type Store = ReturnType<typeof useTransactions>
 
@@ -44,6 +52,8 @@ export default function PartnerTab({ store, onEdit }: Props) {
         />
       </div>
 
+      <DiscordNotifyCard />
+
       <div className="card">
         <h2>動きの履歴</h2>
         {movements.length === 0 ? (
@@ -53,6 +63,96 @@ export default function PartnerTab({ store, onEdit }: Props) {
         )}
       </div>
     </>
+  )
+}
+
+// Webhook URL は表示時に伏せる(先頭40文字だけ見せる)
+function maskUrl(url: string): string {
+  return url.length > 40 ? `${url.slice(0, 40)}…` : url
+}
+
+function DiscordNotifyCard() {
+  const [savedUrl, setSavedUrl] = useState<string | null>(() => getWebhookUrl())
+  const [input, setInput] = useState('')
+  const [inputError, setInputError] = useState<string | null>(null)
+  const [testState, setTestState] = useState<'idle' | 'sending' | 'ok' | 'fail'>('idle')
+
+  const handleSave = () => {
+    const url = input.trim()
+    if (!isValidWebhookUrl(url)) {
+      setInputError(
+        'Discord の Webhook URL(https://discord.com/api/webhooks/... の形式)を入力してください'
+      )
+      return
+    }
+    saveWebhookUrl(url)
+    setSavedUrl(url)
+    setInput('')
+    setInputError(null)
+    setTestState('idle')
+  }
+
+  const handleTest = async () => {
+    setTestState('sending')
+    const ok = await sendTestMessage()
+    setTestState(ok ? 'ok' : 'fail')
+  }
+
+  const handleClear = () => {
+    clearWebhookUrl()
+    setSavedUrl(null)
+    setTestState('idle')
+  }
+
+  return (
+    <div className="card">
+      <h2>Discord通知</h2>
+      <p className="muted">預かり残高が変わったとき、Discordのチャンネルに自動で通知します</p>
+      {savedUrl ? (
+        <>
+          <p className="discord-status">✓ 通知は有効です</p>
+          <p className="muted discord-url">{maskUrl(savedUrl)}</p>
+          <div className="discord-actions">
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => void handleTest()}
+              disabled={testState === 'sending'}
+            >
+              {testState === 'sending' ? '送信中…' : 'テスト送信'}
+            </button>
+            <button type="button" className="btn-ghost" onClick={handleClear}>
+              解除
+            </button>
+          </div>
+          {testState === 'ok' && (
+            <p className="muted discord-result">✅ テスト通知を送信しました。Discordのチャンネルを確認してください</p>
+          )}
+          {testState === 'fail' && (
+            <p className="error-text discord-result">送信に失敗しました。URLと通信状態を確認してください</p>
+          )}
+        </>
+      ) : (
+        <div className="discord-form">
+          <label className="field">
+            <span>Webhook URL</span>
+            <input
+              type="url"
+              placeholder="https://discord.com/api/webhooks/..."
+              value={input}
+              onChange={(e) => {
+                setInput(e.target.value)
+                setInputError(null)
+              }}
+            />
+          </label>
+          {inputError && <p className="error-text">{inputError}</p>}
+          <button type="button" className="btn-primary" onClick={handleSave} disabled={!input.trim()}>
+            保存
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 
