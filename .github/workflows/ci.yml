@@ -1,0 +1,47 @@
+# プルリクエスト用のビルド検証
+# PR と main への push で型チェックとビルドを実行し、
+# 壊れた変更がマージ (= 公開) される前に検出する。
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# 検証のみなのでリポジトリの読み取り権限だけを与える
+permissions:
+  contents: read
+
+# 同じ PR (main への push の場合は ref) 単位でグループ化し、
+# 連続 push した際は古い実行を打ち切る
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc -b
+
+      # deploy.yml と同様に secrets を渡すが、
+      # secrets が未設定でもビルドは成功する
+      # (その場合はアプリの初回アクセス時に画面上で接続情報を入力する)。
+      - name: Build
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
