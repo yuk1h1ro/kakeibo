@@ -23,13 +23,13 @@ export default function InputTab({ store }: { store: Store }) {
   )
   const balanceAfter = partnerBalance - pendingPartner
 
-  // 直近の支出から (カテゴリ, 金額, メモ) の組で重複除去して最大5件
+  // 直近の支出から (カテゴリ, 金額, お店, メモ) の組で重複除去して最大5件
   const recentEntries = useMemo(() => {
     const seen = new Set<string>()
     const out: Transaction[] = []
     for (const t of store.transactions) {
       if (t.type !== 'expense') continue
-      const key = `${t.category ?? ''}|${t.amount}|${t.memo}`
+      const key = `${t.category ?? ''}|${t.amount}|${t.store}|${t.memo}`
       if (seen.has(key)) continue
       seen.add(key)
       out.push(t)
@@ -46,6 +46,7 @@ export default function InputTab({ store }: { store: Store }) {
       amount: t.amount,
       category: t.category,
       memo: t.memo,
+      store: t.store,
       partner_amount: t.partner_amount,
     }))
   }
@@ -92,7 +93,7 @@ export default function InputTab({ store }: { store: Store }) {
             {recentEntries.map((t) => (
               <button key={t.id} type="button" className="recent-chip" onClick={() => applyRecent(t)}>
                 <CategoryVisualBadge visual={resolveCategoryVisual(t.category)} size={28} />
-                <span className="recent-label">{t.memo || categoryLabel(t.category)}</span>
+                <span className="recent-label">{t.store || t.memo || categoryLabel(t.category)}</span>
                 <span className="recent-amount">{yen(t.amount)}</span>
               </button>
             ))}

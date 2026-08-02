@@ -15,6 +15,7 @@ export interface TransactionInput {
   amount: number
   category: string | null
   memo: string
+  store: string // お店(店名)。任意。支出でのみ使用(空文字 = 未入力)
   partner_amount: number
 }
 
@@ -22,12 +23,19 @@ export interface TransactionInput {
 
 const TX_CACHE_KEY = 'kakeibo.txCache'
 
+// 後方互換: store カラム追加以前に保存された行(migration 未実行のサーバー・
+// 旧バージョンの localStorage キャッシュ)には store が無い(undefined)。
+// 表示側に `?? ''` を散らさず、読み込みの入口で一括して '' に正規化する。
+function normalizeRows(rows: Transaction[]): Transaction[] {
+  return rows.map((r) => (typeof r.store === 'string' ? r : { ...r, store: '' }))
+}
+
 function loadTxCache(): Transaction[] | null {
   try {
     const raw = localStorage.getItem(TX_CACHE_KEY)
     if (!raw) return null
     const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) ? (parsed as Transaction[]) : null
+    return Array.isArray(parsed) ? normalizeRows(parsed as Transaction[]) : null
   } catch {
     return null
   }
@@ -111,7 +119,7 @@ export function useTransactions(supabase: SupabaseClient) {
         // ネットワーク起因の失敗は「オフライン」扱いで静かに戻る
         if (!isNetworkError(error.message)) setError(error.message)
       } else {
-        const rows = data as Transaction[]
+        const rows = normalizeRows(data as Transaction[])
         setServerTx(rows)
         serverTxRef.current = rows
         saveTxCache(rows)
@@ -166,7 +174,13 @@ export function useTransactions(supabase: SupabaseClient) {
           }
           // サーバーが拒否(制約違反など)— この op は破棄して先へ進む(無限再試行しない)
           setPendingOps(removeOp(op.opId))
-          setError(`同期できなかった記録があります: ${err.message}`)
+          // store カラム未追加(migration-store.sql 未実行)による拒否は、
+          // 生のエラーより対処法が分かるメッセージにする
+          const msg =
+            err.message.includes('store') && err.message.toLowerCase().includes('column')
+              ? 'お店を記録するには README のとおり migration-store.sql の実行が必要です'
+              : `同期できなかった記録があります: ${err.message}`
+          setError(msg)
           flushedSomething = true
         } else {
           // 同期成功 — 彼女残高に影響する op なら Discord に通知する。

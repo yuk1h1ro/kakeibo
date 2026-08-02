@@ -7,6 +7,7 @@ export interface Transaction {
   amount: number // 支払い総額(円)。partner_deposit の場合は預かり額
   category: string | null
   memo: string
+  store: string // お店(店名)。任意。支出でのみ使用(既定は空文字)
   partner_amount: number // 支出のうち彼女の負担分(円)。彼女残高から差し引かれる
   created_at: string
 }

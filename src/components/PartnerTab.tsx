@@ -161,13 +161,16 @@ function MovementRow({ tx, onEdit }: { tx: Transaction; onEdit: (t: Transaction)
   const visual = isDeposit
     ? ({ kind: 'icon', icon: 'wallet' } as const)
     : resolveCategoryVisual(tx.category)
-  const title = isDeposit ? '彼女から預かり' : tx.memo || categoryLabel(tx.category)
+  // タイトルの優先順位: お店 → メモ → カテゴリ名
+  const title = isDeposit ? '彼女から預かり' : tx.store || tx.memo || categoryLabel(tx.category)
 
   const subParts: string[] = [formatDate(tx.date)]
   if (isDeposit) {
     if (tx.memo) subParts.push(tx.memo)
-  } else if (tx.memo) {
-    subParts.push(categoryLabel(tx.category))
+  } else {
+    // タイトルがお店のときはメモをサブ行に併記
+    if (tx.store && tx.memo) subParts.push(tx.memo)
+    if (tx.store || tx.memo) subParts.push(categoryLabel(tx.category))
   }
 
   return (
