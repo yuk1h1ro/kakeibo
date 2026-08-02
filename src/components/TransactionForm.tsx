@@ -13,6 +13,8 @@ export interface FormPrefill {
   memo: string
   store: string
   partner_amount: number
+  // 任意: 指定があるときだけ日付も更新する(レシート読み取り用。「最近の記録から入力」は渡さない)
+  date?: string
 }
 
 interface Props {
@@ -55,10 +57,11 @@ export default function TransactionForm({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // 外部プリフィル適用(日付は触らない)
+  // 外部プリフィル適用(日付は prefill.date があるときだけ更新)
   useEffect(() => {
     if (!prefill) return
     setAmount(String(prefill.amount))
+    if (prefill.date) setDate(prefill.date)
     setCategory(prefill.category)
     setMemo(prefill.memo)
     setStore(prefill.store)

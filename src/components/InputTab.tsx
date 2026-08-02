@@ -1,8 +1,10 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import TransactionForm, { type FormPrefill } from './TransactionForm'
+import GeminiKeySheet from './GeminiKeySheet'
 import { yen } from '../lib/format'
 import { categoryLabel, resolveCategoryVisual, useCategories } from '../lib/categories'
 import { CategoryVisualBadge } from './categoryIcons'
+import { hasGeminiKey, scanReceipt } from '../lib/receiptScan'
 import type { Transaction } from '../lib/types'
 import type { useTransactions } from '../hooks/useTransactions'
 
@@ -15,6 +17,14 @@ export default function InputTab({ store }: { store: Store }) {
   const [pendingPartner, setPendingPartner] = useState(0)
   // カテゴリ変更(名前・絵文字)時に「最近の記録から入力」チップを再描画するための購読
   useCategories()
+
+  // ---------- レシート読み取り ----------
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState<string | null>(null)
+  const [scanNote, setScanNote] = useState(false)
+  const noteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [showGeminiSheet, setShowGeminiSheet] = useState(false)
 
   // 彼女の預かり残高 = 預かり合計 − 支出の彼女負担分合計
   const partnerBalance = store.transactions.reduce(
@@ -51,6 +61,62 @@ export default function InputTab({ store }: { store: Store }) {
     }))
   }
 
+  const handleScanTap = () => {
+    if (!hasGeminiKey()) {
+      setShowGeminiSheet(true)
+      return
+    }
+    fileInputRef.current?.click()
+  }
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    // 同じ画像をもう一度選び直せるように毎回リセット
+    e.target.value = ''
+    if (!file) return
+
+    setScanning(true)
+    setScanError(null)
+    setScanNote(false)
+    try {
+      const result = await scanReceipt(file)
+
+      if (result.store === null && result.total === null && result.date === null) {
+        setScanError('レシートを読み取れませんでした。明るい場所でもう一度撮影してください')
+        return
+      }
+
+      // 読めた項目だけフォームに反映(カテゴリは自動判定しない=ユーザーがタップ)
+      setPrefill((prev) => ({
+        nonce: (prev?.nonce ?? 0) + 1,
+        amount: result.total ?? 0,
+        category: null,
+        memo: '',
+        store: result.store ?? '',
+        partner_amount: 0,
+        ...(result.date ? { date: result.date } : {}),
+      }))
+
+      // 読めなかった項目のフィードバック(1行)
+      const missing: string[] = []
+      if (result.total === null) missing.push('合計金額')
+      if (result.store === null) missing.push('店名')
+      if (result.date === null) missing.push('日付')
+      setScanError(
+        missing.length > 0 ? `${missing.join('・')}を読み取れませんでした。手入力してください` : null
+      )
+
+      // 確認のうながし(数秒で消えるmutedな注意)
+      setScanNote(true)
+      if (noteTimerRef.current) clearTimeout(noteTimerRef.current)
+      noteTimerRef.current = setTimeout(() => setScanNote(false), 6000)
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setScanning(false)
+    }
+  }
+
   return (
     <>
       <div className="card balance-card">
@@ -63,6 +129,33 @@ export default function InputTab({ store }: { store: Store }) {
             </span>
           )}
         </div>
+      </div>
+
+      <div className="scan-block">
+        <button type="button" className="scan-btn" onClick={handleScanTap} disabled={scanning}>
+          {scanning ? (
+            <>
+              <span className="scan-spinner" aria-hidden="true" />
+              読み取り中…
+            </>
+          ) : (
+            <>📷 レシートを読み取る</>
+          )}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          style={{ display: 'none' }}
+          onChange={(e) => void handleFileSelected(e)}
+        />
+        {scanError && <p className="error-text scan-feedback">{scanError}</p>}
+        {scanNote && (
+          <p className="muted scan-feedback">
+            読み取り結果を確認して、必要なら修正してから保存してください
+          </p>
+        )}
       </div>
 
       <div className="card">
@@ -99,6 +192,13 @@ export default function InputTab({ store }: { store: Store }) {
             ))}
           </div>
         </div>
+      )}
+
+      {showGeminiSheet && (
+        <GeminiKeySheet
+          onClose={() => setShowGeminiSheet(false)}
+          onSaved={() => setShowGeminiSheet(false)}
+        />
       )}
     </>
   )
