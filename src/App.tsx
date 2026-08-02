@@ -17,8 +17,12 @@ export default function App() {
       setSession(data.session)
       setAuthReady(true)
     })
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session)
+      // OAuthリダイレクト復帰後にURLへ残る ?code= 等のクエリを除去
+      if (event === 'SIGNED_IN' && window.location.search) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.hash)
+      }
     })
     return () => sub.subscription.unsubscribe()
   }, [supabase])
