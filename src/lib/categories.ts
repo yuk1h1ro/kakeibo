@@ -6,6 +6,7 @@ export interface Category {
   id: string
   catKey: string
   label: string
+  // categories.emoji カラムの生値。絵文字1〜2文字、または 'icon:rice' 形式のアイコンID
   emoji: string
   sortOrder: number
   archived: boolean
@@ -14,14 +15,14 @@ export interface Category {
 // ---------- 既定カテゴリ(フォールバック兼・初回移行時のシード) ----------
 
 const DEFAULT_DEFS: { key: string; label: string; emoji: string }[] = [
-  { key: 'food', label: '食費', emoji: '🍚' },
-  { key: 'eating_out', label: '外食', emoji: '🍜' },
-  { key: 'daily', label: '日用品', emoji: '🧻' },
-  { key: 'transport', label: '交通費', emoji: '🚃' },
-  { key: 'hobby', label: '趣味・娯楽', emoji: '🎮' },
-  { key: 'social', label: '交際費', emoji: '🍻' },
-  { key: 'health', label: '医療・健康', emoji: '💊' },
-  { key: 'other', label: 'その他', emoji: '📦' },
+  { key: 'food', label: '食費', emoji: 'icon:rice' },
+  { key: 'eating_out', label: '外食', emoji: 'icon:ramen' },
+  { key: 'daily', label: '日用品', emoji: 'icon:cart' },
+  { key: 'transport', label: '交通費', emoji: 'icon:train' },
+  { key: 'hobby', label: '趣味・娯楽', emoji: 'icon:gamepad' },
+  { key: 'social', label: '交際費', emoji: 'icon:beer' },
+  { key: 'health', label: '医療・健康', emoji: 'icon:pill' },
+  { key: 'other', label: 'その他', emoji: 'icon:box' },
 ]
 
 const DEFAULT_CATEGORIES: Category[] = DEFAULT_DEFS.map((d, i) => ({
@@ -128,6 +129,48 @@ export function categoryEmoji(id: string | null): string {
   if (!id) return '📦'
   const c = resolve(id)
   return c ? c.emoji : '📦'
+}
+
+// ---------- カテゴリの見た目の解決(絵文字 / 線画アイコン) ----------
+
+/** カテゴリの表示形態。icon は categoryIcons.tsx の CategoryIcon で描画する */
+export type CategoryVisual = { kind: 'icon'; icon: string } | { kind: 'emoji'; emoji: string }
+
+const ICON_PREFIX = 'icon:'
+
+// 既定8カテゴリの旧絵文字 → アイコンIDの読み替え表。
+// 既存ユーザーのDBには絵文字でseed済みのため、この読み替えが無いと見た目が変わらない。
+const LEGACY_EMOJI_TO_ICON: Record<string, string> = {
+  '🍚': 'rice',
+  '🍜': 'ramen',
+  '🧻': 'cart',
+  '🚃': 'train',
+  '🎮': 'gamepad',
+  '🍻': 'beer',
+  '💊': 'pill',
+  '📦': 'box',
+}
+
+/**
+ * emoji カラムの生値から表示形態を求める。
+ * - 'icon:xxx' → 線画アイコン
+ * - 既定8カテゴリの旧絵文字 → 対応する線画アイコンに読み替え
+ * - それ以外の絵文字 → 従来どおり絵文字表示(後方互換)
+ */
+export function visualFromEmojiValue(raw: string): CategoryVisual {
+  if (raw.startsWith(ICON_PREFIX)) {
+    return { kind: 'icon', icon: raw.slice(ICON_PREFIX.length) }
+  }
+  const mapped = LEGACY_EMOJI_TO_ICON[raw]
+  if (mapped) return { kind: 'icon', icon: mapped }
+  return { kind: 'emoji', emoji: raw }
+}
+
+/** カテゴリIDから表示形態を求める。未分類・不明カテゴリは box アイコン */
+export function resolveCategoryVisual(id: string | null): CategoryVisual {
+  if (!id) return { kind: 'icon', icon: 'box' }
+  const c = resolve(id)
+  return c ? visualFromEmojiValue(c.emoji) : { kind: 'icon', icon: 'box' }
 }
 
 // ---------- Supabase 連携 ----------

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { useCategories } from '../lib/categories'
+import { useCategories, visualFromEmojiValue } from '../lib/categories'
+import { CategoryVisualBadge } from './categoryIcons'
 import { daysAgoISO, todayISO } from '../lib/format'
 import type { Transaction } from '../lib/types'
 import type { TransactionInput } from '../hooks/useTransactions'
@@ -161,7 +162,7 @@ export default function TransactionForm({
                 className={`category-chip ${category === c.id ? 'selected' : ''}`}
                 onClick={() => setCategory(c.id)}
               >
-                <span className="emoji">{c.emoji}</span>
+                <CategoryVisualBadge visual={visualFromEmojiValue(c.emoji)} size={34} />
                 {c.label}
               </button>
             ))}

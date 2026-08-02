@@ -7,6 +7,7 @@ import {
   removeOp,
   type PendingOp,
 } from '../lib/offlineQueue'
+import { buildPartnerOpMessage, sendDiscordMessage } from '../lib/discordNotify'
 
 export interface TransactionInput {
   date: string
@@ -90,6 +91,10 @@ export function useTransactions(supabase: SupabaseClient) {
   // StrictMode の二重実行や 'online' イベント連打での flush 多重起動を防ぐ
   const flushingRef = useRef(false)
 
+  // Discord通知の残高計算用に、flush 内から最新のサーバースナップショットを
+  // 同期的に参照できるようにしておく(state だけだと閉じ込めが古くなる)
+  const serverTxRef = useRef<Transaction[]>(serverTx)
+
   const refresh = useCallback(async () => {
     // 明らかにオフラインなら何もしない(キャッシュ表示を維持)
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -108,6 +113,7 @@ export function useTransactions(supabase: SupabaseClient) {
       } else {
         const rows = data as Transaction[]
         setServerTx(rows)
+        serverTxRef.current = rows
         saveTxCache(rows)
         setError(null)
       }
@@ -124,6 +130,10 @@ export function useTransactions(supabase: SupabaseClient) {
     flushingRef.current = true
     setSyncing(true)
     let flushedSomething = false
+    // Discord通知用: この flush 中に成功した op を順に適用したローカル状態。
+    // update/delete の旧行の検索と「op適用後の残高」の計算に使う
+    // (厳密な整合性より、通知が記録を止めないことを優先する)
+    let localRows = serverTxRef.current
     try {
       for (;;) {
         const queue = loadQueue()
@@ -159,6 +169,12 @@ export function useTransactions(supabase: SupabaseClient) {
           setError(`同期できなかった記録があります: ${err.message}`)
           flushedSomething = true
         } else {
+          // 同期成功 — 彼女残高に影響する op なら Discord に通知する。
+          // 旧行の参照(localRows)は「キューから op を消す前」に確保する
+          const nextRows = applyPendingOps(localRows, [op])
+          const message = buildPartnerOpMessage(op, localRows, nextRows)
+          if (message) void sendDiscordMessage(message) // 投げっぱなし。失敗しても記録は止めない
+          localRows = nextRows
           setPendingOps(removeOp(op.opId))
           flushedSomething = true
         }
