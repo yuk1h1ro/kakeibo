@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import TransactionForm, { type FormPrefill } from './TransactionForm'
 import { yen } from '../lib/format'
-import { categoryEmoji, categoryLabel } from '../lib/categories'
+import { categoryEmoji, categoryLabel, useCategories } from '../lib/categories'
 import type { Transaction } from '../lib/types'
 import type { useTransactions } from '../hooks/useTransactions'
 
@@ -12,6 +12,8 @@ export default function InputTab({ store }: { store: Store }) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [prefill, setPrefill] = useState<FormPrefill | undefined>(undefined)
   const [pendingPartner, setPendingPartner] = useState(0)
+  // カテゴリ変更(名前・絵文字)時に「最近の記録から入力」チップを再描画するための購読
+  useCategories()
 
   // 彼女の預かり残高 = 預かり合計 − 支出の彼女負担分合計
   const partnerBalance = store.transactions.reduce(
@@ -51,14 +53,14 @@ export default function InputTab({ store }: { store: Store }) {
     <>
       <div className="card balance-card">
         <span className="label">彼女の預かり残高</span>
-        <span className="balance-values">
+        <div className="balance-values">
           <span className={`value ${partnerBalance < 0 ? 'negative' : ''}`}>{yen(partnerBalance)}</span>
           {pendingPartner > 0 && (
             <span className="balance-after">
               差引後 <span className={balanceAfter < 0 ? 'negative' : ''}>{yen(balanceAfter)}</span>
             </span>
           )}
-        </span>
+        </div>
       </div>
 
       <div className="card">

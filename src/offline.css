@@ -1,10 +1,10 @@
-/* オフライン入力対応の状態バナー(styles.css は変更禁止のため別ファイル)。
-   既存のCSS変数を使うことでライト/ダーク両テーマに自動追従する。 */
+/* オフライン入力対応の状態バナー。
+   デザイントークン(styles.css の :root)のみを使い、ライト/ダーク両テーマに自動追従する。 */
 
 .sync-banner {
   margin: 0 16px;
-  padding: 6px 12px;
-  border-radius: 8px;
+  padding: 7px 12px;
+  border-radius: var(--radius-btn);
   border: 1px solid var(--border);
   font-size: 12px;
   line-height: 1.5;

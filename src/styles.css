@@ -4,39 +4,55 @@
   box-sizing: border-box;
 }
 
+/* ============================================================
+   デザイントークン
+   - アクセントは1色(選択状態・今日・保存ボタン・タブのアクティブのみ)
+   - 意味色: --expense(支出=落ち着いた赤) / --income(収入・預かり=深い緑)
+   - 影は --shadow-1 の1段のみ / 角丸はカード12・ボタン10・シート16
+   ============================================================ */
+
 :root {
   color-scheme: light;
-  --page: #f9f9f7;
-  --surface: #fcfcfb;
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #898781;
-  --gridline: #e1e0d9;
-  --baseline: #c3c2b7;
-  --border: rgba(11, 11, 11, 0.1);
-  --accent: #2a78d6;
-  --accent-soft: rgba(42, 120, 214, 0.1);
-  --good: #006300;
-  --critical: #d03b3b;
+  --page: #f6f5f2;
+  --surface: #ffffff;
+  --text-primary: #17171a;
+  --text-secondary: #55534e;
+  --text-muted: #8a887f;
+  --gridline: #ececea;
+  --baseline: #d9d8d2;
+  --border: rgba(20, 20, 25, 0.07);
+  --fill: rgba(120, 120, 128, 0.08);
+  --accent: #4460ef; /* on #fff = 5.04:1 */
+  --accent-soft: rgba(68, 96, 239, 0.09);
+  --on-accent: #ffffff; /* on accent = 5.04:1 */
+  --expense: #c93b3b; /* on #fff = 5.03:1 */
+  --income: #157f3d; /* on #fff = 5.08:1 */
   --warning-bg: rgba(250, 178, 25, 0.15);
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --radius-card: 12px;
+  --radius-btn: 10px;
+  --radius-sheet: 16px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --page: #0d0d0d;
-    --surface: #1a1a19;
-    --text-primary: #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted: #898781;
-    --gridline: #2c2c2a;
-    --baseline: #383835;
-    --border: rgba(255, 255, 255, 0.1);
-    --accent: #3987e5;
-    --accent-soft: rgba(57, 135, 229, 0.16);
-    --good: #0ca30c;
-    --critical: #e66767;
+    --page: #121212;
+    --surface: #1d1d1f;
+    --text-primary: #f5f5f4;
+    --text-secondary: #b9b8b2;
+    --text-muted: #85847e;
+    --gridline: #2a2a2c;
+    --baseline: #3a3a3d;
+    --border: rgba(255, 255, 255, 0.08);
+    --fill: rgba(120, 120, 128, 0.18);
+    --accent: #7c8cff; /* on #1d1d1f = 5.65:1 */
+    --accent-soft: rgba(124, 140, 255, 0.14);
+    --on-accent: #101223; /* on accent ≈ 6:1 */
+    --expense: #e5776e; /* on #1d1d1f = 5.77:1 */
+    --income: #4cc38a; /* on #1d1d1f = 7.60:1 */
     --warning-bg: rgba(250, 178, 25, 0.12);
+    --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.4);
   }
 }
 
@@ -64,17 +80,20 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px 10px;
+  padding: 12px 16px 6px;
+  /* 背景と一体化(枠・面なし) */
 }
 
 .app-header h1 {
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
 }
 
 .app-main {
   flex: 1;
-  padding: 0 16px calc(76px + env(safe-area-inset-bottom));
+  padding: 4px 16px calc(76px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -83,14 +102,16 @@ body {
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-1);
   padding: 16px;
 }
 
 .card h2 {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
   margin-bottom: 10px;
 }
 
@@ -112,7 +133,7 @@ textarea {
   color: var(--text-primary);
   background: var(--surface);
   border: 1px solid var(--baseline);
-  border-radius: 8px;
+  border-radius: var(--radius-btn);
   padding: 10px 12px;
   min-height: 44px;
   width: 100%;
@@ -142,11 +163,11 @@ textarea:focus {
   display: block;
   width: 100%;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 700;
   font-size: 16px;
   padding: 13px;
-  border-radius: 10px;
+  border-radius: var(--radius-btn);
 }
 
 .btn-primary:disabled {
@@ -156,12 +177,33 @@ textarea:focus {
 
 .btn-ghost {
   padding: 8px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-btn);
   border: 1px solid var(--baseline);
   color: var(--text-secondary);
   font-size: 13px;
   background: var(--surface);
   min-height: 44px;
+}
+
+/* ヘッダーの線画アイコンボタン(歯車・ログアウト) */
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px;
+  border-radius: var(--radius-btn);
+  color: var(--text-secondary);
+  transition: background-color 0.08s ease;
+}
+
+.icon-btn:active {
+  background: var(--fill);
+}
+
+.icon-btn svg {
+  display: block;
 }
 
 /* ---------- タップフィードバック ---------- */
@@ -204,7 +246,7 @@ textarea:focus {
 }
 
 .error-text {
-  color: var(--critical);
+  color: var(--expense);
   font-size: 13px;
 }
 
@@ -234,9 +276,10 @@ textarea:focus {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  padding: 9px 0 7px;
-  font-size: 10.5px;
+  gap: 3px;
+  padding: 8px 0 6px;
+  font-size: 10px;
+  font-weight: 500;
   color: var(--text-muted);
   min-height: 50px;
 }
@@ -247,16 +290,22 @@ textarea:focus {
 }
 
 .tab-bar .tab-icon {
-  font-size: 20px;
+  display: flex;
   line-height: 1;
+}
+
+.tab-bar .tab-icon svg {
+  width: 23px;
+  height: 23px;
 }
 
 /* ---------- 金額入力 ---------- */
 
 .amount-input {
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 700;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .amount-row {
@@ -274,9 +323,8 @@ textarea:focus {
   flex-shrink: 0;
   width: 52px;
   min-height: 44px;
-  border: 1px solid var(--baseline);
-  border-radius: 8px;
-  background: var(--surface);
+  border-radius: var(--radius-btn);
+  background: var(--fill);
   color: var(--text-secondary);
   font-size: 16px;
   font-weight: 700;
@@ -290,10 +338,9 @@ textarea:focus {
 }
 
 .pad-btn {
-  min-height: 44px;
-  border: 1px solid var(--baseline);
-  border-radius: 10px;
-  background: var(--surface);
+  min-height: 46px;
+  border-radius: var(--radius-btn);
+  background: var(--fill);
   color: var(--text-primary);
   font-size: 15px;
   font-weight: 600;
@@ -312,7 +359,7 @@ textarea:focus {
   flex: 1;
   min-height: 44px;
   border: 1px solid var(--baseline);
-  border-radius: 10px;
+  border-radius: var(--radius-btn);
   background: var(--surface);
   color: var(--text-secondary);
   font-size: 14px;
@@ -326,33 +373,33 @@ textarea:focus {
   font-weight: 700;
 }
 
-/* ---------- 彼女の預かり残高カード ---------- */
+/* ---------- 彼女の預かり残高カード(スタットタイル型) ---------- */
 
 .balance-card {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 12px 16px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
 }
 
 .balance-card .label {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
 }
 
 .balance-card .balance-values {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
-  justify-content: flex-end;
 }
 
 .balance-card .value {
-  font-size: 20px;
+  font-size: 28px;
   font-weight: 700;
+  line-height: 1.2;
   font-variant-numeric: tabular-nums;
 }
 
@@ -384,7 +431,7 @@ textarea:focus {
   min-height: 44px;
   padding: 8px 12px;
   border: 1px solid var(--baseline);
-  border-radius: 10px;
+  border-radius: var(--radius-btn);
   background: var(--surface);
   color: var(--text-primary);
   font-size: 14px;
@@ -424,7 +471,7 @@ textarea:focus {
   gap: 3px;
   justify-content: center;
   padding: 9px 2px;
-  border-radius: 10px;
+  border-radius: var(--radius-btn);
   border: 1px solid var(--baseline);
   background: var(--surface);
   font-size: 11px;
@@ -448,7 +495,7 @@ textarea:focus {
   align-items: center;
   justify-content: space-between;
   padding: 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-btn);
   border: 1px solid var(--baseline);
   width: 100%;
   font-size: 14px;
@@ -458,6 +505,11 @@ textarea:focus {
 .partner-toggle.on {
   border-color: var(--accent);
   background: var(--accent-soft);
+}
+
+.partner-toggle.on .toggle-check {
+  color: var(--accent);
+  font-weight: 700;
 }
 
 .quick-row {
@@ -478,38 +530,68 @@ textarea:focus {
 }
 
 .stat-tile .label {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
 }
 
 .stat-tile .value {
-  font-size: 26px;
+  font-size: 28px;
   font-weight: 700;
+  line-height: 1.2;
   margin-top: 4px;
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-tile .delta {
   font-size: 12px;
+  font-weight: 600;
   margin-top: 4px;
   color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 前月比の増減(増=支出色 / 減=収入色)。.stat-tile .delta より詳細度を上げて適用 */
+.stat-tile .delta.negative {
+  color: var(--expense);
+}
+
+.stat-tile .delta.positive {
+  color: var(--income);
+}
+
+/* ---------- 残高ヒーロー(彼女タブ) ---------- */
+
+.hero-card .label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
 }
 
 .hero-value {
-  font-size: 48px;
+  font-size: 42px;
   font-weight: 700;
   line-height: 1.1;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-card .muted {
+  margin-top: 6px;
 }
 
 .negative {
-  color: var(--critical);
+  color: var(--expense);
 }
 
 .positive {
-  color: var(--good);
+  color: var(--income);
 }
 
-/* ---------- 履歴リスト ---------- */
+/* ---------- 月ナビゲーション ---------- */
 
 .month-nav {
   display: flex;
@@ -523,15 +605,23 @@ textarea:focus {
 }
 
 .month-nav button {
-  font-size: 18px;
+  font-size: 17px;
   color: var(--text-secondary);
-  padding: 6px 14px;
-  border-radius: 8px;
+  padding: 6px 16px;
+  min-height: 44px;
+  min-width: 44px;
+  border-radius: var(--radius-btn);
+}
+
+.month-nav button:active:not(:disabled) {
+  background: var(--fill);
 }
 
 .month-nav button:disabled {
   opacity: 0.3;
 }
+
+/* ---------- 履歴リスト ---------- */
 
 .tx-group-date {
   font-size: 12px;
@@ -590,6 +680,7 @@ textarea:focus {
 
 .chart-svg text {
   font-family: inherit;
+  font-variant-numeric: tabular-nums;
 }
 
 .chart-tooltip {
@@ -597,10 +688,10 @@ textarea:focus {
   pointer-events: none;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-btn);
   padding: 7px 10px;
   font-size: 12px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-1);
   white-space: nowrap;
   z-index: 10;
   transform: translate(-50%, calc(-100% - 8px));
@@ -613,6 +704,7 @@ textarea:focus {
 
 .chart-tooltip .tt-value {
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- モーダル ---------- */
@@ -631,11 +723,22 @@ textarea:focus {
   background: var(--page);
   width: 100%;
   max-width: 560px;
-  border-radius: 16px 16px 0 0;
+  border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
   /* キーボード表示時に送信ボタンが隠れにくいよう下部に余白を確保 */
-  padding: 16px 16px calc(48px + env(safe-area-inset-bottom));
+  padding: 8px 16px calc(48px + env(safe-area-inset-bottom));
   max-height: 88dvh;
   overflow-y: auto;
+}
+
+/* シート上部のグラバー */
+.modal-sheet::before {
+  content: '';
+  display: block;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--baseline);
+  margin: 4px auto 12px;
 }
 
 .modal-sheet .sheet-header {
@@ -658,13 +761,15 @@ textarea:focus {
   flex-direction: column;
   justify-content: center;
   padding: 24px;
-  gap: 14px;
+  gap: 16px;
 }
 
 .auth-screen h1 {
-  font-size: 24px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   text-align: center;
-  margin-bottom: 8px;
+  margin-bottom: 16px;
 }
 
 .form-col {
@@ -680,12 +785,13 @@ textarea:focus {
   gap: 10px;
   width: 100%;
   padding: 13px;
-  border-radius: 10px;
+  border-radius: var(--radius-btn);
   border: 1px solid var(--baseline);
   background: var(--surface);
   color: var(--text-primary);
   font-weight: 700;
   font-size: 16px;
+  box-shadow: var(--shadow-1);
 }
 
 .btn-google:disabled {
@@ -706,8 +812,8 @@ textarea:focus {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
-  padding-top: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
   border-top: 1px solid var(--gridline);
   text-align: center;
 }

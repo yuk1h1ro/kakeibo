@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CATEGORIES } from '../lib/categories'
+import { useCategories } from '../lib/categories'
 import { daysAgoISO, todayISO } from '../lib/format'
 import type { Transaction } from '../lib/types'
 import type { TransactionInput } from '../hooks/useTransactions'
@@ -26,7 +26,7 @@ interface Props {
   onPartnerAmountChange?: (amount: number) => void
 }
 
-const AMOUNT_STEPS = [10000, 5000, 1000, 500, 100, 10]
+const AMOUNT_STEPS = [5000, 1000, 500, 100, 10, 1]
 
 export default function TransactionForm({
   initial,
@@ -39,6 +39,7 @@ export default function TransactionForm({
 }: Props) {
   const type = fixedType ?? initial?.type ?? 'expense'
   const isExpense = type === 'expense'
+  const categories = useCategories()
 
   const [amount, setAmount] = useState(initial ? String(initial.amount) : '')
   const [category, setCategory] = useState<string | null>(initial?.category ?? null)
@@ -153,7 +154,7 @@ export default function TransactionForm({
             <span>カテゴリ</span>
           </label>
           <div className="category-grid">
-            {CATEGORIES.map((c) => (
+            {categories.map((c) => (
               <button
                 key={c.id}
                 type="button"
@@ -176,7 +177,7 @@ export default function TransactionForm({
             onClick={() => setWithPartner(!withPartner)}
           >
             <span>彼女の分もまとめて払った</span>
-            <span>{withPartner ? '✓' : ''}</span>
+            <span className="toggle-check">{withPartner ? '✓' : ''}</span>
           </button>
           {withPartner && (
             <>
@@ -249,7 +250,7 @@ export default function TransactionForm({
       </button>
 
       {onDelete && (
-        <button className="btn-ghost" style={{ color: 'var(--critical)' }} disabled={busy} onClick={onDelete}>
+        <button className="btn-ghost" style={{ color: 'var(--expense)' }} disabled={busy} onClick={onDelete}>
           削除する
         </button>
       )}
