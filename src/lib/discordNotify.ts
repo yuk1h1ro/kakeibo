@@ -126,11 +126,12 @@ export function partnerBalance(rows: PartnerTxLike[]): number {
   return rows.reduce((sum, t) => sum + partnerImpact(t), 0)
 }
 
-// PendingOp(offlineQueue.ts)を構造的に受けられる最小の形
+// PendingOp(offlineQueue.ts)を構造的に受けられる最小の形。
+// store は旧バージョンで積まれたキュー(store 追加以前)に無いことがあるため optional
 export interface PartnerOpLike {
   kind: 'insert' | 'update' | 'delete'
   id: string
-  payload?: PartnerTxLike & { category: string | null; memo: string }
+  payload?: PartnerTxLike & { category: string | null; memo: string; store?: string }
 }
 
 /**
@@ -153,9 +154,10 @@ export function buildPartnerOpMessage(
       return formatPartnerNotification({ kind: 'deposit', amount: p.amount, balance })
     }
     if (p.partner_amount > 0) {
+      // 表題の優先順位: お店 → メモ → カテゴリ名
       return formatPartnerNotification({
         kind: 'expense',
-        label: p.memo || categoryLabel(p.category),
+        label: p.store || p.memo || categoryLabel(p.category),
         amount: p.partner_amount,
         balance,
       })

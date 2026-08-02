@@ -11,7 +11,10 @@ export interface FormPrefill {
   amount: number
   category: string | null
   memo: string
+  store: string
   partner_amount: number
+  // 任意: 指定があるときだけ日付も更新する(レシート読み取り用。「最近の記録から入力」は渡さない)
+  date?: string
 }
 
 interface Props {
@@ -46,6 +49,7 @@ export default function TransactionForm({
   const [category, setCategory] = useState<string | null>(initial?.category ?? null)
   const [date, setDate] = useState(initial?.date ?? todayISO())
   const [memo, setMemo] = useState(initial?.memo ?? '')
+  const [store, setStore] = useState(initial?.store ?? '')
   const [withPartner, setWithPartner] = useState((initial?.partner_amount ?? 0) > 0)
   const [partnerAmount, setPartnerAmount] = useState(
     initial && initial.partner_amount > 0 ? String(initial.partner_amount) : ''
@@ -53,12 +57,14 @@ export default function TransactionForm({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // 外部プリフィル適用(日付は触らない)
+  // 外部プリフィル適用(日付は prefill.date があるときだけ更新)
   useEffect(() => {
     if (!prefill) return
     setAmount(String(prefill.amount))
+    if (prefill.date) setDate(prefill.date)
     setCategory(prefill.category)
     setMemo(prefill.memo)
+    setStore(prefill.store)
     setWithPartner(prefill.partner_amount > 0)
     setPartnerAmount(prefill.partner_amount > 0 ? String(prefill.partner_amount) : '')
   }, [prefill])
@@ -101,12 +107,14 @@ export default function TransactionForm({
         amount: amountNum,
         category: isExpense ? category : null,
         memo: memo.trim(),
+        store: isExpense ? store.trim() : '',
         partner_amount: isExpense ? partnerNum : 0,
       })
       // 新規入力時のみリセット(編集モーダルは親が閉じる)
       if (!initial) {
         setAmount('')
         setMemo('')
+        setStore('')
         setWithPartner(false)
         setPartnerAmount('')
       }
@@ -233,6 +241,18 @@ export default function TransactionForm({
         </div>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
       </div>
+
+      {isExpense && (
+        <label className="field">
+          <span>お店(任意)</span>
+          <input
+            type="text"
+            placeholder="例: セブンイレブン"
+            value={store}
+            onChange={(e) => setStore(e.target.value)}
+          />
+        </label>
+      )}
 
       <label className="field">
         <span>メモ(任意)</span>

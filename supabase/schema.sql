@@ -31,6 +31,9 @@ create table if not exists public.transactions (
   -- メモ (任意。既定は空文字)
   memo text not null default '',
 
+  -- お店 (店名。任意。既定は空文字。支出でのみ使用)
+  store text not null default '',
+
   -- 支出のうち彼女の負担分 (円)。彼女の預かり残高から差し引かれる。
   -- 0 以上かつ支払い総額 (amount) 以下であること。
   partner_amount integer not null default 0

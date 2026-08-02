@@ -194,3 +194,77 @@
 .discord-result {
   margin-top: 8px;
 }
+
+/* ---------- Gemini APIキー設定シート(レシート読み取り) ---------- */
+
+.gemini-desc {
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 10px;
+}
+
+.gemini-steps {
+  margin: 0 0 14px;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.gemini-steps a {
+  color: var(--accent);
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.gemini-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.gemini-key-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.gemini-key-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.gemini-eye {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.gemini-warn {
+  color: var(--text-secondary);
+}
+
+.gemini-status {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--income);
+}
+
+.gemini-masked {
+  margin-top: 2px;
+  word-break: break-all;
+}
+
+.gemini-clear {
+  margin-top: 10px;
+}
+
+.gemini-notes {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--gridline);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
