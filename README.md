@@ -2,6 +2,7 @@
 
 自分専用のシンプルな家計簿 PWA です。カテゴリ別の支出記録、月次レポート、そして彼女から預かったお金の残高管理ができます。スマホのホーム画面に追加すれば、ネイティブアプリのように使えます。
 
+- ログインは **Google アカウントのみ**(メールアドレス+パスワードでのログインは使いません)
 - データは [Supabase](https://supabase.com/)(無料枠)に保存されます
 - ホスティングは GitHub Pages(無料)で、main ブランチへの push で自動デプロイされます
 - Row Level Security (RLS) により、ログインした本人以外はデータに一切アクセスできません
@@ -31,35 +32,55 @@
 2. 「New project」から新しいプロジェクトを作成します(リージョンは Tokyo がおすすめ。データベースパスワードは控えておいてください)
 3. プロジェクトが起動したら、左メニューの **SQL Editor** を開きます
 4. このリポジトリの [`supabase/schema.sql`](supabase/schema.sql) の中身をすべてコピーして貼り付け、**Run** をクリックします(テーブルとセキュリティ設定が作成されます)
-5. 認証まわりを設定します:
-   - **Authentication → Sign In / Providers** で Email が有効になっていることを確認します
-   - 同じ画面の **Confirm email** を **オフ** にすると、確認メールなしですぐログインできて楽です(自分専用アプリなのでオフ推奨)
-   - **Authentication → Users** から自分のユーザーを作るか、アプリの画面からサインアップします
-   - 自分のアカウントを作成し終えたら、**Sign up を無効化**(Authentication 設定の「Allow new users to sign up」をオフ)しておくと、他人が勝手にアカウントを作れなくなるので安心です
-6. あとで使う接続情報を控えます: **Settings → API** にある
+5. あとで使う接続情報を控えます: **Settings → API** にある
    - **Project URL**(例: `https://xxxx.supabase.co`)
    - **anon public** キー
 
-### 2. GitHub Pages を有効化する
+   > **注意:** ここで控える **Project URL** は `https://xxxx.supabase.co` の形です。次の手順 2 で出てくる **Callback URL**(`https://xxxx.supabase.co/auth/v1/callback`)と間違えないよう気をつけてください。
+
+### 2. Google ログインを設定する
+
+このアプリのログイン方法は **Google アカウントのみ**です。次の手順で Google 認証を有効にします。
+
+1. Supabase の **Authentication → Sign In / Providers → Google** を開き、画面に表示されている **Callback URL**(`https://xxxx.supabase.co/auth/v1/callback` の形)をコピーしておきます
+2. [Google Cloud Console](https://console.cloud.google.com/) を開き、Google 側の設定をします
+   - 画面上部からプロジェクトを新規作成します(名前は `kakeibo` など何でも構いません)
+   - **APIとサービス → OAuth同意画面** を開き、User Type は **External(外部)** を選択します。アプリ名・サポートメール・デベロッパー連絡先を入力して保存します
+   - 同じ OAuth同意画面の **テストユーザー** に、自分の Google アカウント(ログインに使うメールアドレス)を追加します(公開申請をしなくても、テストユーザーならログインできます)
+   - **APIとサービス → 認証情報 → 認証情報を作成 → OAuth クライアント ID** を選び、次のように設定して作成します
+     - アプリケーションの種類: **ウェブ アプリケーション**
+     - **承認済みの JavaScript 生成元**: `https://<あなたのGitHubユーザー名>.github.io`
+     - **承認済みのリダイレクト URI**: 手順 1 でコピーした Callback URL(`https://xxxx.supabase.co/auth/v1/callback`)
+3. 作成すると **クライアント ID** と **クライアント シークレット** が表示されます。これを Supabase の **Authentication → Sign In / Providers → Google** の `Client IDs` / `Client Secret` に貼り付け、Google プロバイダを **有効(Enable)** にして **Save** します
+4. Supabase の **Authentication → URL Configuration** を開き、
+   - **Site URL** に `https://<あなたのGitHubユーザー名>.github.io/kakeibo/`
+   - **Redirect URLs** にも `https://<あなたのGitHubユーザー名>.github.io/kakeibo/`
+
+   を設定して保存します(ログイン後にアプリへ戻ってくるために必要です)
+5. デプロイが済んだらアプリを開き、**「Googleでログイン」** をタップして自分の Google アカウントでログインします。無事にログインできたら、**Authentication → Settings** の **「Allow new users to sign up」を オフ** にしておきます。こうすると他人が勝手にアカウントを作れなくなるので安心です
+
+> ローカル開発(`http://localhost:5173`)でも Google ログインを試したい場合は、Google Cloud 側の「承認済みの JavaScript 生成元」に `http://localhost:5173`、Supabase の **Redirect URLs** に `http://localhost:5173/kakeibo/` を追加してください。
+
+### 3. GitHub Pages を有効化する
 
 1. このリポジトリを自分のアカウントに用意します(fork またはテンプレートから作成)
 2. リポジトリの **Settings → Pages** を開きます
 3. **Source** を **GitHub Actions** に変更します
 
-### 3. リポジトリ secrets を設定する(任意)
+### 4. リポジトリ secrets を設定する(任意)
 
 ビルド時に Supabase の接続情報を埋め込みたい場合は、リポジトリの **Settings → Secrets and variables → Actions → New repository secret** で次の 2 つを登録します。
 
 | Name | Value |
 | --- | --- |
-| `VITE_SUPABASE_URL` | 手順 1-6 で控えた Project URL |
-| `VITE_SUPABASE_ANON_KEY` | 手順 1-6 で控えた anon public キー |
+| `VITE_SUPABASE_URL` | 手順 1-5 で控えた Project URL |
+| `VITE_SUPABASE_ANON_KEY` | 手順 1-5 で控えた anon public キー |
 
 **設定しなくても動きます。** その場合は、デプロイされたアプリに初めてアクセスしたときに表示される設定画面で URL と anon キーを入力してください(ブラウザの localStorage に保存されます)。
 
 なお anon キーは「公開してよい」種類のキーです。データの保護は RLS(本人しか読み書きできないルール)で行われているため、キーが見えても他人はあなたのデータにアクセスできません。
 
-### 4. デプロイする
+### 5. デプロイする
 
 main ブランチに push(またはマージ)すると、GitHub Actions が自動でビルドして GitHub Pages に公開します。手動で実行したい場合は **Actions → Deploy to GitHub Pages → Run workflow** からも実行できます。
 
@@ -67,7 +88,7 @@ main ブランチに push(またはマージ)すると、GitHub Actions が自�
 
 (リポジトリ名を `kakeibo` 以外にした場合は、`vite.config.ts` の `base` をそのリポジトリ名に合わせて変更してください)
 
-### 5. スマホのホーム画面に追加する(PWA)
+### 6. スマホのホーム画面に追加する(PWA)
 
 **iOS (Safari)**
 
@@ -110,7 +131,7 @@ npm run preview
 - **React 18 + TypeScript** — UI
 - **Vite** — ビルドツール
 - **vite-plugin-pwa** — PWA 対応(マニフェスト生成・Service Worker・オフラインキャッシュ)
-- **Supabase** — 認証 + PostgreSQL データベース(無料枠)
+- **Supabase** — 認証(Google OAuth)+ PostgreSQL データベース(無料枠)
 - **GitHub Pages + GitHub Actions** — ホスティングと自動デプロイ(無料)
 
 ## データの保存場所とセキュリティ
