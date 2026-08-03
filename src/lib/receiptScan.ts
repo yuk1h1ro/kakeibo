@@ -179,27 +179,6 @@ export function extractReceiptFields(apiResponse: unknown): ReceiptScanResult {
 }
 
 /**
- * Gemini のエラーレスポンス本文から Google 自身のメッセージを取り出す。
- * 形式: {"error": {"code": 400, "message": "...", "status": "INVALID_ARGUMENT"}}
- * JSON でない・形が違う場合は null(呼び出し側を落とさない)。
- */
-export function extractApiErrorMessage(bodyText: string): string | null {
-  let raw: unknown
-  try {
-    raw = JSON.parse(bodyText)
-  } catch {
-    return null
-  }
-  if (raw === null || typeof raw !== 'object') return null
-  const err = (raw as { error?: unknown }).error
-  if (err === null || typeof err !== 'object') return null
-  const { message, status } = err as { message?: unknown; status?: unknown }
-  if (typeof message === 'string' && message.trim() !== '') return message.trim()
-  if (typeof status === 'string' && status.trim() !== '') return status.trim()
-  return null
-}
-
-/**
  * HTTP ステータスをユーザー向けの日本語メッセージに変換する。
  * apiMessage(Googleが返した原因)があれば必ず併記する — これが無いと
  * 「キーが悪いのか、モデル名が悪いのか」の切り分けができない。
@@ -235,11 +214,19 @@ export interface GeminiTestResult {
 }
 
 /**
- * Google API のエラーレスポンス JSON から原因の手がかりを取り出す。
- * error.message だけでなく status と details[].reason も混ぜて返し、
- * 呼び出し側が SERVICE_DISABLED などで分岐できるようにする。
+ * Google API のエラーレスポンス本文から原因の手がかりを取り出す。(純粋関数)
+ * 形式: {"error": {"code": 400, "message": "...", "status": "...", "details": [...]}}
+ * message だけでなく status と details[].reason も混ぜて返し、呼び出し側が
+ * SERVICE_DISABLED などで分岐できるようにする。
+ * JSON でない・形が違う場合は null(呼び出し側を落とさない)。
  */
-export function extractApiErrorMessage(payload: unknown): string | null {
+export function extractApiErrorMessage(bodyText: string): string | null {
+  let payload: unknown
+  try {
+    payload = JSON.parse(bodyText)
+  } catch {
+    return null
+  }
   if (payload === null || typeof payload !== 'object') return null
   const err = (payload as { error?: unknown }).error
   if (err === null || typeof err !== 'object') return null
@@ -261,6 +248,8 @@ export function extractApiErrorMessage(payload: unknown): string | null {
 
 /**
  * 失敗レスポンスを、原因別の対処法付き日本語メッセージにする。(純粋関数)
+ * detail は extractApiErrorMessage で取り出した Google 自身のメッセージ。
+ * ステータス+詳細で「キーが違う/APIが未有効/キーの制限」を切り分ける。
  */
 export function buildTestFailureMessage(status: number, detail: string | null): string {
   const d = detail ?? ''
@@ -275,7 +264,8 @@ export function buildTestFailureMessage(status: number, detail: string | null): 
     base =
       'APIキーの制限により拒否されました。Google Cloud Console でキーの制限設定を確認してください'
   } else {
-    base = httpErrorMessage(status)
+    // それ以外は既存の変換に任せる(詳細の併記もそちらが行う)
+    return httpErrorMessage(status, detail)
   }
   return detail ? `${base}(詳細: ${detail})` : base
 }
@@ -321,7 +311,7 @@ export function buildTestSuccessResult(modelIds: string[]): GeminiTestResult {
 export interface TestResponseLike {
   ok: boolean
   status: number
-  json: () => Promise<unknown>
+  text: () => Promise<string>
 }
 export type FetchLike = (url: string) => Promise<TestResponseLike>
 
@@ -343,17 +333,26 @@ export async function testGeminiKey(fetchImpl?: FetchLike): Promise<GeminiTestRe
     return { ok: false, message: '通信エラー。電波の良い場所でお試しください' }
   }
 
-  let json: unknown = null
+  let body = ''
   try {
-    json = await res.json()
+    body = await res.text()
   } catch {
-    json = null
+    body = ''
   }
 
   if (!res.ok) {
-    return { ok: false, message: buildTestFailureMessage(res.status, extractApiErrorMessage(json)) }
+    return {
+      ok: false,
+      message: buildTestFailureMessage(res.status, extractApiErrorMessage(body)),
+    }
   }
 
+  let json: unknown = null
+  try {
+    json = JSON.parse(body)
+  } catch {
+    json = null
+  }
   return buildTestSuccessResult(extractModelIds(json))
 }
 
