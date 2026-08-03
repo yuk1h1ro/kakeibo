@@ -7,12 +7,23 @@
 
 const STORAGE_KEY = 'kakeibo.geminiApiKey'
 
-const ENDPOINT =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'
+/** このアプリが使う Gemini のモデル。接続テストでの存在確認にも使う */
+export const MODEL_ID = 'gemini-2.5-flash'
+
+const API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
+
+const ENDPOINT = `${API_BASE}/models/${MODEL_ID}:generateContent`
+
+/** モデル一覧(軽量・課金なし)。接続テストで使う */
+const MODELS_ENDPOINT = `${API_BASE}/models`
 
 export function getGeminiKey(): string | null {
   try {
-    return localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw === null) return null
+    // 既に空白付きで保存されている場合の救済として、読み出し時にも trim する
+    const key = raw.trim()
+    return key === '' ? null : key
   } catch {
     return null
   }
@@ -20,7 +31,8 @@ export function getGeminiKey(): string | null {
 
 export function saveGeminiKey(key: string): void {
   try {
-    localStorage.setItem(STORAGE_KEY, key)
+    // 呼び出し側でも trim しているが、前後の空白は保存時にも落としておく
+    localStorage.setItem(STORAGE_KEY, key.trim())
   } catch {
     // 保存できなくてもアプリは落とさない
   }
@@ -167,27 +179,6 @@ export function extractReceiptFields(apiResponse: unknown): ReceiptScanResult {
 }
 
 /**
- * Gemini のエラーレスポンス本文から Google 自身のメッセージを取り出す。
- * 形式: {"error": {"code": 400, "message": "...", "status": "INVALID_ARGUMENT"}}
- * JSON でない・形が違う場合は null(呼び出し側を落とさない)。
- */
-export function extractApiErrorMessage(bodyText: string): string | null {
-  let raw: unknown
-  try {
-    raw = JSON.parse(bodyText)
-  } catch {
-    return null
-  }
-  if (raw === null || typeof raw !== 'object') return null
-  const err = (raw as { error?: unknown }).error
-  if (err === null || typeof err !== 'object') return null
-  const { message, status } = err as { message?: unknown; status?: unknown }
-  if (typeof message === 'string' && message.trim() !== '') return message.trim()
-  if (typeof status === 'string' && status.trim() !== '') return status.trim()
-  return null
-}
-
-/**
  * HTTP ステータスをユーザー向けの日本語メッセージに変換する。
  * apiMessage(Googleが返した原因)があれば必ず併記する — これが無いと
  * 「キーが悪いのか、モデル名が悪いのか」の切り分けができない。
@@ -210,6 +201,159 @@ export function httpErrorMessage(status: number, apiMessage?: string | null): st
   }
   const detail = typeof apiMessage === 'string' ? apiMessage.trim() : ''
   return detail ? `${base}(詳細: ${detail})` : base
+}
+
+// ---------- 接続テスト ----------
+
+export interface GeminiTestResult {
+  ok: boolean
+  /** 画面にそのまま出す日本語メッセージ */
+  message: string
+  /** 利用可能なモデル名(models/ を除いた形) */
+  availableModels?: string[]
+}
+
+/**
+ * Google API のエラーレスポンス本文から原因の手がかりを取り出す。(純粋関数)
+ * 形式: {"error": {"code": 400, "message": "...", "status": "...", "details": [...]}}
+ * message だけでなく status と details[].reason も混ぜて返し、呼び出し側が
+ * SERVICE_DISABLED などで分岐できるようにする。
+ * JSON でない・形が違う場合は null(呼び出し側を落とさない)。
+ */
+export function extractApiErrorMessage(bodyText: string): string | null {
+  let payload: unknown
+  try {
+    payload = JSON.parse(bodyText)
+  } catch {
+    return null
+  }
+  if (payload === null || typeof payload !== 'object') return null
+  const err = (payload as { error?: unknown }).error
+  if (err === null || typeof err !== 'object') return null
+  const e = err as { message?: unknown; status?: unknown; details?: unknown }
+
+  const parts: string[] = []
+  if (typeof e.message === 'string' && e.message.trim() !== '') parts.push(e.message.trim())
+  if (typeof e.status === 'string' && e.status.trim() !== '') parts.push(e.status.trim())
+  if (Array.isArray(e.details)) {
+    for (const d of e.details) {
+      const reason = (d as { reason?: unknown } | null)?.reason
+      if (typeof reason === 'string' && reason.trim() !== '' && !parts.includes(reason.trim())) {
+        parts.push(reason.trim())
+      }
+    }
+  }
+  return parts.length > 0 ? parts.join(' / ') : null
+}
+
+/**
+ * 失敗レスポンスを、原因別の対処法付き日本語メッセージにする。(純粋関数)
+ * detail は extractApiErrorMessage で取り出した Google 自身のメッセージ。
+ * ステータス+詳細で「キーが違う/APIが未有効/キーの制限」を切り分ける。
+ */
+export function buildTestFailureMessage(status: number, detail: string | null): string {
+  const d = detail ?? ''
+  let base: string
+  if (status === 400 && d.includes('API key not valid')) {
+    base =
+      'APIキーが正しくありません。AI Studio (aistudio.google.com/apikey) で発行したキーをコピーし直してください'
+  } else if (status === 403 && (d.includes('SERVICE_DISABLED') || d.includes('has not been used'))) {
+    base =
+      'このプロジェクトで Generative Language API が有効化されていません。詳細に表示されるURLから有効化してください'
+  } else if (status === 403) {
+    base =
+      'APIキーの制限により拒否されました。Google Cloud Console でキーの制限設定を確認してください'
+  } else {
+    // それ以外は既存の変換に任せる(詳細の併記もそちらが行う)
+    return httpErrorMessage(status, detail)
+  }
+  return detail ? `${base}(詳細: ${detail})` : base
+}
+
+/** models 一覧レスポンスからモデルID(models/ を除いた形)を取り出す。(純粋関数) */
+export function extractModelIds(payload: unknown): string[] {
+  if (payload === null || typeof payload !== 'object') return []
+  const models = (payload as { models?: unknown }).models
+  if (!Array.isArray(models)) return []
+  const ids: string[] = []
+  for (const m of models) {
+    const name = (m as { name?: unknown } | null)?.name
+    if (typeof name === 'string' && name.trim() !== '') {
+      ids.push(name.trim().replace(/^models\//, ''))
+    }
+  }
+  return ids
+}
+
+/**
+ * 取得できたモデル一覧から結果を組み立てる。(純粋関数)
+ * このアプリが使うモデルが無ければ「キーは有効だがモデル不一致」として失敗にする。
+ */
+export function buildTestSuccessResult(modelIds: string[]): GeminiTestResult {
+  if (!modelIds.includes(MODEL_ID)) {
+    const head = modelIds.slice(0, 5).join(', ')
+    return {
+      ok: false,
+      message:
+        `キーは有効ですが、このアプリが使うモデル(${MODEL_ID})が利用できません。` +
+        `利用可能: ${head === '' ? '(取得できませんでした)' : head}`,
+      availableModels: modelIds,
+    }
+  }
+  return {
+    ok: true,
+    message: '接続できました。レシート読み取りを利用できます',
+    availableModels: modelIds,
+  }
+}
+
+/** テストで差し替えられるよう、fetch の必要最小限だけを型にする */
+export interface TestResponseLike {
+  ok: boolean
+  status: number
+  text: () => Promise<string>
+}
+export type FetchLike = (url: string) => Promise<TestResponseLike>
+
+/**
+ * 保存済みAPIキーで疎通確認する。モデル一覧の取得(GET)だけなので課金されない。
+ * 「キーが違う」「APIが未有効」「モデル名が違う」を切り分けられるメッセージを返す。
+ * fetchImpl は単体テスト用の差し替え口(通常は省略)。
+ */
+export async function testGeminiKey(fetchImpl?: FetchLike): Promise<GeminiTestResult> {
+  const key = getGeminiKey()
+  if (!key) return { ok: false, message: 'APIキーが設定されていません' }
+
+  const doFetch: FetchLike = fetchImpl ?? ((url) => fetch(url))
+
+  let res: TestResponseLike
+  try {
+    res = await doFetch(`${MODELS_ENDPOINT}?key=${encodeURIComponent(key)}`)
+  } catch {
+    return { ok: false, message: '通信エラー。電波の良い場所でお試しください' }
+  }
+
+  let body = ''
+  try {
+    body = await res.text()
+  } catch {
+    body = ''
+  }
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      message: buildTestFailureMessage(res.status, extractApiErrorMessage(body)),
+    }
+  }
+
+  let json: unknown = null
+  try {
+    json = JSON.parse(body)
+  } catch {
+    json = null
+  }
+  return buildTestSuccessResult(extractModelIds(json))
 }
 
 // ---------- 読み取り本体 ----------

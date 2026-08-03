@@ -4,6 +4,8 @@ import {
   getGeminiKey,
   looksLikeGeminiKey,
   saveGeminiKey,
+  testGeminiKey,
+  type GeminiTestResult,
 } from '../lib/receiptScan'
 
 interface Props {
@@ -22,21 +24,39 @@ export default function GeminiKeySheet({ onClose, onSaved }: Props) {
   const [savedKey, setSavedKey] = useState<string | null>(() => getGeminiKey())
   const [input, setInput] = useState('')
   const [showKey, setShowKey] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<GeminiTestResult | null>(null)
 
   const trimmed = input.trim()
   const formatWarning = trimmed !== '' && !looksLikeGeminiKey(trimmed)
 
-  const handleSave = () => {
+  const runTest = async (): Promise<GeminiTestResult> => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const result = await testGeminiKey()
+      setTestResult(result)
+      return result
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  // 保存は必ず成立させたうえで、続けて接続テストを走らせる。
+  // 成功したらそのまま閉じ、失敗したらシートに原因を出して切り分けてもらう。
+  const handleSave = async () => {
     if (!trimmed) return
     saveGeminiKey(trimmed)
     setSavedKey(trimmed)
     setInput('')
-    onSaved?.()
+    const result = await runTest()
+    if (result.ok) onSaved?.()
   }
 
   const handleClear = () => {
     clearGeminiKey()
     setSavedKey(null)
+    setTestResult(null)
   }
 
   return (
@@ -68,9 +88,30 @@ export default function GeminiKeySheet({ onClose, onSaved }: Props) {
           <>
             <p className="gemini-status">✓ APIキーは設定済みです</p>
             <p className="muted gemini-masked">{maskKey(savedKey)}</p>
-            <button type="button" className="btn-ghost gemini-clear" onClick={handleClear}>
-              解除
-            </button>
+            <div className="gemini-actions">
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => void runTest()}
+                disabled={testing}
+              >
+                {testing ? 'テスト中…' : '接続テスト'}
+              </button>
+              <button type="button" className="btn-ghost" onClick={handleClear} disabled={testing}>
+                解除
+              </button>
+            </div>
+            {testResult && (
+              <p
+                className={
+                  testResult.ok
+                    ? 'gemini-test-result gemini-test-ok'
+                    : 'error-text gemini-test-result'
+                }
+              >
+                {testResult.ok ? `✅ ${testResult.message}` : testResult.message}
+              </p>
+            )}
           </>
         ) : (
           <div className="gemini-form">
@@ -99,7 +140,12 @@ export default function GeminiKeySheet({ onClose, onSaved }: Props) {
                 ⚠ 一般的なAPIキーの形式(AIzaで始まる39文字前後)と異なります。このまま保存もできます
               </p>
             )}
-            <button type="button" className="btn-primary" onClick={handleSave} disabled={!trimmed}>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => void handleSave()}
+              disabled={!trimmed || testing}
+            >
               保存
             </button>
           </div>
