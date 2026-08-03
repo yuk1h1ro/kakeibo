@@ -166,18 +166,50 @@ export function extractReceiptFields(apiResponse: unknown): ReceiptScanResult {
   return { store, total, date }
 }
 
-/** HTTP ステータスをユーザー向けの日本語メッセージに変換する */
-export function httpErrorMessage(status: number): string {
-  if (status === 400 || status === 401 || status === 403) {
-    return 'APIキーが無効です。設定を確認してください'
+/**
+ * Gemini のエラーレスポンス本文から Google 自身のメッセージを取り出す。
+ * 形式: {"error": {"code": 400, "message": "...", "status": "INVALID_ARGUMENT"}}
+ * JSON でない・形が違う場合は null(呼び出し側を落とさない)。
+ */
+export function extractApiErrorMessage(bodyText: string): string | null {
+  let raw: unknown
+  try {
+    raw = JSON.parse(bodyText)
+  } catch {
+    return null
   }
-  if (status === 429) {
-    return '無料枠の上限に達しました。しばらく待ってから再度お試しください'
+  if (raw === null || typeof raw !== 'object') return null
+  const err = (raw as { error?: unknown }).error
+  if (err === null || typeof err !== 'object') return null
+  const { message, status } = err as { message?: unknown; status?: unknown }
+  if (typeof message === 'string' && message.trim() !== '') return message.trim()
+  if (typeof status === 'string' && status.trim() !== '') return status.trim()
+  return null
+}
+
+/**
+ * HTTP ステータスをユーザー向けの日本語メッセージに変換する。
+ * apiMessage(Googleが返した原因)があれば必ず併記する — これが無いと
+ * 「キーが悪いのか、モデル名が悪いのか」の切り分けができない。
+ */
+export function httpErrorMessage(status: number, apiMessage?: string | null): string {
+  let base: string
+  if (status === 401 || status === 403) {
+    base = 'APIキーが無効か、権限がありません。設定を確認してください'
+  } else if (status === 400) {
+    // 400 はリクエスト不正・モデル名不正・スキーマ不正でも返る。キー決め打ちにしない
+    base = 'リクエストが拒否されました'
+  } else if (status === 404) {
+    base = '指定のモデルが見つかりません'
+  } else if (status === 429) {
+    base = '無料枠の上限に達しました。しばらく待ってから再度お試しください'
+  } else if (status >= 500) {
+    base = 'Googleのサーバーが混み合っています。しばらく待ってから再度お試しください'
+  } else {
+    base = `読み取りに失敗しました(HTTP ${status})`
   }
-  if (status >= 500) {
-    return 'Googleのサーバーが混み合っています。しばらく待ってから再度お試しください'
-  }
-  return `読み取りに失敗しました(HTTP ${status})`
+  const detail = typeof apiMessage === 'string' ? apiMessage.trim() : ''
+  return detail ? `${base}(詳細: ${detail})` : base
 }
 
 // ---------- 読み取り本体 ----------
@@ -232,7 +264,16 @@ export async function scanReceipt(file: File): Promise<ReceiptScanResult> {
     throw new Error('通信エラー。電波の良い場所でお試しください')
   }
 
-  if (!res.ok) throw new Error(httpErrorMessage(res.status))
+  if (!res.ok) {
+    // エラー本文から Google のメッセージを拾って併記する(読めなくても落とさない)
+    let apiMessage: string | null = null
+    try {
+      apiMessage = extractApiErrorMessage(await res.text())
+    } catch {
+      apiMessage = null
+    }
+    throw new Error(httpErrorMessage(res.status, apiMessage))
+  }
 
   let json: unknown
   try {

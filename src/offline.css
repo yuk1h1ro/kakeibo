@@ -18,3 +18,16 @@
 .sync-banner.syncing {
   background: var(--accent-soft);
 }
+
+/* オンラインなのに同期が詰まっている(未同期の記録が残っている)状態 */
+.sync-banner.warning {
+  background: var(--warning-bg);
+}
+
+/* 対処法などの補足。長文でも折り返して読めるようにする */
+.sync-banner .banner-detail {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}

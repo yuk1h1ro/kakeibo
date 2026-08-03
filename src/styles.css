@@ -251,7 +251,6 @@ textarea:focus {
 .btn-ghost,
 .category-chip,
 .partner-toggle,
-.pad-btn,
 .amount-clear,
 .date-chip,
 .recent-chip,
@@ -263,7 +262,6 @@ textarea:focus {
 .btn-ghost:active:not(:disabled),
 .category-chip:active,
 .partner-toggle:active,
-.pad-btn:active,
 .amount-clear:active,
 .date-chip:active,
 .recent-chip:active {
@@ -276,7 +274,6 @@ textarea:focus {
   .btn-ghost:active:not(:disabled),
   .category-chip:active,
   .partner-toggle:active,
-  .pad-btn:active,
   .amount-clear:active,
   .date-chip:active,
   .recent-chip:active {
@@ -287,6 +284,9 @@ textarea:focus {
 .error-text {
   color: var(--expense);
   font-size: 13px;
+  line-height: 1.5;
+  /* APIの生メッセージなど長い一続きの文字列でも折り返す */
+  overflow-wrap: anywhere;
 }
 
 .muted {
@@ -367,24 +367,6 @@ textarea:focus {
   color: var(--text-secondary);
   font-size: 16px;
   font-weight: 700;
-}
-
-.amount-pad {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.pad-btn {
-  min-width: 0;
-  min-height: 46px;
-  border-radius: var(--radius-btn);
-  background: var(--fill);
-  color: var(--text-primary);
-  font-size: 15px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- 日付クイック選択 ---------- */

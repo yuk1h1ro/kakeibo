@@ -33,6 +33,11 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
     void initCategories(supabase)
   }, [supabase])
 
+  // オンラインなのに同期が詰まっている(= 記録は保持されているが送れていない)状態。
+  // 放置すると「履歴に反映されない」ように見えるので、対処法とあわせて明示する
+  const stalled =
+    store.isOnline && store.pendingCount > 0 && !store.syncing && store.error !== null
+
   return (
     <>
       <header className="app-header">
@@ -61,9 +66,15 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
         </div>
       ) : store.pendingCount > 0 && store.syncing ? (
         <div className="sync-banner syncing">同期中… ({store.pendingCount}件)</div>
+      ) : stalled ? (
+        <div className="sync-banner warning">
+          ⚠ 未同期の記録が {store.pendingCount}件あります
+          <span className="banner-detail">{store.error}</span>
+        </div>
       ) : null}
       <main className="app-main">
-        {store.error && <p className="error-text">データ取得エラー: {store.error}</p>}
+        {/* 未同期バナーに同じ内容を出しているときは重複表示しない */}
+        {store.error && !stalled && <p className="error-text">データ取得エラー: {store.error}</p>}
         {tab === 'input' && <InputTab store={store} />}
         {tab === 'history' && <HistoryTab store={store} onEdit={setEditing} />}
         {tab === 'report' && <ReportTab transactions={store.transactions} />}
