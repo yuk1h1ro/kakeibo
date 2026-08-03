@@ -4,6 +4,7 @@ import GeminiKeySheet from './GeminiKeySheet'
 import { yen } from '../lib/format'
 import { categoryLabel, resolveCategoryVisual, useCategories } from '../lib/categories'
 import { CategoryVisualBadge } from './categoryIcons'
+import { IconGear } from './icons'
 import { hasGeminiKey, scanReceipt } from '../lib/receiptScan'
 import type { Transaction } from '../lib/types'
 import type { useTransactions } from '../hooks/useTransactions'
@@ -61,6 +62,8 @@ export default function InputTab({ store }: { store: Store }) {
     }))
   }
 
+  // キー未設定なら設定シートへ誘導、設定済みならそのままカメラを起動する。
+  // 設定済みのときの設定シートへの導線は、隣の歯車ボタン(常設)が担う
   const handleScanTap = () => {
     if (!hasGeminiKey()) {
       setShowGeminiSheet(true)
@@ -132,16 +135,27 @@ export default function InputTab({ store }: { store: Store }) {
       </div>
 
       <div className="scan-block">
-        <button type="button" className="scan-btn" onClick={handleScanTap} disabled={scanning}>
-          {scanning ? (
-            <>
-              <span className="scan-spinner" aria-hidden="true" />
-              読み取り中…
-            </>
-          ) : (
-            <>📷 レシートを読み取る</>
-          )}
-        </button>
+        <div className="scan-row">
+          <button type="button" className="scan-btn" onClick={handleScanTap} disabled={scanning}>
+            {scanning ? (
+              <>
+                <span className="scan-spinner" aria-hidden="true" />
+                読み取り中…
+              </>
+            ) : (
+              <>📷 レシートを読み取る</>
+            )}
+          </button>
+          <button
+            type="button"
+            className="scan-settings-btn"
+            aria-label="レシート読み取りの設定"
+            onClick={() => setShowGeminiSheet(true)}
+            disabled={scanning}
+          >
+            <IconGear />
+          </button>
+        </div>
         <input
           ref={fileInputRef}
           type="file"

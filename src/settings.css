@@ -19,6 +19,7 @@
   padding: 0;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .cat-row {
@@ -28,6 +29,8 @@
   padding: 6px 0;
   border-bottom: 1px solid var(--border);
   min-height: 56px;
+  /* min-width: auto のままだと行内の min-content 幅の合計で横にはみ出す */
+  min-width: 0;
 }
 
 .cat-row:last-child {
@@ -45,7 +48,9 @@
   white-space: nowrap;
 }
 
-/* 並べ替え・編集・削除ボタン(44px 以上のタップ領域) */
+/* 並べ替え・編集・削除ボタン(44px 以上のタップ領域)。
+   375px 幅では アイコン32 + 44×4 + gap 6×5 = 238px で、残りがカテゴリ名に回る。
+   ラベルを折り返させないことで各ボタンの幅を予測可能にし、行の合計幅を固定する */
 .cat-move,
 .cat-action {
   min-width: 44px;
@@ -53,6 +58,7 @@
   padding: 8px;
   font-size: 13px;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .cat-delete {
@@ -74,6 +80,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 .cat-label-input {

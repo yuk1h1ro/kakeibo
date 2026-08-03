@@ -15,6 +15,7 @@ import {
   CategoryVisualBadge,
   categoryIconLabel,
 } from './categoryIcons'
+import useBodyScrollLock from '../hooks/useBodyScrollLock'
 import '../settings.css'
 
 interface Props {
@@ -68,6 +69,9 @@ export default function CategorySettingsSheet({ supabase, onClose }: Props) {
   const [newIcon, setNewIcon] = useState('box')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // シートを開いている間は背面ページを固定する
+  useBodyScrollLock()
 
   // カテゴリ編集はオンライン前提。失敗はシート内の .error-text に表示する
   const run = async (fn: () => Promise<void>) => {
