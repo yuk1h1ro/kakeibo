@@ -449,11 +449,21 @@ textarea:focus {
   gap: 6px;
 }
 
+/* 読み取りボタン(主役・幅いっぱい)+ 設定の歯車(従属・44px角)の横並び */
+.scan-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
 .scan-btn {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  flex: 1;
+  min-width: 0;
   width: 100%;
   min-height: 48px;
   padding: 12px;
@@ -480,6 +490,37 @@ textarea:focus {
 .scan-btn:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* レシート読み取りの設定(Geminiキー)を開く歯車。キー設定後も常設される導線 */
+.scan-settings-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--baseline);
+  border-radius: var(--radius-btn);
+  background: var(--surface);
+  color: var(--text-secondary);
+  transition: background-color 0.08s ease;
+}
+
+.scan-settings-btn:active:not(:disabled) {
+  background: var(--fill);
+}
+
+.scan-settings-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.scan-settings-btn svg {
+  display: block;
+  width: 20px;
+  height: 20px;
 }
 
 /* 読み取り中のスピナー */
@@ -806,6 +847,9 @@ textarea:focus {
   background: var(--page);
   width: 100%;
   max-width: 560px;
+  /* flex アイテムの min-width: auto(= min-content 幅)で画面外へせり出すのを防ぐ。
+     内部の行は各要素側で min-width: 0 を持たせて畳む */
+  min-width: 0;
   border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
   /* キーボード表示時に送信ボタンが隠れにくいよう下部に余白を確保 */
   padding: 8px 16px calc(48px + env(safe-area-inset-bottom));

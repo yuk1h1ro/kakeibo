@@ -10,6 +10,7 @@ import PartnerTab from './PartnerTab'
 import TransactionForm from './TransactionForm'
 import CategorySettingsSheet from './CategorySettingsSheet'
 import { IconCalendar, IconChart, IconGear, IconHeart, IconLogout, IconPen } from './icons'
+import useBodyScrollLock from '../hooks/useBodyScrollLock'
 import '../offline.css'
 import '../settings.css'
 
@@ -27,6 +28,10 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
   const [tab, setTab] = useState<Tab>('input')
   const [editing, setEditing] = useState<Transaction | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+
+  // 取引編集モーダルを開いている間は背面ページを固定する
+  // (カテゴリ設定/Geminiキーの各シートは自前でロックを取得する)
+  useBodyScrollLock(editing !== null)
 
   // カテゴリをSupabaseから読み込む(初回は既定カテゴリを移行)。失敗時はキャッシュで継続
   useEffect(() => {

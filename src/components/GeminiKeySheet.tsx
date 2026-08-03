@@ -7,6 +7,7 @@ import {
   testGeminiKey,
   type GeminiTestResult,
 } from '../lib/receiptScan'
+import useBodyScrollLock from '../hooks/useBodyScrollLock'
 
 interface Props {
   onClose: () => void
@@ -26,6 +27,9 @@ export default function GeminiKeySheet({ onClose, onSaved }: Props) {
   const [showKey, setShowKey] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<GeminiTestResult | null>(null)
+
+  // シートを開いている間は背面ページを固定する
+  useBodyScrollLock()
 
   const trimmed = input.trim()
   const formatWarning = trimmed !== '' && !looksLikeGeminiKey(trimmed)
