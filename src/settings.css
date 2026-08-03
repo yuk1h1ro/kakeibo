@@ -256,8 +256,30 @@
   word-break: break-all;
 }
 
-.gemini-clear {
+/* 接続テスト・解除ボタンの並び(Discord設定カードと同じ操作感) */
+.gemini-actions {
+  display: flex;
+  gap: 8px;
   margin-top: 10px;
+}
+
+.gemini-actions .btn-ghost {
+  flex: 1;
+  min-width: 0;
+}
+
+/* テスト結果。長いエラー詳細でも折り返して全文読めるようにする */
+.gemini-test-result {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.gemini-test-ok {
+  color: var(--income);
+  font-weight: 600;
 }
 
 .gemini-notes {
