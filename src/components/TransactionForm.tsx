@@ -30,8 +30,6 @@ interface Props {
   onPartnerAmountChange?: (amount: number) => void
 }
 
-const AMOUNT_STEPS = [5000, 1000, 500, 100, 10, 1]
-
 export default function TransactionForm({
   initial,
   submitLabel,
@@ -84,12 +82,6 @@ export default function TransactionForm({
     amountNum > 0 &&
     (!isExpense || !withPartner || (Number.isInteger(partnerNum) && partnerNum >= 0 && partnerNum <= amountNum)) &&
     (!isExpense || category !== null)
-
-  const addAmount = (step: number) => {
-    const cur = Number(amount)
-    const base = amount !== '' && Number.isFinite(cur) ? cur : 0
-    setAmount(String(base + step))
-  }
 
   const dateChips = [
     { label: '今日', value: daysAgoISO(0) },
@@ -147,13 +139,6 @@ export default function TransactionForm({
           >
             C
           </button>
-        </div>
-        <div className="amount-pad">
-          {AMOUNT_STEPS.map((step) => (
-            <button key={step} type="button" className="pad-btn" onClick={() => addAmount(step)}>
-              +{step.toLocaleString('ja-JP')}
-            </button>
-          ))}
         </div>
       </div>
 

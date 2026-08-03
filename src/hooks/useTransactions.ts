@@ -49,15 +49,49 @@ function saveTxCache(rows: Transaction[]): void {
   }
 }
 
-// ---------- ネットワーク起因エラーの判定 ----------
+// ---------- 再試行すべきエラーの判定 ----------
+
+// Supabase(PostgREST)のエラー。code / details / hint まで見て分類する。
+// catch した例外は message しか無いので、message 以外は任意。
+export interface ServerErrorLike {
+  message: string
+  code?: string | null
+  details?: string | null
+  hint?: string | null
+}
 
 // supabase-js は fetch の失敗を「TypeError: Failed to fetch」(Chrome)や
 // 「TypeError: Load failed」(Safari)といった message の error として返す。
 // これらは「後で再試行すべき」失敗で、サーバーの拒否(制約違反等)とは区別する。
-function isNetworkError(message: string): boolean {
-  if (typeof navigator !== 'undefined' && !navigator.onLine) return true
+export function isNetworkError(message: string): boolean {
+  // navigator.onLine が false と明示されているときだけオフライン扱い
+  // (非ブラウザ環境では undefined になるため === false で判定する)
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true
   return /fetch|network|load failed|接続|タイムアウト|timeout/i.test(message)
 }
+
+// スキーマ未適用(migration 未実行)による拒否。
+// マイグレーションを実行すれば通るので、キューを捨ててはいけない。
+//   PGRST204 … schema cache に列が無い
+//   42703    … undefined_column
+//   42P01    … undefined_table
+const SCHEMA_ERROR_CODES = new Set(['PGRST204', '42703', '42P01'])
+
+export function isSchemaError(err: ServerErrorLike): boolean {
+  if (err.code && SCHEMA_ERROR_CODES.has(err.code)) return true
+  const text = [err.message, err.details, err.hint].filter(Boolean).join(' ')
+  return /schema cache|does not exist|could not find/i.test(text)
+}
+
+// 「あとで直せる(再試行すべき)」失敗か。
+// true のとき op はキューに残す = 入力した記録は絶対に失わない。
+export function isRetryableServerError(err: ServerErrorLike): boolean {
+  return isSchemaError(err) || isNetworkError(err.message)
+}
+
+export const SCHEMA_ERROR_MESSAGE =
+  'データベースの更新が必要です。SupabaseのSQL Editorで migration-store.sql を実行してください' +
+  '(記録は保存されており、実行後に自動で同期されます)'
 
 function sortRows(rows: Transaction[]): Transaction[] {
   return [...rows].sort(
@@ -147,7 +181,8 @@ export function useTransactions(supabase: SupabaseClient) {
         const queue = loadQueue()
         if (queue.length === 0) break
         const op = queue[0]
-        let err: { message: string } | null = null
+        // code/details/hint まで保持する(スキーマ関連エラーの判定に使う)
+        let err: ServerErrorLike | null = null
         try {
           if (op.kind === 'insert') {
             const { error } = await supabase
@@ -168,19 +203,19 @@ export function useTransactions(supabase: SupabaseClient) {
           err = { message: e instanceof Error ? e.message : String(e) }
         }
         if (err) {
-          if (isNetworkError(err.message)) {
-            // 通信起因 — キューは保持したまま中断し、次のトリガーで再試行
+          if (isSchemaError(err)) {
+            // migration 未実行などスキーマ起因 — 実行すれば通るので op は必ず残す。
+            // 対処法が分かるメッセージを出したうえで中断する
+            setError(SCHEMA_ERROR_MESSAGE)
             break
           }
-          // サーバーが拒否(制約違反など)— この op は破棄して先へ進む(無限再試行しない)
+          if (isNetworkError(err.message)) {
+            // 通信起因 — キューは保持したまま静かに中断し、次のトリガーで再試行
+            break
+          }
+          // 永続的な拒否(制約違反など)— この op は破棄して先へ進む(無限再試行しない)
           setPendingOps(removeOp(op.opId))
-          // store カラム未追加(migration-store.sql 未実行)による拒否は、
-          // 生のエラーより対処法が分かるメッセージにする
-          const msg =
-            err.message.includes('store') && err.message.toLowerCase().includes('column')
-              ? 'お店を記録するには README のとおり migration-store.sql の実行が必要です'
-              : `同期できなかった記録があります: ${err.message}`
-          setError(msg)
+          setError(`同期できなかった記録があります: ${err.message}`)
           flushedSomething = true
         } else {
           // 同期成功 — 彼女残高に影響する op なら Discord に通知する。
