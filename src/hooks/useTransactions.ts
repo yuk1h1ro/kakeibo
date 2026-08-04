@@ -19,6 +19,15 @@ import {
   isSchemaError,
   type ServerErrorLike,
 } from '../lib/serverErrors'
+import { categoryLabel } from '../lib/categories'
+import {
+  diffTransaction,
+  initChangeLog,
+  newEntry,
+  recordChange,
+  transactionSummary,
+} from '../lib/changeLog'
+import { restoreInput } from '../lib/txActions'
 
 export interface TransactionInput {
   date: string
@@ -76,11 +85,37 @@ function saveTxCache(rows: Transaction[]): void {
   }
 }
 
+// ---------- 最終同期時刻 (機能154) ----------
+// 「いつのデータを見ているのか」は再起動しても引き継ぎたいので端末内に残す。
+// 記録できるのは「サーバーから取り込みに成功した時刻」だけで、
+// 通信できなかったときは前の値を保つ(嘘の更新時刻を出さないため)。
+
+const LAST_SYNC_KEY = 'kakeibo.lastSyncedAt'
+
+function loadLastSyncedAt(): string | null {
+  try {
+    return localStorage.getItem(LAST_SYNC_KEY)
+  } catch {
+    return null
+  }
+}
+
+function saveLastSyncedAt(iso: string): void {
+  try {
+    localStorage.setItem(LAST_SYNC_KEY, iso)
+  } catch {
+    // 保存できなくても表示が出ないだけ
+  }
+}
+
 // ---------- 再試行すべきエラーの判定 ----------
 // 判定そのものは lib/serverErrors.ts に置き、他のテーブルからも同じ基準で使う。
 // 従来この場所から import していた箇所のために再エクスポートする。
 export type { ServerErrorLike }
 export { isNetworkError, isSchemaError, isRetryableServerError }
+
+/** 削除を取り消せる時間 (機能159)。短いと間に合わず、長いと画面を塞ぐ */
+const UNDO_WINDOW_MS = 7000
 
 export const SCHEMA_ERROR_MESSAGE =
   'データベースの更新が必要です。SupabaseのSQL Editorで migration-store.sql を実行してください' +
@@ -122,6 +157,8 @@ export function useTransactions(supabase: SupabaseClient) {
     typeof navigator !== 'undefined' ? navigator.onLine : true
   )
   const [syncing, setSyncing] = useState(false)
+  // サーバーから取り込みに成功した最後の時刻 (機能154)
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(() => loadLastSyncedAt())
 
   // StrictMode の二重実行や 'online' イベント連打での flush 多重起動を防ぐ
   const flushingRef = useRef(false)
@@ -151,6 +188,10 @@ export function useTransactions(supabase: SupabaseClient) {
         serverTxRef.current = rows
         saveTxCache(rows)
         setError(null)
+        // 取り込めたときだけ更新時刻を進める(機能154)
+        const now = new Date().toISOString()
+        setLastSyncedAt(now)
+        saveLastSyncedAt(now)
       }
     } catch {
       // fetch 例外もオフライン扱い。error state は汚さない
@@ -244,6 +285,12 @@ export function useTransactions(supabase: SupabaseClient) {
     void refresh().then(() => flush())
   }, [refresh, flush])
 
+  // 変更履歴 (機能163)。テーブルが無ければ静かに無効化されるだけで、
+  // 記録・入力・同期には一切影響しない。貯まっていた履歴もここで送る
+  useEffect(() => {
+    void initChangeLog(supabase)
+  }, [supabase])
+
   // オンライン/オフラインの追跡。復帰時は自動で再同期
   useEffect(() => {
     const handleOnline = () => {
@@ -258,6 +305,62 @@ export function useTransactions(supabase: SupabaseClient) {
       window.removeEventListener('offline', handleOffline)
     }
   }, [flush])
+
+  // ---------- 変更履歴 (機能163) ----------
+  // 記録の書き換えは必ずこのフックを通るので、履歴もここで一括して残す。
+  // 画面ごとに書くと必ずどこかが漏れる(編集シート・一括編集・スワイプ削除…)。
+  // 履歴は投げっぱなしで、失敗しても取引の保存・同期は一切止めない。
+
+  // 差分を取るための「変更前」の行。保留キューを適用した表示中の内容を見る
+  const txRef = useRef<Transaction[]>([])
+
+  const logUpdate = useCallback((id: string, input: TransactionInput) => {
+    const before = txRef.current.find((t) => t.id === id)
+    if (!before) return
+    recordChange(
+      newEntry(
+        id,
+        'update',
+        transactionSummary(before, categoryLabel),
+        diffTransaction(before, input, categoryLabel)
+      )
+    )
+  }, [])
+
+  const logRemoved = useCallback((tx: Transaction) => {
+    recordChange(newEntry(tx.id, 'delete', transactionSummary(tx, categoryLabel), []))
+  }, [])
+
+  // ---------- 削除の取り消し (機能159) ----------
+  // 「削除を取り消せる状態」はフック側に持たせる。
+  // どの画面から消しても(編集シート・スワイプ・長押し・一括)同じように
+  // 取り消せるようにするため、そして画面を離れても数秒で必ず期限切れになるため
+  // (取り消しバーの寿命を画面の寿命に紐付けると、あとから古いバーが出てしまう)。
+  const [undoableDeletes, setUndoableDeletes] = useState<Transaction[] | null>(null)
+  const undoTimerRef = useRef<number | null>(null)
+
+  const clearUndoTimer = () => {
+    if (undoTimerRef.current !== null) {
+      window.clearTimeout(undoTimerRef.current)
+      undoTimerRef.current = null
+    }
+  }
+
+  const armUndo = useCallback((txs: readonly Transaction[]) => {
+    clearUndoTimer()
+    setUndoableDeletes(txs.length > 0 ? [...txs] : null)
+    undoTimerRef.current = window.setTimeout(() => {
+      undoTimerRef.current = null
+      setUndoableDeletes(null)
+    }, UNDO_WINDOW_MS)
+  }, [])
+
+  const dismissUndo = useCallback(() => {
+    clearUndoTimer()
+    setUndoableDeletes(null)
+  }, [])
+
+  useEffect(() => clearUndoTimer, [])
 
   const add = useCallback(
     async (input: TransactionInput) => {
@@ -278,6 +381,7 @@ export function useTransactions(supabase: SupabaseClient) {
 
   const update = useCallback(
     async (id: string, input: TransactionInput) => {
+      logUpdate(id, input)
       const op: PendingOp = {
         opId: crypto.randomUUID(),
         kind: 'update',
@@ -288,7 +392,7 @@ export function useTransactions(supabase: SupabaseClient) {
       setPendingOps(appendOp(op))
       void flush()
     },
-    [flush]
+    [flush, logUpdate]
   )
 
   /**
@@ -301,6 +405,7 @@ export function useTransactions(supabase: SupabaseClient) {
       const queuedAt = new Date().toISOString()
       let ops: PendingOp[] = loadQueue()
       for (const u of updates) {
+        logUpdate(u.id, u.input)
         ops = appendOp({
           opId: crypto.randomUUID(),
           kind: 'update',
@@ -312,11 +417,17 @@ export function useTransactions(supabase: SupabaseClient) {
       setPendingOps(ops)
       void flush()
     },
-    [flush]
+    [flush, logUpdate]
   )
 
   const remove = useCallback(
     async (id: string) => {
+      const before = txRef.current.find((t) => t.id === id)
+      if (before) {
+        logRemoved(before)
+        // 編集シートからの削除も取り消せるようにする(機能159)
+        armUndo([before])
+      }
       const op: PendingOp = {
         opId: crypto.randomUUID(),
         kind: 'delete',
@@ -326,8 +437,66 @@ export function useTransactions(supabase: SupabaseClient) {
       setPendingOps(appendOp(op))
       void flush()
     },
-    [flush]
+    [flush, logRemoved, armUndo]
   )
+
+  /**
+   * 複数行をまとめて削除する (機能146 / 149 / 151 からの削除)。
+   * 1件ずつ delete op をキューに積むだけなので、オフラインでも失われない。
+   * 削除した行はそのまま取り消し用に持っておく(機能159)。
+   */
+  const removeMany = useCallback(
+    async (txs: readonly Transaction[]) => {
+      if (txs.length === 0) return
+      const queuedAt = new Date().toISOString()
+      let ops: PendingOp[] = loadQueue()
+      for (const t of txs) {
+        logRemoved(t)
+        ops = appendOp({ opId: crypto.randomUUID(), kind: 'delete', id: t.id, queuedAt })
+      }
+      setPendingOps(ops)
+      armUndo(txs)
+      void flush()
+    },
+    [flush, logRemoved, armUndo]
+  )
+
+  /**
+   * 削除の取り消し (機能159)。同じ行IDで入れ直す。
+   *
+   * キューから delete op を抜き取るのではなく、あとに insert op を積む方式にしている。
+   * 抜き取る方式だと「まさに送信中だった delete」と競合し、
+   * サーバー上は消えたのに取り消せたつもりになる = データを失う恐れがあるため。
+   * delete → insert の順で送れば、どちらのタイミングでも最後は「在る」に落ち着く。
+   * 行IDを変えないので、共有ページのコメントなど取引IDを指すものとの縁も切れない。
+   */
+  const restoreMany = useCallback(
+    async (txs: readonly Transaction[]) => {
+      if (txs.length === 0) return
+      const queuedAt = new Date().toISOString()
+      let ops: PendingOp[] = loadQueue()
+      for (const t of txs) {
+        ops = appendOp({
+          opId: crypto.randomUUID(),
+          kind: 'insert',
+          id: t.id,
+          payload: restoreInput(t),
+          queuedAt,
+        })
+        recordChange(newEntry(t.id, 'restore', transactionSummary(t, categoryLabel), []))
+      }
+      setPendingOps(ops)
+      dismissUndo()
+      void flush()
+    },
+    [flush, dismissUndo]
+  )
+
+  /** 取り消しバーの「元に戻す」。直前に削除した行をまとめて戻す (機能159) */
+  const undoDelete = useCallback(async () => {
+    if (!undoableDeletes) return
+    await restoreMany(undoableDeletes)
+  }, [undoableDeletes, restoreMany])
 
   // 表示用: サーバースナップショット + 保留キューの楽観的マージ
   const transactions = useMemo(
@@ -335,17 +504,39 @@ export function useTransactions(supabase: SupabaseClient) {
     [serverTx, pendingOps]
   )
 
+  // 変更履歴の「変更前」を引くための参照を最新に保つ
+  useEffect(() => {
+    txRef.current = transactions
+  }, [transactions])
+
+  /**
+   * 引き下げて更新 (機能154)。取り込みと保留分の再送をまとめて行う。
+   * 「更新した気になったのに未同期のまま」を防ぐため、順番は flush → refresh。
+   */
+  const syncNow = useCallback(async () => {
+    await flush()
+    await refresh()
+  }, [flush, refresh])
+
   return {
     transactions,
     loading,
     error,
     refresh,
+    syncNow,
     add,
     update,
     updateMany,
     remove,
+    removeMany,
+    restoreMany,
+    // 機能159: 直前の削除(数秒だけ取り消せる)
+    undoableDeletes,
+    undoDelete,
+    dismissUndo,
     pendingCount: pendingOps.length,
     isOnline,
     syncing,
+    lastSyncedAt,
   }
 }
