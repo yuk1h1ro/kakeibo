@@ -31,12 +31,12 @@
 }
 
 .balance-direction.is-lent {
-  background: rgba(201, 59, 59, 0.12);
+  background: var(--expense-soft);
   color: var(--expense);
 }
 
 .balance-direction.is-holding {
-  background: rgba(21, 127, 61, 0.12);
+  background: var(--income-soft);
   color: var(--income);
 }
 
