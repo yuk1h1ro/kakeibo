@@ -11,6 +11,7 @@ import { initSatisfaction } from '../lib/satisfaction'
 import { initAssets, isAssetsTabVisible, useAssetsStore } from '../lib/assets'
 import { todayISO } from '../lib/format'
 import { amountMaskToggleLabel, toggleAmountMask, useAmountMasked } from '../lib/amountMask'
+import { guidanceForMessage, type Guidance } from '../lib/errorGuidance'
 import InputTab from './InputTab'
 import HistoryTab from './HistoryTab'
 import ReportTab from './ReportTab'
@@ -27,6 +28,33 @@ import '../offline.css'
 import '../settings.css'
 
 type Tab = 'input' | 'history' | 'report' | 'partner' | 'assets'
+
+/**
+ * エラーの「原因」と「次の行動」を出す (機能161)。
+ *
+ * 原文だけを出していた頃は、読んでも次に何をすればいいのか分からなかった。
+ * 原因を1行、やることを箇条書き、原文は最後に小さく — の順に固定している
+ * (原文が先頭にあると、読む気を失ってやることまで届かない)。
+ */
+function ErrorGuide({ guide, onOpenSettings }: { guide: Guidance; onOpenSettings: () => void }) {
+  return (
+    <>
+      <span className="err-guide-summary">{guide.summary}</span>
+      <ul className="err-guide-actions">
+        {guide.actions.map((a) => (
+          <li key={a}>{a}</li>
+        ))}
+      </ul>
+      {/* 接続設定が疑わしいときだけ、その場からやり直せる場所へ連れて行く */}
+      {guide.kind === 'connection' && (
+        <button type="button" className="btn-ghost err-guide-btn" onClick={onOpenSettings}>
+          接続設定を確認する
+        </button>
+      )}
+      {guide.detail && <span className="err-guide-detail">詳細: {guide.detail}</span>}
+    </>
+  )
+}
 
 const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
   { id: 'input', label: '入力', icon: <IconPen /> },
@@ -116,6 +144,11 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
   const stalled =
     store.isOnline && store.pendingCount > 0 && !store.syncing && store.error !== null
 
+  // エラーの原因と次の行動 (機能161)。
+  // ここに届くころには文字列しか残っていない (フックが Error.message を積む) ので、
+  // 文字列から引き直している。オンラインかどうかで書き分けが変わるため合わせて渡す
+  const guide = store.error ? guidanceForMessage(store.error, store.isOnline) : null
+
   // 金額の目隠し (機能169)。
   // 整形関数 (format.ts の yen など) は React の外にある状態を読むので、
   // 切り替えても自動では描き直されない。アプリの全画面がこの下にぶら下がっているため、
@@ -169,15 +202,21 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
         </div>
       ) : store.pendingCount > 0 && store.syncing ? (
         <div className="sync-banner syncing">同期中… ({store.pendingCount}件)</div>
-      ) : stalled ? (
+      ) : stalled && guide ? (
         <div className="sync-banner warning">
           ⚠ 未同期の記録が {store.pendingCount}件あります
-          <span className="banner-detail">{store.error}</span>
+          <span className="banner-detail">
+            <ErrorGuide guide={guide} onOpenSettings={() => setShowSettings(true)} />
+          </span>
         </div>
       ) : null}
       <main className="app-main">
         {/* 未同期バナーに同じ内容を出しているときは重複表示しない */}
-        {store.error && !stalled && <p className="error-text">データ取得エラー: {store.error}</p>}
+        {guide && !stalled && (
+          <div className="error-text err-guide">
+            <ErrorGuide guide={guide} onOpenSettings={() => setShowSettings(true)} />
+          </div>
+        )}
         {activeTab === 'input' && (
           <InputTab store={store} supabase={supabase} datePrefill={datePrefill} />
         )}

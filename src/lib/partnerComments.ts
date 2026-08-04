@@ -12,6 +12,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isSchemaError } from './serverErrors'
+import { formatGuidance, guidanceForServerError, isOnlineNow } from './errorGuidance'
 
 /** コメント1件あたりの上限。データベース側の CHECK 制約と必ず同じ値にすること */
 export const MAX_COMMENT_LENGTH = 300
@@ -160,9 +161,11 @@ export async function addOwnerComment(
     .single()
   if (error) {
     if (isSchemaError(error)) tableMissing = true
-    throw new Error(error.message)
+    throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
   }
-  if (!data) throw new Error('コメントを保存できませんでした')
+  if (!data) {
+    throw new Error('コメントを保存できませんでした。通信が不安定な可能性があります。もう一度お試しください')
+  }
   return fromCommentRow(data as unknown as CommentRow)
 }
 
@@ -185,5 +188,5 @@ export async function markTransactionRead(
 /** 利用者が自分のコメントを消す(誤爆の取り消し用) */
 export async function deleteOwnComment(supabase: SupabaseClient, id: string): Promise<void> {
   const { error } = await supabase.from('partner_share_comments').delete().eq('id', id)
-  if (error) throw new Error(error.message)
+  if (error) throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
 }

@@ -8,6 +8,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isSchemaError, toServerError } from './serverErrors'
+import { formatGuidance, guidanceForServerError, isOnlineNow } from './errorGuidance'
 
 export interface ShareLink {
   id: string
@@ -128,9 +129,11 @@ export async function createShareLink(
     .single()
   if (error) {
     if (isSchemaError(error)) tableMissing = true
-    throw new Error(error.message)
+    throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
   }
-  if (!data) throw new Error('共有リンクを作成できませんでした')
+  if (!data) {
+    throw new Error('共有リンクを作成できませんでした。通信が不安定な可能性があります。もう一度お試しください')
+  }
   return fromRow(data as unknown as ShareLinkRow)
 }
 
@@ -140,7 +143,7 @@ export async function revokeShareLink(supabase: SupabaseClient, id: string): Pro
     .from('partner_share_links')
     .update({ revoked_at: new Date().toISOString() })
     .eq('id', id)
-  if (error) throw new Error(error.message)
+  if (error) throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
 }
 
 /**

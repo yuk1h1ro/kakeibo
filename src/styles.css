@@ -301,6 +301,48 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
+/* エラーの「原因 → 次の行動 → 原文」(機能161)。
+   .error-text の中でも、同期バナーの中でも同じ形で出す。
+   原文(detail)は英語の一続きの文字列が来るので、必ず折り返して
+   横スクロールを出さないこと */
+.err-guide-summary {
+  display: block;
+  font-weight: 600;
+}
+
+.err-guide-actions {
+  margin: 4px 0 0;
+  padding-left: 1.1em;
+  list-style: disc;
+  color: var(--text-secondary);
+}
+
+.err-guide-actions li {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+/* バナーの中では地の色に合わせる(赤字が積み重なると読みにくい) */
+.sync-banner .err-guide-summary {
+  color: var(--text-secondary);
+}
+
+.err-guide-btn {
+  display: block;
+  margin-top: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  color: var(--accent);
+}
+
+.err-guide-detail {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .muted {
   color: var(--text-muted);
   font-size: 12px;

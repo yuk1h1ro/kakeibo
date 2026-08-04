@@ -11,6 +11,8 @@ import {
   type KeypadPreference,
 } from '../lib/keypadSettings'
 import { amountMaskStateLabel, setAmountMasked, useAmountMasked } from '../lib/amountMask'
+import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
+import { clearConfig, getConfiguredUrl, hasStoredConfig } from '../lib/supabaseClient'
 import { privacyBlurStateLabel } from '../lib/privacyBlur'
 import { setPrivacyBlurEnabled, usePrivacyBlurEnabled } from '../lib/privacyShield'
 import { isRecurringUnavailable } from '../lib/recurringRules'
@@ -59,6 +61,9 @@ export default function SettingsSheet({ supabase, onClose }: Props) {
   const amountMasked = useAmountMasked()
   const templates = useTransactionTemplates()
   const [error, setError] = useState<string | null>(null)
+  // 接続設定の表示 (機能161)。描画のたびに読んでよい軽い値
+  const configuredUrl = getConfiguredUrl()
+  const storedConfig = hasStoredConfig()
 
   useBodyScrollLock()
 
@@ -66,7 +71,9 @@ export default function SettingsSheet({ supabase, onClose }: Props) {
     if (!confirm(`テンプレート「${label}」を削除しますか?`)) return
     setError(null)
     void deleteTransactionTemplate(supabase, id).catch((e: unknown) => {
-      setError(e instanceof Error ? e.message : String(e))
+      // 原文をそのまま出しても次に何をすればいいか分からないので、
+      // 原因と次の行動に置き換える (機能161)
+      setError(describeUnknownError(e, isOnlineNow()))
     })
   }
 
@@ -174,6 +181,43 @@ export default function SettingsSheet({ supabase, onClose }: Props) {
               ふとした瞬間ののぞき見を減らすためのものです。スクリーンショットや画面収録は
               防げません。端末によっては、アプリ切替の画面に金額が残ることがあります。
             </p>
+          </div>
+
+          {/* Supabase の接続設定 (機能161)。
+              「接続できない」ときのエラー文言から、ここへ来られるようにしてある。
+              毎日触る設定ではないので、いちばん下に置く */}
+          <div className="settings-section">
+            <h3>Supabase の接続設定</h3>
+            <p className="muted">
+              接続先: <code className="settings-url">{configuredUrl ?? '(未設定)'}</code>
+            </p>
+            {storedConfig ? (
+              <>
+                <p className="muted">
+                  「anonキーが無効」「接続できません」と出るときは、Supabase の Settings → API
+                  にある Project URL と anon public
+                  キーを見直してください。やり直すと、この端末に保存した接続情報を消して
+                  最初の入力画面に戻ります(記録したデータは Supabase に残ります)。
+                </p>
+                <button
+                  type="button"
+                  className="btn-ghost settings-reset-config"
+                  onClick={() => {
+                    if (!confirm('この端末の接続設定を消して、入力からやり直しますか?')) return
+                    clearConfig()
+                    location.reload()
+                  }}
+                >
+                  接続設定をやり直す
+                </button>
+              </>
+            ) : (
+              <p className="muted">
+                この接続先は、ビルド時に埋め込まれた設定(リポジトリの secrets の
+                VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)から来ています。変えるには
+                GitHub 側の secrets を直してデプロイし直してください(この端末からは消せません)。
+              </p>
+            )}
           </div>
 
           {!isTemplatesUnavailable() && (

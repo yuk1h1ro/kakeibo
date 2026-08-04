@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { clearConfig, getConfiguredUrl, hasStoredConfig } from '../lib/supabaseClient'
+import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
 
 export default function AuthScreen({ supabase }: { supabase: SupabaseClient }) {
   const configuredUrl = getConfiguredUrl()
@@ -26,7 +27,8 @@ export default function AuthScreen({ supabase }: { supabase: SupabaseClient }) {
       options: { redirectTo: window.location.origin + import.meta.env.BASE_URL },
     })
     if (error) {
-      setError(`Googleログインに失敗しました: ${error.message}`)
+      // 原文だけでは何をすればいいか分からないので、原因と次の行動を添える (機能161)
+      setError(`Googleでログインできませんでした。${describeUnknownError(error, isOnlineNow())}`)
       setBusy(false)
     }
   }

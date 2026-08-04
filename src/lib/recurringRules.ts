@@ -9,7 +9,8 @@
 import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { TransactionInput } from '../hooks/useTransactions'
-import { isSchemaError } from './serverErrors'
+import { isSchemaError, type ServerErrorLike } from './serverErrors'
+import { formatGuidance, guidanceForServerError, isOnlineNow } from './errorGuidance'
 import { pendingOccurrences, type Recurrence, type RecurrenceKind } from './recurrence'
 
 export interface RecurringRule {
@@ -212,8 +213,12 @@ export async function initRecurringRules(supabase: SupabaseClient): Promise<void
   }
 }
 
-function throwOn(error: { message: string } | null): void {
-  if (error) throw new Error(error.message)
+/**
+ * サーバーのエラーを、原因と次の行動が分かる文言にして投げる (機能161)。
+ * 画面はこの message をそのまま出すので、ここで案内まで作ってしまう。
+ */
+function throwOn(error: ServerErrorLike | null): void {
+  if (error) throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
 }
 
 /** ルールを追加する。編集系はオンライン前提で、失敗時は throw する */
@@ -227,7 +232,7 @@ export async function addRecurringRule(
     .select(SELECT_COLUMNS)
     .single()
   throwOn(error)
-  if (!data) throw new Error('繰り返し入力を登録できませんでした')
+  if (!data) throw new Error('繰り返し入力を登録できませんでした。通信が不安定な可能性があります。もう一度お試しください')
   setRules([...rules, fromRow(data as unknown as RecurringRuleRow)])
 }
 
