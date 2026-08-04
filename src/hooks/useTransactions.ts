@@ -31,6 +31,14 @@ import {
   isSchemaError,
   type ServerErrorLike,
 } from '../lib/serverErrors'
+import {
+  formatGuidance,
+  guidanceForServerError,
+  isOnlineNow,
+  ledgerRejectionGuidance,
+  syncRejectedGuidance,
+  type Guidance,
+} from '../lib/errorGuidance'
 import { categoryLabel } from '../lib/categories'
 import {
   diffTransaction,
@@ -137,18 +145,11 @@ export { isNetworkError, isSchemaError, isRetryableServerError }
 /** 削除を取り消せる時間 (機能159)。短いと間に合わず、長いと画面を塞ぐ */
 const UNDO_WINDOW_MS = 7000
 
-export const SCHEMA_ERROR_MESSAGE =
-  'データベースの更新が必要です。SupabaseのSQL Editorで migration-store.sql を実行してください' +
-  '(記録は保存されており、実行後に自動で同期されます)'
-
-/**
- * 返金・調整 (機能012) を、migration-partner-ledger.sql 未実行のまま
- * 書き込もうとしたときの案内。列不足ではなくチェック制約違反で返ってくるので、
- * 「捨ててよい拒否」と間違えないように専用のメッセージを出す。
- */
-export const LEDGER_SCHEMA_ERROR_MESSAGE =
-  '預かりの返金・調整を保存するには、SupabaseのSQL Editorで migration-partner-ledger.sql を' +
-  '実行してください(記録は保存されており、実行後に自動で同期されます)'
+// エラー文言は lib/errorGuidance.ts が組み立てる (機能161)。
+// ここに固定文言を置いていた頃は migration-store.sql の決め打ちで、
+// タグ・分割・返金など別の列が足りないときにも「store の SQL を実行してください」と
+// 間違ったファイルを案内していた。サーバーの code / details / hint が生きているのは
+// この場所だけなので、ここで分類すれば正しい SQL を名指しできる。
 
 function sortRows(rows: Transaction[]): Transaction[] {
   return [...rows].sort(
@@ -181,7 +182,10 @@ export function useTransactions(supabase: SupabaseClient) {
   const [pendingOps, setPendingOps] = useState<PendingOp[]>(() => loadQueue())
   // キャッシュがあれば即表示できるので loading にしない
   const [loading, setLoading] = useState(() => loadTxCache() === null)
-  const [error, setError] = useState<string | null>(null)
+  // エラーは「原因 + 次の行動」の構造のまま持つ (機能161)。
+  // 文字列にしてから画面側で分類し直すと、畳んだ文言をもう一度ほどくことになり、
+  // 案内が二重に出てしまうため(MainScreen は errorGuide をそのまま描く)。
+  const [errorGuide, setErrorGuide] = useState<Guidance | null>(null)
   const [isOnline, setIsOnline] = useState(() =>
     typeof navigator !== 'undefined' ? navigator.onLine : true
   )
@@ -210,13 +214,15 @@ export function useTransactions(supabase: SupabaseClient) {
         .order('created_at', { ascending: false })
       if (error) {
         // ネットワーク起因の失敗は「オフライン」扱いで静かに戻る
-        if (!isNetworkError(error.message)) setError(error.message)
+        if (!isNetworkError(error.message)) {
+          setErrorGuide(guidanceForServerError(error, isOnlineNow()))
+        }
       } else {
         const rows = normalizeRows(data as Transaction[])
         setServerTx(rows)
         serverTxRef.current = rows
         saveTxCache(rows)
-        setError(null)
+        setErrorGuide(null)
         // 取り込めたときだけ更新時刻を進める(機能154)
         const now = new Date().toISOString()
         setLastSyncedAt(now)
@@ -291,15 +297,16 @@ export function useTransactions(supabase: SupabaseClient) {
               continue
             }
             // それ以外の migration 未実行 — 実行すれば通るので op は必ず残す。
-            // 対処法が分かるメッセージを出したうえで中断する
-            setError(SCHEMA_ERROR_MESSAGE)
+            // どの SQL を実行すればよいかは、code / details / hint が残っている
+            // ここでしか分からない。決め打ちの文言ではなく、必ず err から引く
+            setErrorGuide(guidanceForServerError(err, isOnlineNow()))
             break
           }
           if (isLedgerTypeRejection(err, op.payload?.type)) {
             // 返金・調整の種別が DB のチェック制約に無い = migration 未実行。
             // 実行すれば通るので、絶対に op を捨てない(捨てると記録が消える)
             markTxFeatureUnavailable('settlement')
-            setError(LEDGER_SCHEMA_ERROR_MESSAGE)
+            setErrorGuide(ledgerRejectionGuidance(err))
             break
           }
           if (isNetworkError(err.message)) {
@@ -308,7 +315,7 @@ export function useTransactions(supabase: SupabaseClient) {
           }
           // 永続的な拒否(制約違反など)— この op は破棄して先へ進む(無限再試行しない)
           setPendingOps(removeOp(op.opId))
-          setError(`同期できなかった記録があります: ${err.message}`)
+          setErrorGuide(syncRejectedGuidance(err, isOnlineNow()))
           flushedSomething = true
         } else {
           // 同期成功 — 彼女残高に影響する op なら Discord に通知する。
@@ -605,10 +612,15 @@ export function useTransactions(supabase: SupabaseClient) {
     await refresh()
   }, [flush, refresh])
 
+  // 1行しか置けない場所(テストや将来の呼び出し側)のために畳んだ形も返す。
+  // 画面に出すのは errorGuide のほう — 畳んだ文字列を分類し直させないこと
+  const error = errorGuide ? formatGuidance(errorGuide) : null
+
   return {
     transactions,
     loading,
     error,
+    errorGuide,
     refresh,
     syncNow,
     add,

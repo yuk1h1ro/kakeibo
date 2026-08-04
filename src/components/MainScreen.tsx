@@ -11,7 +11,7 @@ import { initSatisfaction } from '../lib/satisfaction'
 import { initAssets, isAssetsTabVisible, useAssetsStore } from '../lib/assets'
 import { todayISO } from '../lib/format'
 import { amountMaskToggleLabel, toggleAmountMask, useAmountMasked } from '../lib/amountMask'
-import { guidanceForMessage, type Guidance } from '../lib/errorGuidance'
+import { type Guidance } from '../lib/errorGuidance'
 import InputTab from './InputTab'
 import HistoryTab from './HistoryTab'
 import ReportTab from './ReportTab'
@@ -142,12 +142,13 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
   // オンラインなのに同期が詰まっている(= 記録は保持されているが送れていない)状態。
   // 放置すると「履歴に反映されない」ように見えるので、対処法とあわせて明示する
   const stalled =
-    store.isOnline && store.pendingCount > 0 && !store.syncing && store.error !== null
+    store.isOnline && store.pendingCount > 0 && !store.syncing && store.errorGuide !== null
 
   // エラーの原因と次の行動 (機能161)。
-  // ここに届くころには文字列しか残っていない (フックが Error.message を積む) ので、
-  // 文字列から引き直している。オンラインかどうかで書き分けが変わるため合わせて渡す
-  const guide = store.error ? guidanceForMessage(store.error, store.isOnline) : null
+  // フックが構造のまま (Guidance) 渡してくるので、ここでは分類し直さない。
+  // 以前は畳んだ文字列から引き直していたが、フック側も errorGuidance を通すように
+  // なったため、そのままだと「畳んだ案内」をもう一度案内で包むことになる
+  const guide = store.errorGuide
 
   // 金額の目隠し (機能169)。
   // 整形関数 (format.ts の yen など) は React の外にある状態を読むので、
