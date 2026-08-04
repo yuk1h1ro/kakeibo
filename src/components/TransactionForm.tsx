@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { categoryLabel, useCategories, visualFromEmojiValue } from '../lib/categories'
 import { CategoryVisualBadge } from './categoryIcons'
 import { daysAgoISO, todayISO } from '../lib/format'
@@ -82,6 +82,7 @@ export default function TransactionForm({
   // 自前テンキー(機能052)。タッチ端末では既定で有効、PC では OS のキーボードのまま
   const keypadEnabled = useKeypadEnabled()
   const [keypadOpen, setKeypadOpen] = useState(false)
+  const amountRef = useRef<HTMLInputElement | null>(null)
 
   // 店名からのカテゴリ自動選択(機能067+075)
   const learned = useStoreCategories()
@@ -115,6 +116,21 @@ export default function TransactionForm({
     if (!keypadOpen) return
     document.body.classList.add('keypad-open')
     return () => document.body.classList.remove('keypad-open')
+  }, [keypadOpen])
+
+  // 金額欄・テンキー以外を触ったら閉じる。
+  // blur ではなく click で閉じるのは、押した相手の onClick が先に走るようにするため
+  // (先に閉じると余白が消えてボタンが指の下からずれることがある)
+  useEffect(() => {
+    if (!keypadOpen) return
+    const onDocumentClick = (e: MouseEvent) => {
+      const target = e.target
+      if (!(target instanceof HTMLElement)) return
+      if (target === amountRef.current || target.closest('.keypad-dock')) return
+      setKeypadOpen(false)
+    }
+    document.addEventListener('click', onDocumentClick)
+    return () => document.removeEventListener('click', onDocumentClick)
   }, [keypadOpen])
 
   // 外部プリフィル適用(日付は prefill.date があるときだけ更新)
@@ -231,6 +247,7 @@ export default function TransactionForm({
         <span>{isExpense ? '支払い金額(円)' : '預かり金額(円)'}</span>
         <div className="amount-row">
           <input
+            ref={amountRef}
             className={`amount-input ${amountNum < 0 ? 'negative' : ''}`}
             type="number"
             /* テンキー使用中も readOnly にはしない — 貼り付け・選択を殺さず、
@@ -241,7 +258,6 @@ export default function TransactionForm({
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             onFocus={() => keypadEnabled && setKeypadOpen(true)}
-            onBlur={() => setKeypadOpen(false)}
           />
           <button type="button" className="amount-clear" aria-label="金額をクリア" onClick={runClear}>
             C
