@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { clearConfig, getConfiguredUrl, hasStoredConfig } from '../lib/supabaseClient'
+import { unsyncedCount, unsyncedWarningText } from '../lib/localData'
 import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
 
 export default function AuthScreen({ supabase }: { supabase: SupabaseClient }) {
@@ -8,8 +9,17 @@ export default function AuthScreen({ supabase }: { supabase: SupabaseClient }) {
   const canReset = hasStoredConfig()
 
   const resetConfig = () => {
+    // 何が消えるかを具体的に書く。未同期の記録はこの端末にしか無いので、
+    // 残っているときは消させない (機能: 端末を貸す・売るときの後始末)
+    const pending = unsyncedCount()
+    if (pending > 0) {
+      window.alert(unsyncedWarningText(pending))
+      return
+    }
     const ok = window.confirm(
-      'Supabaseの接続設定を消して初期設定からやり直しますか?(家計簿のデータは消えません)',
+      'Supabaseの接続設定を消して初期設定からやり直しますか?\n' +
+        'この端末に残っている接続情報・ログイン状態・明細のキャッシュ・' +
+        'APIキー等も消えます(サーバー上の家計簿のデータは消えません)',
     )
     if (!ok) return
     clearConfig()

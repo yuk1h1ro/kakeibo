@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { cleanupAfterSignOut, clearLocalData, clearSupabaseSession } from './localData'
 
 const URL_KEY = 'kakeibo.supabaseUrl'
 const ANON_KEY = 'kakeibo.supabaseAnonKey'
@@ -57,6 +58,12 @@ export function getSupabase(): SupabaseClient | null {
   const config = resolveConfig()
   if (!config) return null
   client = createClient(config.url, config.anonKey)
+  // ログアウトの後始末はここに1つだけ置く。ログアウトのボタンが増えても
+  // 「セッションだけ消えて端末内のデータと鍵が残る」状態を作らないため。
+  // (未同期が残っているときは何も消さずに知らせるだけ — localData.ts)
+  client.auth.onAuthStateChange((event) => {
+    if (event === 'SIGNED_OUT') cleanupAfterSignOut()
+  })
   return client
 }
 
@@ -79,8 +86,16 @@ export function saveConfig(url: string, anonKey: string): void {
   localStorage.setItem(ANON_KEY, anonKey.trim())
 }
 
+/**
+ * 接続設定をやり直す (AuthScreen の導線)。
+ *
+ * URL と anon キーだけを消すと、前の接続先のログイン状態(Supabase の
+ * セッション鍵)と、前の接続先から取り込んだ明細のキャッシュが端末に残る。
+ * 「別のプロジェクトに繋ぎ直す」ためのボタンなので、端末内は全部片付ける
+ * (サーバー上の記録は1件も消えない)。
+ */
 export function clearConfig(): void {
-  localStorage.removeItem(URL_KEY)
-  localStorage.removeItem(ANON_KEY)
+  clearLocalData([])
+  clearSupabaseSession()
   client = null
 }
