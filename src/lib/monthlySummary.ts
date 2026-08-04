@@ -17,6 +17,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { formatMonth, monthKey, monthKeyOffset, yenPlain } from './format'
 import { getWebhookUrl, sendDiscordMessage } from './discordNotify'
 import { balanceWording, partnerImpact, type PartnerTxLike } from './partnerBalance'
+import { partnerPaid } from './types'
 import { isSchemaError } from './serverErrors'
 
 /** さかのぼって送る月数の上限。長期間アプリを開いていなくても通知が溢れないようにする */
@@ -65,7 +66,13 @@ export interface MonthlySummary {
   withdrawTotal: number
   /** その月に預かった合計 */
   depositTotal: number
-  /** 集計時点(= 送信時点)の残高。全期間の預かり − 全期間の負担分 */
+  /** その月に彼女へ返した合計 (機能012)。正の数 */
+  refundTotal: number
+  /** その月の手動調整の合計 (機能012)。符号つき(減らす調整はマイナス) */
+  adjustTotal: number
+  /** その月に彼女自身が払った合計 (機能018)。正の数 */
+  partnerPaidTotal: number
+  /** 集計時点(= 送信時点)の残高。全期間の影響額の合計 */
   balance: number
   /** その月の彼女負担分のカテゴリ別内訳(多い順) */
   categories: { category: string | null; amount: number }[]
@@ -73,13 +80,23 @@ export interface MonthlySummary {
   hasActivity: boolean
 }
 
-/** 指定した月の預かり金サマリーを組み立てる。(純粋関数) */
+/**
+ * 指定した月の預かり金サマリーを組み立てる。(純粋関数)
+ *
+ * 数えるのは「その月に残高を動かしたもの **すべて**」。
+ * 預かりと彼女の負担分しか数えていなかった頃は、残高だけが正しくて
+ * 本文の足し算が合わず、返金・調整しか無かった月は hasActivity が false になって
+ * 「2万円返した月に1通も届かない」という黙り方をしていた。
+ */
 export function buildMonthlySummary(
   rows: readonly SummaryTxLike[],
   month: string
 ): MonthlySummary {
   let withdrawTotal = 0
   let depositTotal = 0
+  let refundTotal = 0
+  let adjustTotal = 0
+  let partnerPaidTotal = 0
   let balance = 0
   const byCategory = new Map<string | null, number>()
 
@@ -90,9 +107,18 @@ export function buildMonthlySummary(
     if (monthKey(t.date) !== month) continue
     if (t.type === 'partner_deposit') {
       depositTotal += t.amount
-    } else if (t.type === 'expense' && t.partner_amount > 0) {
-      withdrawTotal += t.partner_amount
-      byCategory.set(t.category, (byCategory.get(t.category) ?? 0) + t.partner_amount)
+    } else if (t.type === 'partner_refund') {
+      refundTotal += t.amount
+    } else if (t.type === 'partner_adjust') {
+      // 調整は符号つき。増やす調整と減らす調整が同額あれば 0 になる
+      adjustTotal += t.amount
+    } else if (t.type === 'expense') {
+      // 機能018: 彼女が払った額は残高を増やす。負担分と別の行として数える
+      partnerPaidTotal += partnerPaid(t)
+      if (t.partner_amount > 0) {
+        withdrawTotal += t.partner_amount
+        byCategory.set(t.category, (byCategory.get(t.category) ?? 0) + t.partner_amount)
+      }
     }
   }
 
@@ -104,15 +130,28 @@ export function buildMonthlySummary(
     month,
     withdrawTotal,
     depositTotal,
+    refundTotal,
+    adjustTotal,
+    partnerPaidTotal,
     balance,
     categories,
-    hasActivity: withdrawTotal > 0 || depositTotal > 0,
+    // 残高が動いた月は必ず送る。返金・調整しか無い月に黙るのがいちばん困る
+    hasActivity:
+      withdrawTotal > 0 ||
+      depositTotal > 0 ||
+      refundTotal > 0 ||
+      adjustTotal !== 0 ||
+      partnerPaidTotal > 0,
   }
 }
 
 /**
  * Discord に流す本文を組み立てる。(純粋関数)
  * カテゴリ名の解決は呼び出し側から関数で受け取る(このファイルを純粋に保つため)。
+ *
+ * 0 の行は出さない(使っていない機能の行を毎月見せない)が、
+ * **残高を動かしたものは必ず1行にする**。書かないと、彼女が本文を足し算しても
+ * 残高に届かず、通知そのものが信用されなくなる。
  */
 export function formatMonthlySummary(
   s: MonthlySummary,
@@ -120,7 +159,17 @@ export function formatMonthlySummary(
 ): string {
   const lines: string[] = [`📅 ${formatMonth(s.month)}のまとめ`]
   lines.push(`使った分の合計: ${yenPlain(s.withdrawTotal)}`)
+  if (s.partnerPaidTotal > 0) lines.push(`彼女が払ってくれた分: ${yenPlain(s.partnerPaidTotal)}`)
   if (s.depositTotal > 0) lines.push(`預かった合計: ${yenPlain(s.depositTotal)}`)
+  if (s.refundTotal > 0) lines.push(`返した合計: ${yenPlain(s.refundTotal)}`)
+  if (s.adjustTotal !== 0) {
+    // 符号の意味を数字だけに担わせない(増やしたのか減らしたのかを言葉で書く)
+    lines.push(
+      s.adjustTotal > 0
+        ? `調整で増やした分: ${yenPlain(s.adjustTotal)}`
+        : `調整で減らした分: ${yenPlain(-s.adjustTotal)}`
+    )
+  }
   // 符号だけでは「預かり」か「貸し」か読めないので、機能011 の言い回しを添える
   const w = balanceWording(s.balance)
   lines.push(`いまの残高: ${yenPlain(w.magnitude)}(${w.title})`)

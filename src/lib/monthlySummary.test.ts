@@ -4,6 +4,7 @@ import {
   dueSummaryMonths,
   formatMonthlySummary,
   SUMMARY_LOOKBACK_MONTHS,
+  type MonthlySummary,
   type SummaryTxLike,
 } from './monthlySummary'
 
@@ -21,6 +22,37 @@ const deposit = (date: string, amount: number): SummaryTxLike => ({
   amount,
   category: null,
   partner_amount: 0,
+})
+
+// 機能012 の返金・手動調整と、機能018 の「彼女が払った回」
+const refund = (date: string, amount: number): SummaryTxLike => ({
+  date,
+  type: 'partner_refund',
+  amount,
+  category: null,
+  partner_amount: 0,
+})
+
+const adjust = (date: string, amount: number): SummaryTxLike => ({
+  date,
+  type: 'partner_adjust',
+  amount,
+  category: null,
+  partner_amount: 0,
+})
+
+const paidByPartner = (
+  date: string,
+  paid: number,
+  partner: number,
+  category: string | null = 'eating_out'
+): SummaryTxLike => ({
+  date,
+  type: 'expense',
+  amount: paid,
+  category,
+  partner_amount: partner,
+  partner_paid: paid,
 })
 
 // ============================================================
@@ -146,6 +178,89 @@ describe('buildMonthlySummary', () => {
     const s = buildMonthlySummary([expense('2026-02-01', 500, null)], '2026-02')
     expect(s.categories).toEqual([{ category: null, amount: 500 }])
   })
+
+  // ---- 機能012 / 018 を数える(本文の足し算が残高と合うこと) ----
+
+  it('返金・調整・彼女が払った分をそれぞれ数える', () => {
+    const s = buildMonthlySummary(
+      [
+        deposit('2026-02-01', 30000),
+        expense('2026-02-02', 1500),
+        refund('2026-02-03', 20000),
+        adjust('2026-02-04', 500),
+        adjust('2026-02-05', -300),
+        paidByPartner('2026-02-06', 3000, 1200),
+      ],
+      '2026-02'
+    )
+    expect(s.depositTotal).toBe(30000)
+    expect(s.withdrawTotal).toBe(1500 + 1200)
+    expect(s.refundTotal).toBe(20000)
+    expect(s.adjustTotal).toBe(200)
+    expect(s.partnerPaidTotal).toBe(3000)
+  })
+
+  it('本文に出す数字の足し算が、残高の動きと一致する', () => {
+    const rows = [
+      deposit('2026-02-01', 30000),
+      expense('2026-02-02', 1500),
+      refund('2026-02-03', 20000),
+      adjust('2026-02-04', -300),
+      paidByPartner('2026-02-06', 3000, 1200),
+    ]
+    const s = buildMonthlySummary(rows, '2026-02')
+    const fromLines =
+      s.depositTotal - s.withdrawTotal + s.partnerPaidTotal - s.refundTotal + s.adjustTotal
+    // その月しか記録が無いので、残高そのものと一致するはず
+    expect(fromLines).toBe(s.balance)
+  })
+
+  it('返金しかなかった月も送る(2万円返した月に黙らない)', () => {
+    const s = buildMonthlySummary([refund('2026-02-10', 20000)], '2026-02')
+    expect(s.hasActivity).toBe(true)
+    expect(s.refundTotal).toBe(20000)
+  })
+
+  it('調整しかなかった月も送る(増やす調整・減らす調整のどちらでも)', () => {
+    expect(buildMonthlySummary([adjust('2026-02-10', 500)], '2026-02').hasActivity).toBe(true)
+    expect(buildMonthlySummary([adjust('2026-02-10', -500)], '2026-02').hasActivity).toBe(true)
+  })
+
+  it('彼女が払った回しか無い月も送る(残高は増えている)', () => {
+    const s = buildMonthlySummary([paidByPartner('2026-02-10', 3000, 0)], '2026-02')
+    expect(s.hasActivity).toBe(true)
+    expect(s.partnerPaidTotal).toBe(3000)
+    expect(s.withdrawTotal).toBe(0)
+  })
+
+  it('増やす調整と減らす調整が同額の月でも、動きがあったことは伝える', () => {
+    // 合計は 0 でも、記録は2件動いている。ここで黙ると調整の履歴が伝わらない
+    const s = buildMonthlySummary(
+      [adjust('2026-02-10', 500), adjust('2026-02-11', -500), deposit('2026-02-12', 1000)],
+      '2026-02'
+    )
+    expect(s.adjustTotal).toBe(0)
+    expect(s.hasActivity).toBe(true)
+  })
+
+  it('別の月の返金・調整は数えない', () => {
+    const rows = [refund('2026-01-10', 5000), adjust('2026-03-10', 700)]
+    const s = buildMonthlySummary(rows, '2026-02')
+    expect(s.refundTotal).toBe(0)
+    expect(s.adjustTotal).toBe(0)
+    expect(s.hasActivity).toBe(false)
+  })
+
+  it('返金・調整・彼女が払った分も残高に効く(partnerBalance と同じ式)', () => {
+    const rows = [
+      deposit('2026-01-01', 30000),
+      refund('2026-02-03', 20000),
+      adjust('2026-02-04', -300),
+      paidByPartner('2026-02-06', 3000, 1200),
+    ]
+    // 30000 - 20000 - 300 + (3000 - 1200)
+    expect(buildMonthlySummary(rows, '2026-02').balance).toBe(11500)
+  })
 })
 
 // ============================================================
@@ -154,16 +269,27 @@ describe('buildMonthlySummary', () => {
 describe('formatMonthlySummary', () => {
   const labelOf = (c: string | null) => (c === 'food' ? '食費' : c === null ? 'その他' : c)
 
+  const summary = (over: Partial<MonthlySummary> = {}): MonthlySummary => ({
+    month: '2026-02',
+    withdrawTotal: 0,
+    depositTotal: 0,
+    refundTotal: 0,
+    adjustTotal: 0,
+    partnerPaidTotal: 0,
+    balance: 0,
+    categories: [],
+    hasActivity: true,
+    ...over,
+  })
+
   it('合計・残高・内訳が入る', () => {
     const text = formatMonthlySummary(
-      {
-        month: '2026-02',
+      summary({
         withdrawTotal: 3500,
         depositTotal: 30000,
         balance: 21500,
         categories: [{ category: 'food', amount: 3500 }],
-        hasActivity: true,
-      },
+      }),
       labelOf
     )
     expect(text).toContain('2026年2月のまとめ')
@@ -174,33 +300,45 @@ describe('formatMonthlySummary', () => {
   })
 
   it('預かりが無い月は「預かった合計」の行を出さない', () => {
-    const text = formatMonthlySummary(
-      {
-        month: '2026-02',
-        withdrawTotal: 100,
-        depositTotal: 0,
-        balance: 900,
-        categories: [],
-        hasActivity: true,
-      },
-      labelOf
-    )
+    const text = formatMonthlySummary(summary({ withdrawTotal: 100, balance: 900 }), labelOf)
     expect(text).not.toContain('預かった合計')
     expect(text).not.toContain('内訳')
   })
 
-  it('残高がマイナスのときは符号ではなく言葉で意味を伝える (機能011)', () => {
+  it('返金・調整・彼女が払った分も本文に出る (機能012 / 018)', () => {
     const text = formatMonthlySummary(
-      {
-        month: '2026-02',
-        withdrawTotal: 100,
-        depositTotal: 0,
-        balance: -500,
-        categories: [],
-        hasActivity: true,
-      },
+      summary({
+        withdrawTotal: 2700,
+        depositTotal: 30000,
+        refundTotal: 20000,
+        adjustTotal: -300,
+        partnerPaidTotal: 3000,
+        balance: 10000,
+      }),
       labelOf
     )
+    expect(text).toContain('使った分の合計: ¥2,700')
+    expect(text).toContain('彼女が払ってくれた分: ¥3,000')
+    expect(text).toContain('預かった合計: ¥30,000')
+    expect(text).toContain('返した合計: ¥20,000')
+    expect(text).toContain('調整で減らした分: ¥300')
+  })
+
+  it('増やす調整は「増やした分」と書く(符号を数字だけに任せない)', () => {
+    const text = formatMonthlySummary(summary({ adjustTotal: 500 }), labelOf)
+    expect(text).toContain('調整で増やした分: ¥500')
+    expect(text).not.toContain('減らした分')
+  })
+
+  it('動きの無かった項目は行ごと出さない(毎月同じ 0 を並べない)', () => {
+    const text = formatMonthlySummary(summary({ withdrawTotal: 100, balance: 900 }), labelOf)
+    for (const label of ['返した合計', '調整で', '彼女が払ってくれた分', '預かった合計']) {
+      expect(text).not.toContain(label)
+    }
+  })
+
+  it('残高がマイナスのときは符号ではなく言葉で意味を伝える (機能011)', () => {
+    const text = formatMonthlySummary(summary({ withdrawTotal: 100, balance: -500 }), labelOf)
     // マイナスは「立て替え中(彼女への貸し)」。符号だけだと預かりが減ったのか
     // 貸しが増えたのか読めないので、絶対値 + 言葉で出す
     expect(text).toContain('いまの残高: ¥500(立て替え中(彼女への貸し))')
