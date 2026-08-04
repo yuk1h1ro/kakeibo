@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { cleanupAfterSignOut, clearLocalData, clearSupabaseSession } from './localData'
+import { cleanupAfterSignOut, markSignOutRequested, takeSignOutRequest, clearLocalData, clearSupabaseSession } from './localData'
 
 const URL_KEY = 'kakeibo.supabaseUrl'
 const ANON_KEY = 'kakeibo.supabaseAnonKey'
@@ -61,8 +61,11 @@ export function getSupabase(): SupabaseClient | null {
   // ログアウトの後始末はここに1つだけ置く。ログアウトのボタンが増えても
   // 「セッションだけ消えて端末内のデータと鍵が残る」状態を作らないため。
   // (未同期が残っているときは何も消さずに知らせるだけ — localData.ts)
+  //
+  // ただし SIGNED_OUT はセッション期限切れでも飛ぶ。意図を立てたときだけ
+  // 後始末する(そうしないと、何もしていないのに消去の確認が出る)
   client.auth.onAuthStateChange((event) => {
-    if (event === 'SIGNED_OUT') cleanupAfterSignOut()
+    if (event === 'SIGNED_OUT' && takeSignOutRequest()) cleanupAfterSignOut()
   })
   return client
 }
@@ -98,4 +101,19 @@ export function clearConfig(): void {
   clearLocalData([])
   clearSupabaseSession()
   client = null
+}
+
+/**
+ * 利用者が押したログアウト。
+ *
+ * ここを通ったときだけ端末内の後始末をする。素の signOut() を直に呼ぶと
+ * セッション期限切れと区別が付かず、何もしていないのに消去の確認が出る。
+ * 後始末を断られてもログアウト自体は行う(消すかどうかとは別の話なので)。
+ */
+export async function signOutByUser(supabase: SupabaseClient): Promise<void> {
+  markSignOutRequested()
+  const { error } = await supabase.auth.signOut()
+  // 失敗して SIGNED_OUT が飛ばないときは、立てた意図を倒しておく
+  // (次に期限切れが来たときに後始末が誤発火しないようにする)
+  if (error) takeSignOutRequest()
 }

@@ -6,6 +6,8 @@ import {
   clearSupabaseSession,
   keysToClear,
   supabaseSessionKeys,
+  markSignOutRequested,
+  takeSignOutRequest,
 } from './localData'
 
 /** localStorage の代わり(テストは Node 環境で走るため) */
@@ -119,5 +121,20 @@ describe('cleanupAfterSignOut', () => {
     expect(storage.getItem('kakeibo.discordWebhook')).toBeNull()
     expect(storage.getItem('kakeibo.txCache')).toBeNull()
     expect(storage.getItem('kakeibo.supabaseUrl')).toBe('https://x.supabase.co')
+  })
+})
+
+describe('ログアウトの意図', () => {
+  it('意図を立てていなければ後始末しない(セッション期限切れのケース)', () => {
+    // 立てずに取り出すと false。呼び出し側はこれで cleanupAfterSignOut を
+    // 呼ばない = 何もしていないのに消去の確認が出ることがない
+    expect(takeSignOutRequest()).toBe(false)
+  })
+
+  it('立てた意図は1回だけ取り出せる', () => {
+    markSignOutRequested()
+    expect(takeSignOutRequest()).toBe(true)
+    // 2回目は倒れている(1回のログアウトで2回後始末しない)
+    expect(takeSignOutRequest()).toBe(false)
   })
 })

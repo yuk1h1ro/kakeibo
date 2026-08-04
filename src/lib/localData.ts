@@ -118,6 +118,26 @@ export function clearSupabaseSession(storage: Storage = localStorage): string[] 
   return targets
 }
 
+// 利用者が自分でログアウトを押したかどうか。
+//
+// Supabase の SIGNED_OUT は、セッションの期限切れやトークンの失効でも飛ぶ。
+// そのたびに「端末のデータを消しますか」と聞くと、何もしていないのに
+// 消去の確認が出ることになり、驚かせるうえ誤って消させかねない。
+// 後始末をするのは「押した本人が意図したログアウト」のときだけにする。
+let signOutRequested = false
+
+/** ログアウトの意図を立てる。押した直後に signOut を呼ぶこと */
+export function markSignOutRequested(): void {
+  signOutRequested = true
+}
+
+/** 立っている意図を1回だけ取り出す。(取り出したら倒す) */
+export function takeSignOutRequest(): boolean {
+  const requested = signOutRequested
+  signOutRequested = false
+  return requested
+}
+
 /**
  * ログアウトの後始末。
  *
