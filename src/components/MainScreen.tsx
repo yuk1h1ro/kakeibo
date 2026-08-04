@@ -205,11 +205,11 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
                 await store.update(editing.id, input)
                 setEditing(null)
               }}
+              // 削除前の確認は出さない。消したあとに出る「元に戻す」バーが
+              // 同じ役割を果たすので、摩擦は操作の前ではなく後ろに置く
               onDelete={async () => {
-                if (confirm('この記録を削除しますか?')) {
-                  await store.remove(editing.id)
-                  setEditing(null)
-                }
+                await store.remove(editing.id)
+                setEditing(null)
               }}
             />
             {editing.type === 'expense' && !isTemplatesUnavailable() && (
