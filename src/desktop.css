@@ -1,0 +1,291 @@
+/* ============================================================
+   PC / ブラウザからのまとめ入力 (機能059)
+
+   このアプリはもともと iPhone の1カラム(#root は max-width:560px)で作られている。
+   PC で足りないのは横幅なので、広い画面のときだけ
+   「左にタブのレール + 右に複数カラムのカード」へ組み替える。
+
+   守っていること:
+   - 狭い画面(iPhone)の見た目は1pxも変えない。
+     このファイルの指定はすべて min-width のメディアクエリの中か、
+     タッチ端末では発火しない条件 (:focus-visible / hover:hover) に閉じてある。
+   - 色・角丸・影は styles.css のトークンだけを使う(ダークモードは自動で効く)。
+   - components 配下には触れないので、既存の DOM のままで成立する組み方にしている。
+   ============================================================ */
+
+/* ---------- キーボード操作(画面幅によらず有効) ----------
+   :focus-visible は「キーボードなどで移動したとき」だけ効くので、
+   指でタップする iPhone では発火しない = 見た目は変わらない。
+   これが無いと PC で Tab を押しても、どこにいるのか分からない要素が多かった。
+   outline は要素の border-radius に自動で沿うので、ここで角丸は指定しない
+   (指定すると、フォーカス中だけ要素そのものの角が変わってしまう)。 */
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- マウス操作の手応え(タッチ端末では発火しない) ---------- */
+
+@media (hover: hover) and (pointer: fine) {
+  .btn-ghost:hover:not(:disabled),
+  .icon-btn:hover,
+  .month-nav button:hover:not(:disabled),
+  .more-btn:hover,
+  .scan-settings-btn:hover:not(:disabled) {
+    background: var(--fill);
+  }
+
+  .tx-row:hover,
+  .recent-chip:hover,
+  .store-suggestion:hover,
+  .detail-toggle:hover {
+    background: var(--fill);
+  }
+
+  .category-chip:hover,
+  .date-chip:hover,
+  .stamp-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+
+  .btn-primary:hover:not(:disabled),
+  .scan-btn:hover:not(:disabled),
+  .btn-secondary:hover:not(:disabled) {
+    filter: brightness(1.06);
+  }
+
+  .tab-bar button:hover {
+    color: var(--text-secondary);
+  }
+
+  .tab-bar button.active:hover {
+    color: var(--accent);
+  }
+}
+
+/* ============================================================
+   ここから広い画面(PC)専用
+
+   境目を 1000px にしている理由: レール(220px)と左右の余白を引いたあと、
+   2段に割っても1段あたり 340px 以上 = iPhone の1カラム(343px)とほぼ同じ幅を
+   確保できる最小の幅がこのあたりだから。これより狭い画面で段組みにすると、
+   カードの中身がスマホより窮屈になってしまう。
+   iPad の縦(768px)は従来どおりスマホと同じ1カラムのまま。
+   ============================================================ */
+
+@media (min-width: 1000px) {
+  :root {
+    /* 左のタブレールの幅と、本文の最大幅 */
+    --rail-w: 220px;
+    --content-max: 1160px;
+    --pc-gutter: 24px;
+  }
+
+  /* 1カラムの縛りを外す。ただし本文の幅は下の .app-main 側で抑える */
+  #root {
+    max-width: none;
+  }
+
+  /* ---------- タブバー: 画面下の固定バー → 左のレール ----------
+     PC では画面の下端が遠く、下固定のバーは押しに行くのが億劫になる。
+     また縦に長い画面ではタブが本文から離れすぎる。左に縦置きすると
+     常に視界に入り、本文の縦を1行も食わない。 */
+
+  .tab-bar {
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: var(--rail-w);
+    max-width: none;
+    transform: none;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 4px;
+    padding: 20px 12px;
+    border-top: none;
+    border-right: 1px solid var(--border);
+  }
+
+  .tab-bar button {
+    flex: 0 0 auto;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 0 14px;
+    min-height: 48px;
+    font-size: 14px;
+    font-weight: 600;
+    border-radius: var(--radius-btn);
+  }
+
+  .tab-bar button.active {
+    background: var(--accent-soft);
+  }
+
+  .tab-bar .tab-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* ---------- 本文の位置 ----------
+     レールは position:fixed のままなので、本文側で場所を空ける。
+     #root に padding を入れるとログイン画面や共有ページ(タブバーが無い)まで
+     ずれるため、MainScreen にしか出てこない要素だけをずらしている。
+
+     箱の最大幅にレール幅を含めて中央寄せし、左 padding をレール幅ぶん取ると、
+     結果として「レールの右側の空間の中央」に本文が来る。 */
+
+  .app-header,
+  .app-main {
+    width: 100%;
+    max-width: calc(var(--content-max) + var(--rail-w));
+    margin-inline: auto;
+    padding-left: calc(var(--pc-gutter) + var(--rail-w));
+    padding-right: var(--pc-gutter);
+  }
+
+  .app-header {
+    padding-top: 20px;
+    padding-bottom: 8px;
+  }
+
+  .app-header h1 {
+    font-size: 17px;
+  }
+
+  /* 同期バナーは色の付いた箱なので、padding ではなく幅と位置で本文の列に合わせる */
+  .sync-banner {
+    width: min(
+      calc(100% - var(--pc-gutter) * 2 - var(--rail-w)),
+      calc(var(--content-max) - var(--pc-gutter) * 2)
+    );
+    margin-inline: auto;
+    transform: translateX(calc(var(--rail-w) / 2));
+  }
+
+  /* ---------- カードを横に並べる ----------
+     タブの中身(InputTab / HistoryTab / PartnerTab)は .app-main の直下に
+     カードが縦に積まれているだけなので、段組みにすれば横に並ぶ。
+     grid ではなく段組み(columns)を使う理由は、カードの高さがまちまちで、
+     grid だと行の高さが一番高いカードに揃って隙間だらけになるため。 */
+
+  .app-main {
+    display: block;
+    columns: 2;
+    column-gap: 20px;
+    padding-top: 6px;
+    /* 下固定のタブバーが無くなるので、その分の余白(76px)は返す */
+    padding-bottom: 48px;
+  }
+
+  .app-main > * {
+    /* カードが段の途中で切れないように */
+    break-inside: avoid;
+    margin-bottom: 20px;
+  }
+
+  /* 月送りや期間の切り替えなど「その画面全体に効く操作」は横幅いっぱいに置く。
+     段の中に埋もれると、どの列に効くのか分からなくなる */
+  .app-main > .month-nav,
+  .app-main > .month-quick,
+  .app-main > .seg,
+  .app-main > .error-text,
+  .app-main > .report-swipe,
+  .app-main > .comment-unread-banner {
+    column-span: all;
+  }
+
+  /* レポートタブのカードは .report-swipe の内側にあるので、そこで段組みにする */
+  .report-body {
+    display: block;
+    columns: 2;
+    column-gap: 20px;
+  }
+
+  .report-body > * {
+    break-inside: avoid;
+    margin-bottom: 20px;
+  }
+
+  /* 月ナビは幅いっぱいだと矢印が両端に離れすぎるので、中央にまとめる */
+  .app-main > .month-nav {
+    justify-content: center;
+    gap: 24px;
+  }
+
+  /* 2択のセグメントは、幅いっぱいに伸ばすとボタンが1000px級になって
+     「押す物」に見えなくなる。中央に置いて幅だけ抑える */
+  .app-main > .seg {
+    max-width: 440px;
+    margin-inline: auto;
+  }
+
+  /* 期間指定のカードも同じ理由で幅を抑える(日付欄が間延びしない) */
+  .app-main > .range-picker {
+    column-span: all;
+    max-width: 440px;
+    margin-inline: auto;
+  }
+
+  /* ---------- モーダル ----------
+     PC では画面下から生えるシートは不自然(指が届く位置に置く必要がない)なので、
+     中央のダイアログにする */
+
+  .modal-backdrop {
+    align-items: center;
+    padding: 24px;
+    /* レールを避けて、本文と同じ空間の中央に出す */
+    padding-left: calc(24px + var(--rail-w));
+  }
+
+  .modal-sheet {
+    max-width: 640px;
+    border-radius: var(--radius-sheet);
+    padding: 16px 24px 24px;
+    max-height: 86dvh;
+  }
+
+  /* シート上部のグラバーは「下から引き出す」暗示なので、ダイアログでは出さない */
+  .modal-sheet::before {
+    display: none;
+  }
+
+  /* テンキーを明示的にオンにしている場合も、レールを避けた中央に置く */
+  .keypad-dock {
+    left: calc(50% + var(--rail-w) / 2);
+  }
+
+  /* 目隠しをオフにする導線も、下固定のタブバーが無いぶん下げられる。
+     左右を留めて中央に寄せているので、左だけレールぶん逃がせば本文の中央に来る */
+  .privacy-hint {
+    bottom: 24px;
+    left: calc(12px + var(--rail-w));
+  }
+
+  /* ---------- タブバーが無い画面 ----------
+     #root の max-width を外したぶん、1カラムのままの画面は自分で幅を持つ */
+
+  .auth-screen {
+    width: 100%;
+    max-width: 460px;
+    margin-inline: auto;
+  }
+
+  .share-page {
+    width: 100%;
+    max-width: 600px;
+    margin-inline: auto;
+  }
+}
+
+/* ---------- さらに広い画面: 3段にして情報密度を上げる ----------
+   1段あたり約350pxで、iPhone の1カラム(343px)とほぼ同じ幅になる。
+   これより細くすると金額とラベルが同じ行に収まらなくなるので増やさない。 */
+
+@media (min-width: 1400px) {
+  .app-main,
+  .report-body {
+    columns: 3;
+  }
+}
