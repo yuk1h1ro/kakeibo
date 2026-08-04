@@ -14,11 +14,13 @@
 //   戻ったときも即座(トランジションなし)に消える。
 // ============================================================
 
+import { useSyncExternalStore } from 'react'
 import {
   PRIVACY_BLUR_HINT_KEY,
   PRIVACY_BLUR_KEY,
   parseEnabled,
   parseHintCount,
+  resolveEnabled,
   serializeEnabled,
   shouldShield,
   shouldShowHint,
@@ -26,6 +28,8 @@ import {
 
 const SHOWN_CLASS = 'privacy-shield-shown'
 const HINT_MS = 6000
+/** バーから止めたあと、どこで戻せるかを伝える一言 (設定シートの見出しと同じ言い方にする) */
+const RESTORE_NOTE = '設定の「アプリ切替時に画面を隠す」から戻せます'
 
 function readStorage(key: string): string | null {
   try {
@@ -68,9 +72,11 @@ function createShield(): HTMLElement {
 }
 
 /**
- * 「もう隠さない」への導線。
- * 設定シート(components 配下)に行を足せないため、目隠しが出たあとの数回だけ
- * 小さく出す。押すと localStorage に off が入り、以後この機能は動かない。
+ * 「もう隠さない」への近道。目隠しが出たあとの数回だけ小さく出す。
+ *
+ * 設定シートに恒久的な行ができたあとも残しているのは、止めたいと思うのが
+ * 「いま覆いが出た直後」だからで、そのときに設定を探しに行かせないため。
+ * 押すと localStorage に off が入る。戻し方は下の showRestoreNote で必ず伝える。
  */
 function createHint(onDisable: () => void): HTMLElement {
   const el = document.createElement('div')
@@ -88,6 +94,17 @@ function createHint(onDisable: () => void): HTMLElement {
 
   el.append(text, btn)
   return el
+}
+
+/**
+ * バーの中身を「設定から戻せます」に差し替える。
+ * 押したその場で戻し方を見せないと、バーが出なくなったあとに詰まってしまう。
+ */
+function fillRestoreNote(el: HTMLElement): void {
+  const text = document.createElement('span')
+  text.className = 'privacy-hint-text'
+  text.textContent = RESTORE_NOTE
+  el.replaceChildren(text)
 }
 
 export type PrivacyShieldHandle = {
@@ -130,7 +147,14 @@ export function installPrivacyShield(): PrivacyShieldHandle | null {
     enabled = false
     writeStorage(PRIVACY_BLUR_KEY, serializeEnabled(false))
     setShown(false)
-    hideHint()
+    notify()
+    // バーは消さずに中身だけ差し替える。開いている設定シートがあれば
+    // そちらの表示も notify() で「隠さない」に切り替わる
+    if (hint) {
+      fillRestoreNote(hint)
+      if (hintTimer !== undefined) window.clearTimeout(hintTimer)
+      hintTimer = window.setTimeout(hideHint, HINT_MS)
+    }
   }
 
   const showHint = () => {
@@ -214,7 +238,11 @@ export function installPrivacyShield(): PrivacyShieldHandle | null {
     setEnabled: (next: boolean) => {
       enabled = next
       writeStorage(PRIVACY_BLUR_KEY, serializeEnabled(next))
+      // オンに戻したときは、いま覆いが要る状態かどうかをその場で計算し直す。
+      // 再読み込みを待たせない (設定シートは覆いの上には出ないので、
+      // 実際にはこの場で被さることはなく、次に離れたときから効く)
       update()
+      notify()
     },
     destroy: () => {
       document.removeEventListener('visibilitychange', onVisibility)
@@ -226,12 +254,68 @@ export function installPrivacyShield(): PrivacyShieldHandle | null {
       hideHint()
       shield.remove()
       document.documentElement.classList.remove(SHOWN_CLASS)
+      if (installed === handle) installed = null
+      notify()
     },
   }
 
-  // 設定シートに行を足せていないため、オフにしたあと戻す手段として
-  // コンソールから触れる口だけ用意しておく (window.kakeiboPrivacyShield.setEnabled(true))
-  ;(window as unknown as Record<string, unknown>).kakeiboPrivacyShield = handle
-
+  installed = handle
+  notify()
   return handle
+}
+
+// ============================================================
+// 設定画面から触るための口
+//
+// 以前は window.kakeiboPrivacyShield に生やしていたが、
+// グローバル変数はどこからでも差し替えられて型も付かないので、
+// 設置済みのハンドルはこのモジュールの中だけで持ち回る。
+// 画面側はこの下の関数とフックだけを使う。
+// ============================================================
+
+let installed: PrivacyShieldHandle | null = null
+const listeners = new Set<() => void>()
+
+function notify(): void {
+  for (const l of listeners) l()
+}
+
+/** 設置済みの目隠し。まだ設置されていなければ null */
+export function getPrivacyShield(): PrivacyShieldHandle | null {
+  return installed
+}
+
+/**
+ * いまオンかどうか。
+ * 目隠しが設置されていない場面 (テスト等) でも設定は表示できるべきなので、
+ * そのときは保存値から答える。
+ */
+export function getPrivacyBlurEnabled(): boolean {
+  return resolveEnabled(installed?.isEnabled() ?? null, readStorage(PRIVACY_BLUR_KEY))
+}
+
+/**
+ * オン・オフを切り替える。設置済みならその場で挙動まで変わる (再読み込みは要らない)。
+ * 設置されていなければ保存だけしておき、次の起動から効かせる。
+ */
+export function setPrivacyBlurEnabled(enabled: boolean): void {
+  if (installed) {
+    installed.setEnabled(enabled) // 保存・反映・通知はハンドル側で済む
+    return
+  }
+  writeStorage(PRIVACY_BLUR_KEY, serializeEnabled(enabled))
+  notify()
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+/**
+ * 現在の設定値。設定シートでの切り替えにも、目隠しのバーの「もう隠さない」にも追従する。
+ * (両方から変わりうるので、React の state に写し取らず購読で受ける)
+ */
+export function usePrivacyBlurEnabled(): boolean {
+  return useSyncExternalStore(subscribe, getPrivacyBlurEnabled, getPrivacyBlurEnabled)
 }

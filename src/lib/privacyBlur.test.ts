@@ -3,6 +3,8 @@ import {
   HINT_LIMIT,
   parseEnabled,
   parseHintCount,
+  privacyBlurStateLabel,
+  resolveEnabled,
   serializeEnabled,
   shouldShield,
   shouldShowHint,
@@ -44,6 +46,31 @@ describe('parseEnabled', () => {
   it('serializeEnabled と往復する', () => {
     expect(parseEnabled(serializeEnabled(true))).toBe(true)
     expect(parseEnabled(serializeEnabled(false))).toBe(false)
+  })
+})
+
+describe('resolveEnabled', () => {
+  it('目隠しが設置済みなら、その値をそのまま使う(保存値より優先)', () => {
+    expect(resolveEnabled(true, 'off')).toBe(true)
+    expect(resolveEnabled(false, 'on')).toBe(false)
+  })
+
+  it('設置前・未設置のときだけ保存値から読む', () => {
+    expect(resolveEnabled(null, 'off')).toBe(false)
+    expect(resolveEnabled(null, 'on')).toBe(true)
+    expect(resolveEnabled(null, null)).toBe(true)
+  })
+})
+
+describe('privacyBlurStateLabel', () => {
+  it('オン・オフで別の文言になる', () => {
+    expect(privacyBlurStateLabel(true)).not.toBe(privacyBlurStateLabel(false))
+  })
+
+  it('効果を大きく見せる言い方をしない(防げる・安全と書かない)', () => {
+    for (const label of [privacyBlurStateLabel(true), privacyBlurStateLabel(false)]) {
+      expect(label).not.toMatch(/防げ|防ぎ|完全|安全|守ら/)
+    }
   })
 })
 
