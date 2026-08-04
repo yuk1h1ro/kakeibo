@@ -10,6 +10,7 @@ import {
   useKeypadPreference,
   type KeypadPreference,
 } from '../lib/keypadSettings'
+import { amountMaskStateLabel, setAmountMasked, useAmountMasked } from '../lib/amountMask'
 import { privacyBlurStateLabel } from '../lib/privacyBlur'
 import { setPrivacyBlurEnabled, usePrivacyBlurEnabled } from '../lib/privacyShield'
 import { isRecurringUnavailable } from '../lib/recurringRules'
@@ -38,6 +39,13 @@ const PRIVACY_OPTIONS: { enabled: boolean; label: string }[] = [
   { enabled: false, label: '隠さない' },
 ]
 
+// 金額の目隠し (機能169) の2択。ふだんの操作はヘッダーのボタンで、
+// ここは「いまどちらなのか」を確かめ、機能208 との違いを読める場所として置く
+const AMOUNT_MASK_OPTIONS: { masked: boolean; label: string }[] = [
+  { masked: false, label: '表示する' },
+  { masked: true, label: '伏字にする' },
+]
+
 /**
  * 設定のハブ。歯車から開き、各設定シートへの入口をまとめる。
  *
@@ -48,6 +56,7 @@ export default function SettingsSheet({ supabase, onClose }: Props) {
   const [child, setChild] = useState<'category' | 'recurring' | null>(null)
   const keypadPref = useKeypadPreference()
   const privacyBlur = usePrivacyBlurEnabled()
+  const amountMasked = useAmountMasked()
   const templates = useTransactionTemplates()
   const [error, setError] = useState<string | null>(null)
 
@@ -111,6 +120,32 @@ export default function SettingsSheet({ supabase, onClose }: Props) {
             </div>
           </div>
 
+          {/* 金額の目隠し (機能169) の切り替え。
+              ふだんはヘッダーの目のボタンで切り替える。ここに置いているのは
+              「いまどちらか」を確かめるためと、すぐ下の機能208 と混同させないため */}
+          <div className="settings-section">
+            <h3>画面の金額を伏字にする</h3>
+            <p className="muted">{amountMaskStateLabel(amountMasked)}</p>
+            <div className="privacy-pref">
+              {AMOUNT_MASK_OPTIONS.map((o) => (
+                <button
+                  key={o.label}
+                  type="button"
+                  className={`date-chip ${amountMasked === o.masked ? 'selected' : ''}`}
+                  aria-pressed={amountMasked === o.masked}
+                  onClick={() => setAmountMasked(o.masked)}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <p className="muted">
+              人前で開くときに、画面右上の目のボタンでいつでも切り替えられます(ここと同じ設定です)。
+              伏字にすると金額は <code>¥•••••</code> になり、桁数も分かりません。
+              入力中の金額欄と、レポートの予算の入力欄は、打っている本人が読めないと困るので伏せません。
+            </p>
+          </div>
+
           {/* 目隠し (機能208) の切り替え。
               覆いが出た直後のバーからも止められるが、そちらは数回で出なくなるので、
               戻す手段は必ずここに置いておく */}
@@ -130,6 +165,11 @@ export default function SettingsSheet({ supabase, onClose }: Props) {
                 </button>
               ))}
             </div>
+            <p className="muted">
+              こちらは<strong>自動</strong>で、アプリを離れている間だけ画面全体を覆います
+              (見ている最中は何も変わりません)。開いたまま金額だけを隠したいときは、上の
+              「画面の金額を伏字にする」を使ってください。
+            </p>
             <p className="muted">
               ふとした瞬間ののぞき見を減らすためのものです。スクリーンショットや画面収録は
               防げません。端末によっては、アプリ切替の画面に金額が残ることがあります。

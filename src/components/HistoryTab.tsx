@@ -23,7 +23,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Transaction } from '../lib/types'
 import { ownAmount } from '../lib/types'
-import { formatDate, formatMonth, monthKey, monthKeyOffset, todayISO, yen } from '../lib/format'
+import {
+  formatDate,
+  formatMonth,
+  maskCompact,
+  monthKey,
+  monthKeyOffset,
+  todayISO,
+  yen,
+} from '../lib/format'
 import { categoryLabel } from '../lib/categories'
 import type { useTransactions } from '../hooks/useTransactions'
 import { WEEKDAY_LABELS, defaultSelectedDate, monthWeeks } from '../lib/calendar'
@@ -390,8 +398,12 @@ export default function HistoryTab({ store, onEdit, onStartInput }: Props) {
                   const summary = byDay.get(cell.iso)
                   const isToday = cell.iso === today
                   const isSelected = cell.iso === selected
+                  // 目隠し (機能169) 中は伏字。金額そのものは出さないが、
+                  // 「その日に使ったかどうか」は伏字の有無で分かる(色や件数と同じ粒度)
                   const amountText =
-                    summary && summary.own > 0 ? summary.own.toLocaleString('ja-JP') : null
+                    summary && summary.own > 0
+                      ? maskCompact(summary.own.toLocaleString('ja-JP'))
+                      : null
                   const cls = [
                     'cal-cell',
                     isToday ? 'cal-today' : '',

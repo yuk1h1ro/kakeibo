@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { yen } from '../../lib/format'
+import { maskCompact, yen } from '../../lib/format'
 import { computeTicks } from './ticks'
 
 export interface VerticalDatum {
@@ -29,6 +29,8 @@ export default function VerticalBars({
   const { top, ticks } = computeTicks(maxV)
 
   const VB_W = 360
+  // 左の余白は目隠しの有無にかかわらず素の桁数から決める
+  // (伏字にした瞬間にグラフの幅が動くと、同じ画面には見えなくなるため)
   const leftPad = top.toLocaleString('ja-JP').length * 6.5 + 14
   const rightPad = 8
   const topPad = 22
@@ -90,7 +92,7 @@ export default function VerticalBars({
               fontSize={11}
               fill="var(--text-muted)"
             >
-              {t.toLocaleString('ja-JP')}
+              {maskCompact(t.toLocaleString('ja-JP'))}
             </text>
           </g>
         ))}

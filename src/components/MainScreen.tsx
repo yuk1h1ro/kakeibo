@@ -10,6 +10,7 @@ import { initTransactionTemplates, isTemplatesUnavailable } from '../lib/transac
 import { initSatisfaction } from '../lib/satisfaction'
 import { initAssets, isAssetsTabVisible, useAssetsStore } from '../lib/assets'
 import { todayISO } from '../lib/format'
+import { amountMaskToggleLabel, toggleAmountMask, useAmountMasked } from '../lib/amountMask'
 import InputTab from './InputTab'
 import HistoryTab from './HistoryTab'
 import ReportTab from './ReportTab'
@@ -20,6 +21,7 @@ import SettingsSheet from './SettingsSheet'
 import TemplateSaveSheet from './TemplateSaveSheet'
 import { IconCalendar, IconChart, IconGear, IconHeart, IconLogout, IconPen } from './icons'
 import { IconAssets } from './assetIcons'
+import { IconEye, IconEyeOff } from './maskIcons'
 import useBodyScrollLock from '../hooks/useBodyScrollLock'
 import '../offline.css'
 import '../settings.css'
@@ -114,6 +116,12 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
   const stalled =
     store.isOnline && store.pendingCount > 0 && !store.syncing && store.error !== null
 
+  // 金額の目隠し (機能169)。
+  // 整形関数 (format.ts の yen など) は React の外にある状態を読むので、
+  // 切り替えても自動では描き直されない。アプリの全画面がこの下にぶら下がっているため、
+  // ここで購読しておけば1回の再描画で画面じゅうの金額が伏字に切り替わる。
+  const masked = useAmountMasked()
+
   // 資産タブの有無 (機能101)。テーブルが無いと分かった時点で選択中でも入力タブへ戻す
   const assetsStore = useAssetsStore()
   const assetsVisible = isAssetsTabVisible(assetsStore)
@@ -125,6 +133,19 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
       <header className="app-header">
         <h1>家計簿</h1>
         <div className="header-actions">
+          {/* 金額の目隠し (機能169)。
+              人が近づいてから設定を開いていては間に合わないので、常に見えている
+              ヘッダーに置く。誤操作したくないログアウトの隣にはしたくないため、
+              歯車より左(タブから最も遠い側)に並べている */}
+          <button
+            className={`icon-btn${masked ? ' masked-on' : ''}`}
+            aria-label={amountMaskToggleLabel(masked)}
+            title={amountMaskToggleLabel(masked)}
+            aria-pressed={masked}
+            onClick={() => toggleAmountMask()}
+          >
+            {masked ? <IconEyeOff /> : <IconEye />}
+          </button>
           <button
             className="icon-btn"
             aria-label="設定"

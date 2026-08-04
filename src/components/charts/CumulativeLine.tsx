@@ -1,4 +1,4 @@
-import { yen } from '../../lib/format'
+import { maskCompact, yen } from '../../lib/format'
 import type { CumulativePoint } from '../../lib/reportPace'
 import { computeTicks } from './ticks'
 
@@ -41,6 +41,7 @@ export default function CumulativeLine({ series, baseline, elapsedDays, forecast
     elapsedDays > 0 ? series[elapsedDays - 1].cumulative : 0
   )
   const { top, ticks } = computeTicks(maxValue)
+  // 余白は素の桁数から決める(伏字にしてもグラフの形が動かないように)
   const leftPad = top.toLocaleString('ja-JP').length * 6.5 + 14
   const plotW = VB_W - leftPad - rightPad
 
@@ -92,7 +93,7 @@ export default function CumulativeLine({ series, baseline, elapsedDays, forecast
               fontSize={11}
               fill="var(--text-muted)"
             >
-              {t.toLocaleString('ja-JP')}
+              {maskCompact(t.toLocaleString('ja-JP'))}
             </text>
           </g>
         ))}

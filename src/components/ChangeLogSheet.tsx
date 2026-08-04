@@ -15,7 +15,7 @@ import {
   fetchChangeLog,
   type ChangeEntry,
 } from '../lib/changeLog'
-import { formatDate } from '../lib/format'
+import { formatDate, maskAmountsIn } from '../lib/format'
 
 function whenText(iso: string): string {
   const d = new Date(iso)
@@ -64,10 +64,12 @@ export default function ChangeLogSheet({ onClose }: { onClose: () => void }) {
                 <div className="hist-log-when">{whenText(e.changedAt)}</div>
                 <div className="hist-log-what">
                   <span className="hist-log-badge">{actionLabel(e.action)}</span>
-                  {e.summary}
+                  {/* 変更履歴に残っている文字列は保存された時点のもの(素の金額)。
+                      目隠し (機能169) 中は表示の直前だけ伏字にする */}
+                  {maskAmountsIn(e.summary)}
                 </div>
                 {e.changes.length > 0 && (
-                  <div className="hist-log-detail">{describeEntry(e)}</div>
+                  <div className="hist-log-detail">{maskAmountsIn(describeEntry(e))}</div>
                 )}
               </div>
             ))}
