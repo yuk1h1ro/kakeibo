@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { Transaction } from '../lib/types'
+import type { Satisfaction, Transaction } from '../lib/types'
 import {
   appendOp,
   loadQueue,
   removeOp,
   type PendingOp,
 } from '../lib/offlineQueue'
+import {
+  isSatisfactionUnavailable,
+  markSatisfactionUnavailable,
+  withoutSatisfaction,
+} from '../lib/satisfaction'
 import { buildPartnerOpMessage, sendDiscordMessage } from '../lib/discordNotify'
 import {
   isNetworkError,
@@ -26,6 +31,19 @@ export interface TransactionInput {
   // 繰り返し入力が自動生成した行の印。手入力では付けない。
   // (省略時は列自体を送らないので、source 列が無いDBでも手入力は通る)
   source?: 'recurring'
+  // 感情スタンプ (機能219 + 143)。migration-satisfaction.sql 未実行の環境では
+  // 送信直前にキーごと落とす(下の sendablePayload)
+  satisfaction?: Satisfaction | null
+}
+
+/**
+ * 送信直前に、この環境に無い列を落とした内容を作る。
+ * 列が無いと分かっている間 satisfaction を送らないことで、
+ * マイグレーション未実行でも記録そのものは必ず通る。
+ */
+function sendablePayload(payload: TransactionInput | undefined): Partial<TransactionInput> {
+  if (!payload) return {}
+  return isSatisfactionUnavailable() ? withoutSatisfaction(payload) : payload
 }
 
 // ---------- スナップショットキャッシュ(オフライン起動・高速起動用) ----------
@@ -162,12 +180,12 @@ export function useTransactions(supabase: SupabaseClient) {
           if (op.kind === 'insert') {
             const { error } = await supabase
               .from('transactions')
-              .insert({ id: op.id, ...op.payload })
+              .insert({ id: op.id, ...sendablePayload(op.payload) })
             err = error
           } else if (op.kind === 'update') {
             const { error } = await supabase
               .from('transactions')
-              .update({ ...op.payload })
+              .update({ ...sendablePayload(op.payload) })
               .eq('id', op.id)
             err = error
           } else {
@@ -179,7 +197,15 @@ export function useTransactions(supabase: SupabaseClient) {
         }
         if (err) {
           if (isSchemaError(err)) {
-            // migration 未実行などスキーマ起因 — 実行すれば通るので op は必ず残す。
+            // satisfaction(感情スタンプ)は「無くても記録は成り立つ」項目なので、
+            // その列が無いだけなら諦めて同じ op をやり直す。ここで中断すると
+            // 後続の記録まで送れなくなり、入力が滞留してしまうため。
+            // 一度落としたあとは sendablePayload が送らないので無限には回らない。
+            if (!isSatisfactionUnavailable() && op.payload?.satisfaction !== undefined) {
+              markSatisfactionUnavailable()
+              continue
+            }
+            // それ以外の migration 未実行 — 実行すれば通るので op は必ず残す。
             // 対処法が分かるメッセージを出したうえで中断する
             setError(SCHEMA_ERROR_MESSAGE)
             break
