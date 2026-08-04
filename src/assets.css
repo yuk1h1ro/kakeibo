@@ -8,6 +8,13 @@
 
 /* ---------- 純資産のヒーローカード ---------- */
 
+/* 純資産は支出額より桁が大きくなりうる。
+   1億円台でも横スクロールを出さないよう、溢れる前に折り返させる
+   (.hero-value 自体は styles.css の共有クラスなので、こちらだけに足す) */
+.nw-hero {
+  overflow-wrap: anywhere;
+}
+
 .nw-delta {
   margin-top: 6px;
   font-size: 13px;
@@ -280,6 +287,7 @@
   font-weight: 700;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .balance-preview strong.negative {

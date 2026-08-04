@@ -71,7 +71,7 @@ export default function AssetsTab({ supabase }: { supabase: SupabaseClient }) {
     <>
       <div className="card hero-card">
         <div className="label">純資産(資産 − 負債)</div>
-        <div className={`hero-value ${current.netWorth < 0 ? 'negative' : ''}`}>
+        <div className={`hero-value nw-hero ${current.netWorth < 0 ? 'negative' : ''}`}>
           {signed(current.netWorth)}
         </div>
         {change.delta !== null && change.previous ? (

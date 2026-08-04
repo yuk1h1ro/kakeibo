@@ -60,7 +60,9 @@ export const ASSET_CATEGORIES: AssetCategoryDef[] = [
   { key: 'cash', label: '現金', emoji: '💴' },
   { key: 'emoney', label: '電子マネー・ポイント', emoji: '💳' },
   { key: 'insurance', label: '保険・年金', emoji: '🛡️' },
-  { key: 'realestate', label: '不動産・その他資産', emoji: '🏠' },
+  { key: 'realestate', label: '不動産', emoji: '🏠' },
+  // 未知の種別キー(将来足したものを古い端末で開いた場合など)の受け皿も兼ねる
+  { key: 'other', label: 'その他', emoji: '💰' },
 ]
 
 export const LIABILITY_CATEGORIES: AssetCategoryDef[] = [
@@ -74,9 +76,9 @@ export function categoriesFor(kind: AssetKind): AssetCategoryDef[] {
   return kind === 'liability' ? LIABILITY_CATEGORIES : ASSET_CATEGORIES
 }
 
-/** 種別キーの表示名。未知のキーはキーをそのまま出す(将来足しても壊れないように) */
+/** 種別キーの表示名。未知のキーは「その他」に寄せる(将来キーを足しても壊れないように) */
 export function assetCategoryLabel(kind: AssetKind, key: string): string {
-  return categoriesFor(kind).find((c) => c.key === key)?.label ?? key
+  return categoriesFor(kind).find((c) => c.key === key)?.label ?? 'その他'
 }
 
 export function assetCategoryEmoji(kind: AssetKind, key: string): string {
