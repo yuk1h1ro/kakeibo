@@ -1197,18 +1197,23 @@ comment on column public.transactions.tags is
 alter table public.transactions
   drop constraint if exists transactions_tags_check;
 
+-- PostgreSQL は CHECK 制約の中に副問い合わせを書けないため、
+-- 要素ごとの長さの判定を immutable な関数に閉じ込めて呼ぶ
+create or replace function public.kakeibo_tags_ok(t text[])
+returns boolean
+language sql
+immutable
+as $fn$
+  select coalesce(array_length(t, 1), 0) <= 5
+     and coalesce(
+           (select bool_and(char_length(u.v) between 1 and 20)
+              from unnest(coalesce(t, '{}'::text[])) as u(v)),
+           true)
+$fn$;
+
 alter table public.transactions
   add constraint transactions_tags_check
-  check (
-    array_length(tags, 1) is null
-    or (
-      array_length(tags, 1) <= 5
-      and not exists (
-        select 1 from unnest(tags) as t(v)
-         where char_length(v) = 0 or char_length(v) > 20
-      )
-    )
-  );
+  check (public.kakeibo_tags_ok(tags));
 
 -- タグでの絞り込みは配列の包含で引くので GIN を張る
 create index if not exists idx_transactions_tags
