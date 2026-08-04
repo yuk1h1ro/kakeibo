@@ -38,6 +38,7 @@ import { useSwipeNav } from '../hooks/useSwipeNav'
 import CategoryBars from './charts/CategoryBars'
 import MonthlyTrend from './charts/MonthlyTrend'
 import SatisfactionSortSheet from './SatisfactionSortSheet'
+import { splitSiblings } from '../lib/splits'
 import VerticalBars from './charts/VerticalBars'
 import FixedCostCard from './report/FixedCostCard'
 import GranularityCard from './report/GranularityCard'
@@ -512,6 +513,9 @@ export default function ReportTab({ transactions, onSetSatisfaction }: ReportTab
         <SatisfactionSortSheet
           targets={sortTargets}
           onAssign={onSetSatisfaction}
+          /* 機能096: 分割は束ねごとに代表1件だけが並ぶ。
+             付けた気分は同じ会計の内訳すべてに書く */
+          groupOf={(t) => splitSiblings(transactions, t)}
           onClose={() => setShowSortSheet(false)}
         />
       )}

@@ -17,6 +17,7 @@ import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Satisfaction, Transaction } from './types'
 import { satisfactionOf } from './types'
+import { isSplitPart } from './splits'
 import { isSchemaError } from './serverErrors'
 
 export interface SatisfactionOption {
@@ -47,16 +48,34 @@ export function satisfactionEmoji(value: Satisfaction | null): string {
 /**
  * まとめて仕分ける対象(機能143)。スタンプが未設定の支出を新しい順に返す。(純粋関数)
  * 古い記録ほど「どう感じたか」を思い出せないので、新しい順のまま上限で打ち切る。
+ *
+ * 分割した会計 (機能096) は束ねごとに代表1件だけを返す。分割は
+ * 「1回の買い物をカテゴリで割った行」なので、そのまま並べると同じ店・同じ日の
+ * 断片が N 件続けて出てきて、同じ買い物に何度も同じ気分を付けさせることになる。
+ * 代表に付けた気分は、呼び出し側が同じ束ねの行すべてに書く
+ * (SatisfactionSortSheet の groupOf)。
  */
 export function pendingSatisfactionTargets(
   txs: readonly Transaction[],
   limit = 100
 ): Transaction[] {
-  return txs
+  const pending = txs
     .filter((t) => t.type === 'expense' && satisfactionOf(t) === null)
     .slice()
     .sort((a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at))
-    .slice(0, limit)
+
+  const seenGroups = new Set<string>()
+  const out: Transaction[] = []
+  for (const t of pending) {
+    if (isSplitPart(t)) {
+      const group = t.split_group as string
+      if (seenGroups.has(group)) continue
+      seenGroups.add(group)
+    }
+    out.push(t)
+    if (out.length >= limit) break
+  }
+  return out
 }
 
 /**

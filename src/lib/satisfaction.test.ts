@@ -49,6 +49,38 @@ describe('pendingSatisfactionTargets — まとめて仕分ける対象', () => 
     expect(pendingSatisfactionTargets(rows).map((t) => t.id)).toEqual(['c', 'a'])
   })
 
+  // 機能096: 分割した会計は1回の買い物。断片が N 件続けて出ないよう束ねごとに1件
+  it('分割した会計は束ねごとに代表1件だけ返す', () => {
+    const rows = [
+      tx({ id: 's1', split_group: 'g1', created_at: '2026-08-04T03:00:01.000Z' }),
+      tx({ id: 's2', split_group: 'g1', created_at: '2026-08-04T03:00:02.000Z' }),
+      tx({ id: 's3', split_group: 'g1', created_at: '2026-08-04T03:00:03.000Z' }),
+      tx({ id: 'solo', created_at: '2026-08-04T03:00:04.000Z' }),
+    ]
+    const got = pendingSatisfactionTargets(rows)
+    expect(got).toHaveLength(2)
+    expect(got.map((t) => t.id)).toEqual(['solo', 's3'])
+  })
+
+  it('別々の束ねはそれぞれ1件ずつ出す', () => {
+    const rows = [
+      tx({ id: 'a1', split_group: 'g1' }),
+      tx({ id: 'a2', split_group: 'g1' }),
+      tx({ id: 'b1', split_group: 'g2' }),
+      tx({ id: 'b2', split_group: 'g2' }),
+    ]
+    expect(pendingSatisfactionTargets(rows)).toHaveLength(2)
+  })
+
+  it('束ねの1件に気分が付いていても、残りは畳んだまま1件だけ出す', () => {
+    const rows = [
+      tx({ id: 'x1', split_group: 'g1', satisfaction: 'good' }),
+      tx({ id: 'x2', split_group: 'g1' }),
+      tx({ id: 'x3', split_group: 'g1' }),
+    ]
+    expect(pendingSatisfactionTargets(rows).map((t) => t.id)).toEqual(['x2'])
+  })
+
   it('預かり(支出以外)は対象にしない', () => {
     const rows = [tx({ id: 'd', type: 'partner_deposit', category: null })]
     expect(pendingSatisfactionTargets(rows)).toEqual([])

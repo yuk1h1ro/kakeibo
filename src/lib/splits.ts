@@ -135,6 +135,46 @@ export function splitSiblings(txs: readonly Transaction[], t: Transaction): Tran
   return txs.filter((x) => x.split_group === t.split_group)
 }
 
+/** 分割の何番目か(1始まり)と、その会計の内訳の件数 */
+export interface SplitPosition {
+  index: number
+  count: number
+}
+
+/**
+ * 記録の id → 「分割の何分の何番目か」の対応表を一度に作る。(純粋関数)
+ *
+ * 一覧の行ごとに splitSiblings を呼ぶと、行数 × 記録数の走査になって
+ * 記録が増えるほど履歴が重くなる。描く前にここで1回だけまとめて作る。
+ * 分割でない記録は表に載せない(呼び出し側は「無ければ出さない」だけで済む)。
+ *
+ * 並びは作成時刻 → id で決めきる。入力の並び順で番号が入れ替わると、
+ * 同じ買い物が見るたびに「1/2」「2/2」と入れ替わってしまうため。
+ */
+export function splitPositions(txs: readonly Transaction[]): Map<string, SplitPosition> {
+  const groups = new Map<string, Transaction[]>()
+  for (const t of txs) {
+    if (!isSplitPart(t)) continue
+    const key = t.split_group as string
+    const list = groups.get(key)
+    if (list) list.push(t)
+    else groups.set(key, [t])
+  }
+  const out = new Map<string, SplitPosition>()
+  for (const list of groups.values()) {
+    const ordered = [...list].sort(
+      (a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id)
+    )
+    ordered.forEach((t, i) => out.set(t.id, { index: i + 1, count: ordered.length }))
+  }
+  return out
+}
+
+/** 履歴の行に出す「分割 1/2」。(純粋関数) */
+export function splitBadgeLabel(pos: SplitPosition): string {
+  return `分割 ${pos.index}/${pos.count}`
+}
+
 /**
  * 均等割りの下書きを作る。(純粋関数)
  * 割り切れない分は先頭の内訳に寄せる(合計は必ず total に一致させる)。

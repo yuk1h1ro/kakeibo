@@ -5,6 +5,9 @@ import {
   buildSplitInputs,
   evenSplit,
   isSplitPart,
+  splitBadgeLabel,
+  splitPositions,
+  splitSiblings,
   splitTotal,
   validateSplit,
   type SplitPart,
@@ -148,5 +151,58 @@ describe('isSplitPart', () => {
     expect(isSplitPart(tx({ split_group: 'g1' }))).toBe(true)
     expect(isSplitPart(tx({ split_group: null }))).toBe(false)
     expect(isSplitPart(tx({}))).toBe(false)
+  })
+})
+
+describe('splitPositions / splitSiblings', () => {
+  const tx = (p: Partial<Transaction>): Transaction => ({
+    id: 'a',
+    date: '2026-08-04',
+    type: 'expense',
+    amount: 1000,
+    category: 'food',
+    memo: '',
+    store: '',
+    partner_amount: 0,
+    created_at: '2026-08-04T03:00:00.000Z',
+    ...p,
+  })
+
+  const rows: Transaction[] = [
+    tx({ id: 'solo' }),
+    tx({ id: 'b', split_group: 'g1', created_at: '2026-08-04T03:00:02.000Z' }),
+    tx({ id: 'a1', split_group: 'g1', created_at: '2026-08-04T03:00:01.000Z' }),
+    tx({ id: 'c', split_group: 'g2', created_at: '2026-08-04T04:00:00.000Z' }),
+    tx({ id: 'd', split_group: 'g2', created_at: '2026-08-04T04:00:00.000Z' }),
+    tx({ id: 'e', split_group: 'g2', created_at: '2026-08-04T04:00:00.000Z' }),
+  ]
+
+  it('束ねごとに「何分の何番目か」が出る', () => {
+    const pos = splitPositions(rows)
+    expect(pos.get('a1')).toEqual({ index: 1, count: 2 })
+    expect(pos.get('b')).toEqual({ index: 2, count: 2 })
+    expect(pos.get('c')).toEqual({ index: 1, count: 3 })
+  })
+
+  it('分割でない記録は表に載せない', () => {
+    expect(splitPositions(rows).has('solo')).toBe(false)
+  })
+
+  it('作成時刻が同着でも番号が入れ替わらない(id で決めきる)', () => {
+    const forward = splitPositions(rows)
+    const backward = splitPositions([...rows].reverse())
+    for (const id of ['c', 'd', 'e']) {
+      expect(backward.get(id)).toEqual(forward.get(id))
+    }
+  })
+
+  it('表示は「分割 1/2」', () => {
+    expect(splitBadgeLabel({ index: 1, count: 2 })).toBe('分割 1/2')
+  })
+
+  it('splitSiblings と同じ束ねを指す', () => {
+    const target = rows.find((t) => t.id === 'b')!
+    expect(splitSiblings(rows, target).map((t) => t.id).sort()).toEqual(['a1', 'b'])
+    expect(splitPositions(rows).get('b')?.count).toBe(splitSiblings(rows, target).length)
   })
 })

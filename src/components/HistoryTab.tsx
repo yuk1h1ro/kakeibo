@@ -44,6 +44,7 @@ import {
 import { categoryBulkTargets, duplicateInput, withCategory } from '../lib/txActions'
 import { canStartPull, formatSyncedAt, pullOffset, shouldTriggerRefresh } from '../lib/pullRefresh'
 import { useChangeLogAvailable } from '../lib/changeLog'
+import { splitPositions } from '../lib/splits'
 import HistoryTxRow from './HistoryTxRow'
 import HistoryFilterBar from './HistoryFilterBar'
 import MonthPickerSheet from './MonthPickerSheet'
@@ -157,6 +158,10 @@ export default function HistoryTab({ store, onEdit, onStartInput }: Props) {
 
   // いま一覧に出ている行(選択モードの操作対象)
   const visibleRows = searching ? shownResults : dayTx
+
+  // 分割された会計の「何分の何番目か」(機能096)。
+  // 行ごとに数えると記録数 × 行数の走査になるので、ここで1回だけ作って各行に配る
+  const splitPos = useMemo(() => splitPositions(store.transactions), [store.transactions])
 
   // ---------- 複数選択 (機能151) ----------
 
@@ -463,6 +468,7 @@ export default function HistoryTab({ store, onEdit, onStartInput }: Props) {
                 key={t.id}
                 tx={t}
                 showDate={searching}
+                splitPos={splitPos.get(t.id)}
                 selectMode={selectMode}
                 picked={pickedSet.has(t.id)}
                 onOpen={onEdit}
