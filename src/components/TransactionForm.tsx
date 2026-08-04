@@ -1,17 +1,26 @@
 import { useEffect, useState } from 'react'
-import { useCategories, visualFromEmojiValue } from '../lib/categories'
+import { categoryLabel, useCategories, visualFromEmojiValue } from '../lib/categories'
 import { CategoryVisualBadge } from './categoryIcons'
 import { daysAgoISO, todayISO } from '../lib/format'
 import {
   EMPTY_CALC,
   OP_LABEL,
   clearAll,
+  pressBackspace,
+  pressDigits,
   pressEquals,
   pressOperator,
   resolveForSubmit,
   type CalcOp,
   type CalcState,
 } from '../lib/calc'
+import { useKeypadEnabled } from '../lib/keypadSettings'
+import AmountKeypad from './AmountKeypad'
+import {
+  lookupStoreCategory,
+  matchStoreSuggestions,
+  useStoreCategories,
+} from '../lib/storeCategories'
 import type { Transaction } from '../lib/types'
 import type { TransactionInput } from '../hooks/useTransactions'
 
@@ -64,16 +73,49 @@ export default function TransactionForm({
   )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // 金額入力の簡易電卓(保留中の値と演算子)。数字は既存の入力欄から入る
+  // 金額入力の簡易電卓(保留中の値と演算子)。数字は入力欄か自前テンキーから入る
   const [calc, setCalc] = useState<{ pendingValue: number | null; pendingOp: CalcOp | null }>({
     pendingValue: null,
     pendingOp: null,
   })
 
+  // 自前テンキー(機能052)。タッチ端末では既定で有効、PC では OS のキーボードのまま
+  const keypadEnabled = useKeypadEnabled()
+  const [keypadOpen, setKeypadOpen] = useState(false)
+
+  // 店名からのカテゴリ自動選択(機能067+075)
+  const learned = useStoreCategories()
+  const [storeFocused, setStoreFocused] = useState(false)
+  // 自動で入ったカテゴリを黙って使わせないための1行。ユーザーが選び直したら消す
+  const [autoCategory, setAutoCategory] = useState<string | null>(null)
+
+  const suggestions = storeFocused ? matchStoreSuggestions(learned, store) : []
+
+  // 店名から学習済みのカテゴリを当てる。すでに選ばれているときは尊重する
+  const applyLearnedCategory = (name: string, current: string | null): void => {
+    if (current !== null) return
+    const found = lookupStoreCategory(learned, name)
+    if (found === null) return
+    setCategory(found)
+    setAutoCategory(found)
+  }
+
+  const chooseCategory = (id: string) => {
+    setCategory(id)
+    setAutoCategory(null) // 手で選び直したので、以降は自動選択の表示を出さない
+  }
+
   // 編集モーダルの対象が変わったら計算途中の状態を持ち越さない
   useEffect(() => {
     setCalc(EMPTY_CALC)
   }, [initial])
+
+  // テンキーの高さぶんの余白を本文に持たせる(保存ボタンがパッドの下に隠れないように)
+  useEffect(() => {
+    if (!keypadOpen) return
+    document.body.classList.add('keypad-open')
+    return () => document.body.classList.remove('keypad-open')
+  }, [keypadOpen])
 
   // 外部プリフィル適用(日付は prefill.date があるときだけ更新)
   useEffect(() => {
@@ -81,11 +123,18 @@ export default function TransactionForm({
     setCalc(EMPTY_CALC) // 計算途中の状態が混ざらないようにリセット
     setAmount(String(prefill.amount))
     if (prefill.date) setDate(prefill.date)
-    setCategory(prefill.category)
     setMemo(prefill.memo)
     setStore(prefill.store)
     setWithPartner(prefill.partner_amount > 0)
     setPartnerAmount(prefill.partner_amount > 0 ? String(prefill.partner_amount) : '')
+    // レシート読み取りのように店名だけ入ってくる場合も、手入力と同じ経路でカテゴリを補う
+    setCategory(prefill.category)
+    setAutoCategory(null)
+    if (prefill.category === null && prefill.store !== '') {
+      applyLearnedCategory(prefill.store, null)
+    }
+    // applyLearnedCategory は学習内容のスナップショットに依存するだけなので依存に含めない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill])
 
   const calcState: CalcState = { input: amount, pendingValue: calc.pendingValue, pendingOp: calc.pendingOp }
@@ -110,6 +159,15 @@ export default function TransactionForm({
     const next = clearAll()
     setAmount(next.input)
     setCalc({ pendingValue: next.pendingValue, pendingOp: next.pendingOp })
+  }
+
+  // テンキーの数字も演算子と同じ状態機械を通す(挙動を1本に保つため)
+  const runDigits = (digits: string) => {
+    setAmount(pressDigits(calcState, digits).input)
+  }
+
+  const runBackspace = () => {
+    setAmount(pressBackspace(calcState).input)
   }
 
   // 彼女の負担分の入力値を親に通知(残高カードの「差引後」表示用)
@@ -157,6 +215,8 @@ export default function TransactionForm({
         setStore('')
         setWithPartner(false)
         setPartnerAmount('')
+        setAutoCategory(null)
+        setKeypadOpen(false)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -173,11 +233,15 @@ export default function TransactionForm({
           <input
             className={`amount-input ${amountNum < 0 ? 'negative' : ''}`}
             type="number"
-            inputMode="numeric"
+            /* テンキー使用中も readOnly にはしない — 貼り付け・選択を殺さず、
+               OS のキーボードだけを呼ばないようにする */
+            inputMode={keypadEnabled ? 'none' : 'numeric'}
             min={1}
             placeholder="0"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
+            onFocus={() => keypadEnabled && setKeypadOpen(true)}
+            onBlur={() => setKeypadOpen(false)}
           />
           <button type="button" className="amount-clear" aria-label="金額をクリア" onClick={runClear}>
             C
@@ -192,27 +256,50 @@ export default function TransactionForm({
             )}
             {amountNum < 0 && <span className="calc-warn">マイナスの金額は保存できません</span>}
           </div>
-          <div className="calc-keys">
-            <button type="button" className="calc-key" aria-label="足す" onClick={() => runOperator('+')}>
-              ＋
-            </button>
-            <button type="button" className="calc-key" aria-label="引く" onClick={() => runOperator('-')}>
-              −
-            </button>
-            <button type="button" className="calc-key" aria-label="掛ける" onClick={() => runOperator('×')}>
-              ×
-            </button>
-            <button
-              type="button"
-              className="calc-key calc-key-equals"
-              aria-label="計算する"
-              onClick={runEquals}
-            >
-              ＝
-            </button>
-          </div>
+          {/* テンキーを開いている間は同じ演算子が下に出るので、こちらは畳む */}
+          {!keypadOpen && (
+            <div className="calc-keys">
+              <button type="button" className="calc-key" aria-label="足す" onClick={() => runOperator('+')}>
+                ＋
+              </button>
+              <button type="button" className="calc-key" aria-label="引く" onClick={() => runOperator('-')}>
+                −
+              </button>
+              <button type="button" className="calc-key" aria-label="掛ける" onClick={() => runOperator('×')}>
+                ×
+              </button>
+              <button
+                type="button"
+                className="calc-key calc-key-equals"
+                aria-label="計算する"
+                onClick={runEquals}
+              >
+                ＝
+              </button>
+            </div>
+          )}
         </div>
       </div>
+
+      {keypadEnabled && keypadOpen && (
+        <AmountKeypad
+          pending={
+            calc.pendingOp !== null && calc.pendingValue !== null
+              ? { value: calc.pendingValue, op: calc.pendingOp }
+              : null
+          }
+          onDigits={runDigits}
+          onBackspace={runBackspace}
+          onOperator={runOperator}
+          onEquals={runEquals}
+          onClear={runClear}
+          onDone={() => {
+            setKeypadOpen(false)
+            // フォーカスが金額欄に残ったままだと、もう一度タップしても開き直せない
+            if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+          }}
+        />
+      )}
 
       {isExpense && (
         <div>
@@ -225,13 +312,18 @@ export default function TransactionForm({
                 key={c.id}
                 type="button"
                 className={`category-chip ${category === c.id ? 'selected' : ''}`}
-                onClick={() => setCategory(c.id)}
+                onClick={() => chooseCategory(c.id)}
               >
                 <CategoryVisualBadge visual={visualFromEmojiValue(c.emoji)} size={34} />
                 {c.label}
               </button>
             ))}
           </div>
+          {autoCategory !== null && category === autoCategory && (
+            <p className="muted auto-category-note">
+              前回このお店で選んだ「{categoryLabel(autoCategory)}」にしました(違うときは選び直してください)
+            </p>
+          )}
         </div>
       )}
 
@@ -300,15 +392,46 @@ export default function TransactionForm({
       </div>
 
       {isExpense && (
-        <label className="field">
+        <div className="field store-field">
           <span>お店(任意)</span>
           <input
             type="text"
+            aria-label="お店"
             placeholder="例: セブンイレブン"
             value={store}
+            autoComplete="off"
             onChange={(e) => setStore(e.target.value)}
+            onFocus={() => setStoreFocused(true)}
+            onBlur={() => {
+              setStoreFocused(false)
+              // 候補を選ばずに打ち切った場合も、同じ店名を知っていればカテゴリを補う
+              applyLearnedCategory(store, category)
+            }}
           />
-        </label>
+          {suggestions.length > 0 && (
+            <ul className="store-suggestions">
+              {suggestions.map((s) => (
+                <li key={s.storeKey}>
+                  <button
+                    type="button"
+                    className="store-suggestion"
+                    // blur より先に確定させたいので mousedown/pointerdown で拾う
+                    onPointerDown={(e) => {
+                      e.preventDefault()
+                      setStore(s.storeName)
+                      setStoreFocused(false)
+                      setCategory(s.category)
+                      setAutoCategory(s.category)
+                    }}
+                  >
+                    <span className="store-suggestion-name">{s.storeName}</span>
+                    <span className="store-suggestion-cat">{categoryLabel(s.category)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       <label className="field">
