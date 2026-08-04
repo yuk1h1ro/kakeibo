@@ -8,6 +8,12 @@ import {
   type PendingOp,
 } from '../lib/offlineQueue'
 import { buildPartnerOpMessage, sendDiscordMessage } from '../lib/discordNotify'
+import {
+  isNetworkError,
+  isRetryableServerError,
+  isSchemaError,
+  type ServerErrorLike,
+} from '../lib/serverErrors'
 
 export interface TransactionInput {
   date: string
@@ -17,6 +23,9 @@ export interface TransactionInput {
   memo: string
   store: string // お店(店名)。任意。支出でのみ使用(空文字 = 未入力)
   partner_amount: number
+  // 繰り返し入力が自動生成した行の印。手入力では付けない。
+  // (省略時は列自体を送らないので、source 列が無いDBでも手入力は通る)
+  source?: 'recurring'
 }
 
 // ---------- スナップショットキャッシュ(オフライン起動・高速起動用) ----------
@@ -50,44 +59,10 @@ function saveTxCache(rows: Transaction[]): void {
 }
 
 // ---------- 再試行すべきエラーの判定 ----------
-
-// Supabase(PostgREST)のエラー。code / details / hint まで見て分類する。
-// catch した例外は message しか無いので、message 以外は任意。
-export interface ServerErrorLike {
-  message: string
-  code?: string | null
-  details?: string | null
-  hint?: string | null
-}
-
-// supabase-js は fetch の失敗を「TypeError: Failed to fetch」(Chrome)や
-// 「TypeError: Load failed」(Safari)といった message の error として返す。
-// これらは「後で再試行すべき」失敗で、サーバーの拒否(制約違反等)とは区別する。
-export function isNetworkError(message: string): boolean {
-  // navigator.onLine が false と明示されているときだけオフライン扱い
-  // (非ブラウザ環境では undefined になるため === false で判定する)
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true
-  return /fetch|network|load failed|接続|タイムアウト|timeout/i.test(message)
-}
-
-// スキーマ未適用(migration 未実行)による拒否。
-// マイグレーションを実行すれば通るので、キューを捨ててはいけない。
-//   PGRST204 … schema cache に列が無い
-//   42703    … undefined_column
-//   42P01    … undefined_table
-const SCHEMA_ERROR_CODES = new Set(['PGRST204', '42703', '42P01'])
-
-export function isSchemaError(err: ServerErrorLike): boolean {
-  if (err.code && SCHEMA_ERROR_CODES.has(err.code)) return true
-  const text = [err.message, err.details, err.hint].filter(Boolean).join(' ')
-  return /schema cache|does not exist|could not find/i.test(text)
-}
-
-// 「あとで直せる(再試行すべき)」失敗か。
-// true のとき op はキューに残す = 入力した記録は絶対に失わない。
-export function isRetryableServerError(err: ServerErrorLike): boolean {
-  return isSchemaError(err) || isNetworkError(err.message)
-}
+// 判定そのものは lib/serverErrors.ts に置き、他のテーブルからも同じ基準で使う。
+// 従来この場所から import していた箇所のために再エクスポートする。
+export type { ServerErrorLike }
+export { isNetworkError, isSchemaError, isRetryableServerError }
 
 export const SCHEMA_ERROR_MESSAGE =
   'データベースの更新が必要です。SupabaseのSQL Editorで migration-store.sql を実行してください' +
@@ -290,6 +265,30 @@ export function useTransactions(supabase: SupabaseClient) {
     [flush]
   )
 
+  /**
+   * 複数行をまとめて更新する。1件ずつ update と同じ op をキューに積むだけなので、
+   * オフラインでも未同期のまま失われない(「過去にも適用」の一括変更で使う)。
+   */
+  const updateMany = useCallback(
+    async (updates: { id: string; input: TransactionInput }[]) => {
+      if (updates.length === 0) return
+      const queuedAt = new Date().toISOString()
+      let ops: PendingOp[] = loadQueue()
+      for (const u of updates) {
+        ops = appendOp({
+          opId: crypto.randomUUID(),
+          kind: 'update',
+          id: u.id,
+          payload: u.input,
+          queuedAt,
+        })
+      }
+      setPendingOps(ops)
+      void flush()
+    },
+    [flush]
+  )
+
   const remove = useCallback(
     async (id: string) => {
       const op: PendingOp = {
@@ -317,6 +316,7 @@ export function useTransactions(supabase: SupabaseClient) {
     refresh,
     add,
     update,
+    updateMany,
     remove,
     pendingCount: pendingOps.length,
     isOnline,

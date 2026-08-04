@@ -1010,3 +1010,403 @@ textarea:focus {
 .auth-footer .muted {
   word-break: break-all;
 }
+
+/* ---------- レポート: 期間切替・ランキング・曜日/時間帯 ---------- */
+
+/* 期間やランキングの切り口を選ぶセグメント。タップ領域は44px以上を確保する */
+.seg {
+  display: flex;
+  gap: 4px;
+  background: var(--fill);
+  border-radius: var(--radius-btn);
+  padding: 3px;
+}
+
+.seg button {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 6px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.seg button.active {
+  background: var(--surface);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-1);
+}
+
+/* カード内に置く小さめのセグメント(高さは44pxのまま維持) */
+.seg.seg-sm {
+  margin-bottom: 10px;
+}
+
+.seg.seg-sm button {
+  font-size: 14px;
+  padding: 6px 4px;
+}
+
+/* 月表示を押して当月へ戻すボタン(今月を見ているときは描画しない) */
+.month-nav button.month-jump {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 10px;
+  color: var(--text-primary);
+}
+
+.month-nav button.month-jump .title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.month-nav button.month-jump .jump-hint {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.month-nav button.month-jump:active {
+  background: var(--fill);
+}
+
+.month-quick {
+  display: flex;
+  justify-content: center;
+}
+
+.month-quick .btn-ghost {
+  font-size: 14px;
+}
+
+/* 任意期間の指定 */
+.range-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.range-picker .range-summary {
+  font-variant-numeric: tabular-nums;
+}
+
+/* スワイプで月送りする領域。中身は縦に積む(app-main の gap と同じ間隔) */
+.report-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 月を送った向きにわずかに滑り込ませて、切り替わったことを伝える */
+.report-body.slide-next {
+  animation: report-slide-next 0.18s ease-out;
+}
+
+.report-body.slide-prev {
+  animation: report-slide-prev 0.18s ease-out;
+}
+
+@keyframes report-slide-next {
+  from {
+    opacity: 0.4;
+    transform: translateX(12px);
+  }
+}
+
+@keyframes report-slide-prev {
+  from {
+    opacity: 0.4;
+    transform: translateX(-12px);
+  }
+}
+
+/* 動きを減らす設定を尊重する(スワイプ操作自体は有効なまま) */
+@media (prefers-reduced-motion: reduce) {
+  .report-body.slide-next,
+  .report-body.slide-prev {
+    animation: none;
+  }
+}
+
+/* 年換算(121)。押し付けがましくならないよう小さく副次的に置く */
+.stat-tile .annual-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 支出上位ランキング */
+.rank-list {
+  list-style: none;
+}
+
+.rank-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.rank-row:last-child {
+  border-bottom: none;
+}
+
+.rank-row .rank-no {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  background: var(--fill);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.rank-row .rank-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.rank-row .rank-label {
+  display: block;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank-row .rank-sub {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 1px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank-row .rank-amount {
+  flex-shrink: 0;
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 「もっと見る」。カードの下端いっぱいの押しやすい行にする */
+.more-btn {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 6px;
+  border-radius: var(--radius-btn);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.more-btn:active {
+  background: var(--fill);
+}
+
+/* 事実と異なる読み取りをされないための注意書き(時間帯別など) */
+.caveat {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--fill);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+
+.axis-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  text-align: right;
+}
+
+/* 記録が1件も無い期間の空状態 */
+.empty-state {
+  text-align: center;
+  padding: 28px 16px;
+}
+
+.empty-state .empty-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+/* ---------- 自前テンキー(機能052) ----------
+   OS のキーボードの代わりに画面下部へ固定する。親指が届く位置に置きたいので
+   タブバーの上ではなく、キーボードと同じく最前面に重ねる。 */
+
+.keypad-dock {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 560px;
+  z-index: 40;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  box-shadow: var(--shadow-1);
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  /* 押しっぱなしでの選択・拡大を防ぐ */
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+.keypad-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 18px;
+  padding: 0 2px 4px;
+  font-size: 13px;
+}
+
+.keypad-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+/* 1キーあたり最低 48px(iPhone で押し間違えない高さ) */
+.keypad-key {
+  min-width: 0;
+  min-height: 52px;
+  border-radius: var(--radius-btn);
+  background: var(--fill);
+  color: var(--text-primary);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  transition: transform 0.08s ease, filter 0.08s ease;
+}
+
+.keypad-key:active {
+  transform: scale(0.97);
+  filter: brightness(0.92);
+}
+
+@media (prefers-color-scheme: dark) {
+  .keypad-key:active {
+    filter: brightness(1.25);
+  }
+}
+
+/* 0 は最も使うので2列ぶんの幅を与える */
+.keypad-wide {
+  grid-column: span 2;
+}
+
+.keypad-fn {
+  font-size: 20px;
+  color: var(--text-secondary);
+}
+
+.keypad-equals {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.keypad-done {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* ---------- 店名のオートコンプリート(機能067+075) ---------- */
+
+.store-field {
+  position: relative;
+}
+
+.store-suggestions {
+  list-style: none;
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: var(--surface);
+  border: 1px solid var(--baseline);
+  border-radius: var(--radius-btn);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+
+.store-suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.store-suggestions li:last-child .store-suggestion {
+  border-bottom: none;
+}
+
+.store-suggestion:active {
+  background: var(--fill);
+}
+
+.store-suggestion-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.store-suggestion-cat {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* 自動で入ったカテゴリの断り書き(上書きできることを伝える) */
+.auto-category-note {
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
+/* 連続撮影への導線(単発の読み取りボタンの下) */
+.scan-batch-btn {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 14px;
+}
+
+/* テンキーを開いている間は、その高さぶんだけ下に逃がす。
+   これが無いと保存ボタンがパッドの下に隠れたまま届かない画面が出る */
+body.keypad-open .app-main {
+  padding-bottom: calc(340px + env(safe-area-inset-bottom));
+}
+
+body.keypad-open .modal-sheet {
+  padding-bottom: calc(340px + env(safe-area-inset-bottom));
+}

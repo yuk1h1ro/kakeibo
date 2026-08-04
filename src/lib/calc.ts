@@ -108,3 +108,37 @@ export function resolveForSubmit(state: CalcState): CalcState {
 export function clearAll(): CalcState {
   return EMPTY_CALC
 }
+
+/* ------------------------------------------------------------
+   自前テンキーからの数字入力
+   OSキーボードの代わりにテンキーを使う場合も、演算子と同じ状態機械を通す。
+   入力欄の文字列を組み立てるだけなので、pendingValue / pendingOp には触らない。
+   ------------------------------------------------------------ */
+
+/** 金額として現実的な桁数の上限。押し続けても Number の精度を壊さないための歯止め */
+const MAX_DIGITS = 9
+
+/**
+ * テンキーの数字キー(0〜9 と 00)を押したときの遷移。
+ * - 先頭の 0 は積まない(「0」「00」だけを押しても入力は空のまま)
+ * - 上限桁数を超える分は無視する(打ち間違いで桁が暴走しないように)
+ */
+export function pressDigits(state: CalcState, digits: string): CalcState {
+  if (!/^\d+$/.test(digits)) return state
+  // 先頭の 0 は数値として意味が無いので、空欄のうちは 0 を積まない
+  const base = state.input === '0' ? '' : state.input
+  let next = base
+  for (const d of digits) {
+    if (next === '' && d === '0') continue
+    if (next.length >= MAX_DIGITS) break
+    next += d
+  }
+  if (next === state.input) return state
+  return { ...state, input: next }
+}
+
+/** テンキーの1文字削除。入力欄が空のときは何もしない(保留中の計算は消さない) */
+export function pressBackspace(state: CalcState): CalcState {
+  if (state.input === '') return state
+  return { ...state, input: state.input.slice(0, -1) }
+}
