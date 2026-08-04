@@ -252,8 +252,32 @@
   white-space: nowrap;
 }
 
+/* キーの形式が違うときの警告。.muted だと見落とされるため、
+   sync-banner.warning と同じ系統の「警告ボックス」として目に入る強さにする。
+   長いキー名でも 375px 幅で横にはみ出さないよう折り返す。 */
 .gemini-warn {
-  color: var(--text-secondary);
+  padding: 9px 12px;
+  border-radius: var(--radius-btn);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--expense);
+  background: var(--warning-bg);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.gemini-warn code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--expense);
+  background: var(--fill);
+  border-radius: 4px;
+  padding: 0 4px;
+  white-space: nowrap;
 }
 
 .gemini-status {
