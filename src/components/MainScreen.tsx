@@ -151,7 +151,9 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
         {tab === 'report' && (
           <ReportTab transactions={store.transactions} onSetSatisfaction={setSatisfaction} />
         )}
-        {tab === 'partner' && <PartnerTab store={store} onEdit={setEditing} />}
+        {tab === 'partner' && (
+          <PartnerTab store={store} supabase={supabase} onEdit={setEditing} />
+        )}
       </main>
       <nav className="tab-bar">
         {TABS.map((t) => (

@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import TransactionForm from './TransactionForm'
 import type { Transaction } from '../lib/types'
 import { formatDate, yen } from '../lib/format'
@@ -12,15 +13,27 @@ import {
   saveWebhookUrl,
   sendTestMessage,
 } from '../lib/discordNotify'
+import {
+  addOwnerComment,
+  fetchComments,
+  groupCommentsByTransaction,
+  markTransactionRead,
+  unreadCommentCount,
+  type PartnerComment,
+} from '../lib/partnerComments'
+import CommentThread from './CommentThread'
+import ShareLinkCard from './ShareLinkCard'
+import '../share.css'
 
 type Store = ReturnType<typeof useTransactions>
 
 interface Props {
   store: Store
+  supabase: SupabaseClient
   onEdit: (t: Transaction) => void
 }
 
-export default function PartnerTab({ store, onEdit }: Props) {
+export default function PartnerTab({ store, supabase, onEdit }: Props) {
   const balance = store.transactions.reduce((sum, t) => {
     if (t.type === 'partner_deposit') return sum + t.amount
     return sum - t.partner_amount
@@ -33,6 +46,44 @@ export default function PartnerTab({ store, onEdit }: Props) {
     (t) => t.type === 'partner_deposit' || (t.type === 'expense' && t.partner_amount > 0)
   )
 
+  // コメント (機能185)。テーブルが無ければ null のままで、導線ごと出さない
+  const [comments, setComments] = useState<PartnerComment[] | null>(null)
+  useEffect(() => {
+    let alive = true
+    void fetchComments(supabase).then((rows) => {
+      if (alive && rows !== null) setComments(rows)
+    })
+    return () => {
+      alive = false
+    }
+  }, [supabase])
+
+  const grouped = useMemo(
+    () => groupCommentsByTransaction(comments ?? []),
+    [comments]
+  )
+  const unread = unreadCommentCount(comments ?? [])
+
+  const handleAddComment = async (txId: string, body: string): Promise<string | null> => {
+    try {
+      const created = await addOwnerComment(supabase, txId, body)
+      setComments((prev) => [...(prev ?? []), created])
+      return null
+    } catch (e) {
+      return e instanceof Error ? e.message : 'コメントを保存できませんでした'
+    }
+  }
+
+  // 開いた明細の彼女のコメントは既読にする(未読バッジを消すため)
+  const handleOpenThread = (txId: string) => {
+    const list = grouped[txId] ?? []
+    if (!list.some((c) => c.author === 'partner' && !c.readByOwner)) return
+    void markTransactionRead(supabase, txId)
+    setComments((prev) =>
+      (prev ?? []).map((c) => (c.transactionId === txId ? { ...c, readByOwner: true } : c))
+    )
+  }
+
   return (
     <>
       <div className="card hero-card">
@@ -40,6 +91,10 @@ export default function PartnerTab({ store, onEdit }: Props) {
         <div className={`hero-value ${balance < 0 ? 'negative' : ''}`}>{balanceText}</div>
         {balance < 0 && <p className="muted">立て替え超過です</p>}
       </div>
+
+      {unread > 0 && (
+        <div className="comment-unread-banner">💬 彼女から新しいコメントが{unread}件あります</div>
+      )}
 
       <div className="card">
         <h2>預かりを記録</h2>
@@ -52,6 +107,8 @@ export default function PartnerTab({ store, onEdit }: Props) {
         />
       </div>
 
+      <ShareLinkCard supabase={supabase} />
+
       <DiscordNotifyCard />
 
       <div className="card">
@@ -59,7 +116,16 @@ export default function PartnerTab({ store, onEdit }: Props) {
         {movements.length === 0 ? (
           <p className="muted">記録がありません</p>
         ) : (
-          movements.map((t) => <MovementRow key={t.id} tx={t} onEdit={onEdit} />)
+          movements.map((t) => (
+            <MovementRow
+              key={t.id}
+              tx={t}
+              onEdit={onEdit}
+              comments={comments === null ? null : grouped[t.id] ?? []}
+              onOpenThread={() => handleOpenThread(t.id)}
+              onSubmitComment={(body) => handleAddComment(t.id, body)}
+            />
+          ))
         )}
       </div>
     </>
@@ -156,7 +222,17 @@ function DiscordNotifyCard() {
   )
 }
 
-function MovementRow({ tx, onEdit }: { tx: Transaction; onEdit: (t: Transaction) => void }) {
+interface MovementRowProps {
+  tx: Transaction
+  onEdit: (t: Transaction) => void
+  /** null = コメント機能が使えない(マイグレーション未実行)ので導線を出さない */
+  comments: PartnerComment[] | null
+  onOpenThread: () => void
+  onSubmitComment: (body: string) => Promise<string | null>
+}
+
+function MovementRow({ tx, onEdit, comments, onOpenThread, onSubmitComment }: MovementRowProps) {
+  const [open, setOpen] = useState(false)
   const isDeposit = tx.type === 'partner_deposit'
   const visual = isDeposit
     ? ({ kind: 'icon', icon: 'wallet' } as const)
@@ -173,20 +249,44 @@ function MovementRow({ tx, onEdit }: { tx: Transaction; onEdit: (t: Transaction)
     if (tx.store || tx.memo) subParts.push(categoryLabel(tx.category))
   }
 
+  const unread = comments ? comments.some((c) => c.author === 'partner' && !c.readByOwner) : false
+
   return (
-    <button className="tx-row" onClick={() => onEdit(tx)}>
-      <CategoryVisualBadge visual={visual} size={34} />
-      <span className="tx-body">
-        <span className="tx-title" style={{ display: 'block' }}>
-          {title}
+    <div className="movement-item">
+      <button className="tx-row" onClick={() => onEdit(tx)}>
+        <CategoryVisualBadge visual={visual} size={34} />
+        <span className="tx-body">
+          <span className="tx-title" style={{ display: 'block' }}>
+            {title}
+          </span>
+          <span className="tx-sub" style={{ display: 'block' }}>
+            {subParts.join(' ・ ')}
+          </span>
         </span>
-        <span className="tx-sub" style={{ display: 'block' }}>
-          {subParts.join(' ・ ')}
+        <span className={`tx-amount ${isDeposit ? 'positive' : ''}`}>
+          {isDeposit ? `+${yen(tx.amount)}` : `-${yen(tx.partner_amount)}`}
         </span>
-      </span>
-      <span className={`tx-amount ${isDeposit ? 'positive' : ''}`}>
-        {isDeposit ? `+${yen(tx.amount)}` : `-${yen(tx.partner_amount)}`}
-      </span>
-    </button>
+      </button>
+      {comments !== null && (
+        <>
+          <button
+            type="button"
+            className="comment-toggle"
+            onClick={() => {
+              const next = !open
+              setOpen(next)
+              if (next) onOpenThread()
+            }}
+          >
+            💬 コメント{comments.length > 0 ? ` ${comments.length}` : ''}
+            {unread && <span className="unread-dot" aria-label="未読あり" />}
+            <span style={{ marginLeft: 'auto' }}>{open ? '閉じる' : '開く'}</span>
+          </button>
+          {open && (
+            <CommentThread comments={comments} viewer="owner" onSubmit={onSubmitComment} />
+          )}
+        </>
+      )}
+    </div>
   )
 }

@@ -30,6 +30,26 @@ function resolveConfig(): { url: string; anonKey: string } | null {
   return null
 }
 
+/**
+ * 接続情報(URL と anon キー)を返す。未設定なら null。
+ * 共有ページ (機能179) は「ログインしない別のクライアント」を作る必要があるため、
+ * 接続情報だけをここから取り出せるようにしている。
+ */
+export function getSupabaseConfig(): { url: string; anonKey: string } | null {
+  return resolveConfig()
+}
+
+/**
+ * 接続情報がビルド時の環境変数から来ているか。
+ * 共有リンクは彼女の端末(localStorage が空)で開かれるので、
+ * ビルド時に埋め込まれていないとリンクが機能しない。その注意書きの判定に使う。
+ */
+export function hasBuildTimeConfig(): boolean {
+  const envUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
+  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+  return Boolean(envUrl && envKey)
+}
+
 let client: SupabaseClient | null = null
 
 export function getSupabase(): SupabaseClient | null {
