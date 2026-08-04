@@ -37,6 +37,9 @@ export function transactionToInput(t: Transaction): TransactionInput {
   if (t.partner_paid !== undefined && t.partner_paid !== null) input.partner_paid = t.partner_paid
   if (t.tags !== undefined && t.tags !== null) input.tags = t.tags
   if (t.split_group !== undefined) input.split_group = t.split_group
+  // created_at はここでは写さない。書き換え(一括編集・気分の付け直し)で送ると、
+  // 楽観表示のために仮置きした時刻でサーバーの本物を上書きしてしまうため。
+  // 「同じ行を入れ直す」restoreInput だけが写す。
   return input
 }
 
@@ -68,10 +71,18 @@ export function withCategory(t: Transaction, category: string | null): Transacti
  * 削除の取り消し (機能159) で書き戻す内容。(純粋関数)
  *
  * 行ID(t.id)は呼び出し側がそのまま使う。同じIDで入れ直すことで、
- * 共有ページのコメントなど「取引IDを指しているもの」との結び付きが切れない。
+ * 共有ページのコメントなど「取引IDを指しているもの」との結び付きが戻る
+ * (コメント側の外部キーは on delete cascade を外してあり、
+ *  明細が消えている間はコメントが見えないだけで、消えはしない)。
+ *
+ * created_at も写す。写さないと DB の now() が入り、**元に戻したはずの記録が
+ * 「いま作られた記録」になってしまう** — 同じ日の中での並び順が変わり、
+ * レポートの「時間帯別」も復元した時刻に付け替わる。
  */
 export function restoreInput(t: Transaction): TransactionInput {
-  return transactionToInput(t)
+  const input = transactionToInput(t)
+  if (typeof t.created_at === 'string' && t.created_at !== '') input.created_at = t.created_at
+  return input
 }
 
 /**

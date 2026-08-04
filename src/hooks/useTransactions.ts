@@ -62,7 +62,7 @@ import {
   recordChange,
   transactionSummary,
 } from '../lib/changeLog'
-import { restoreInput, transactionToInput } from '../lib/txActions'
+import { restoreInput } from '../lib/txActions'
 
 export interface TransactionInput {
   date: string
@@ -85,6 +85,10 @@ export interface TransactionInput {
   tags?: string[]
   // 分割した会計の束ねID (機能096)
   split_group?: string | null
+  // 作成日時。ふだんは送らず DB の now() に任せるが、**元に戻す**ときだけは
+  // 元の値を写す (機能159)。写さないと復元した瞬間が created_at になり、
+  // 同じ日の中での並び順が変わり、レポートの「時間帯別」も復元時刻に付け替わる。
+  created_at?: string
 }
 
 /**
@@ -279,7 +283,8 @@ export function useTransactions(supabase: SupabaseClient) {
         opId: crypto.randomUUID(),
         kind: 'insert',
         id: row.id,
-        payload: transactionToInput(row),
+        // 元に戻すのと同じ内容(created_at も含む)。再送すれば元どおりになる
+        payload: restoreInput(row),
         queuedAt: row.created_at,
       }))
       if (!quarantineOps([...group, ...undoOps], reason, err.message || null)) return null
