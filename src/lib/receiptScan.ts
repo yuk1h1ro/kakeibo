@@ -233,6 +233,41 @@ export function extractReceiptFields(apiResponse: unknown): ReceiptScanResult {
   return { store, total, date }
 }
 
+/** 429 の原因別メッセージ(対処法が全く違うので混ぜない) */
+const QUOTA_MESSAGE = {
+  /** 課金が有効なプロジェクト = 無料枠が外れており、前払いクレジットが尽きている */
+  credits:
+    'このプロジェクトは課金が有効なため無料枠が適用されません。' +
+    '課金を有効にしていないプロジェクトで発行したAPIキーに変更するか、クレジットを購入してください',
+  /** 本当のレート制限(分あたり) */
+  perMinute: '短時間に使いすぎました。1分ほど待ってから再度お試しください(無料枠は1分あたり約15回まで)',
+  /** 日次上限 */
+  perDay: '本日の無料枠(1日約1,500回)を使い切りました。日付が変わってからお試しください',
+} as const
+
+/**
+ * 429 の原因を Google が返した詳細メッセージから見分ける。(純粋関数)
+ *
+ * 429 には「クレジット枯渇(課金設定の問題・待っても直らない)」と
+ * 「レート制限(待てば直る)」が混在しており、対処法が正反対になる。
+ * 一律に「無料枠の上限に達しました」と出すと原因究明を妨げるため、ここで分ける。
+ *
+ * 判定は大文字小文字を無視し、`-`/`_` は空白として正規化する
+ * (`per-minute` や quotaId の `PerDayPerProject…` にも当てられるようにするため)。
+ * どれにも当てはまらない場合はレート制限として扱う(最も頻度が高いため)。
+ */
+function quotaExceededMessage(apiMessage?: string | null): string {
+  const d = (typeof apiMessage === 'string' ? apiMessage : '').toLowerCase().replace(/[-_]+/g, ' ')
+  if (d.includes('prepayment') || d.includes('credits')) return QUOTA_MESSAGE.credits
+  if (d.includes('per minute') || d.includes('perminute') || /\brpm\b/.test(d)) {
+    return QUOTA_MESSAGE.perMinute
+  }
+  if (d.includes('per day') || d.includes('perday') || d.includes('daily')) {
+    return QUOTA_MESSAGE.perDay
+  }
+  return QUOTA_MESSAGE.perMinute
+}
+
 /**
  * HTTP ステータスをユーザー向けの日本語メッセージに変換する。
  * apiMessage(Googleが返した原因)があれば必ず併記する — これが無いと
@@ -248,7 +283,8 @@ export function httpErrorMessage(status: number, apiMessage?: string | null): st
   } else if (status === 404) {
     base = '指定のモデルが見つかりません'
   } else if (status === 429) {
-    base = '無料枠の上限に達しました。しばらく待ってから再度お試しください'
+    // 429 は原因(クレジット枯渇 / 分あたり / 日次)で対処法が違うので分ける
+    base = quotaExceededMessage(apiMessage)
   } else if (status >= 500) {
     base = 'Googleのサーバーが混み合っています。しばらく待ってから再度お試しください'
   } else {
@@ -320,6 +356,9 @@ export function buildTestFailureMessage(status: number, detail: string | null): 
   } else if (status === 403) {
     base =
       'APIキーの制限により拒否されました。Google Cloud Console でキーの制限設定を確認してください'
+  } else if (status === 429) {
+    // 読み取り本体と同じ判定を使う(クレジット枯渇 / 分あたり / 日次)
+    base = quotaExceededMessage(d)
   } else {
     // それ以外は既存の変換に任せる(詳細の併記もそちらが行う)
     return httpErrorMessage(status, detail)
