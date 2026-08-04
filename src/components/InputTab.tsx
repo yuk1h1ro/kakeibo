@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import TransactionForm, { type FormPrefill } from './TransactionForm'
+import TransactionForm, { type DatePrefill, type FormPrefill } from './TransactionForm'
 import GeminiKeySheet from './GeminiKeySheet'
 import ReceiptBatchSheet from './ReceiptBatchSheet'
 import RecategorizeSheet from './RecategorizeSheet'
@@ -30,8 +30,16 @@ interface RecategorizeTarget {
   targets: Transaction[]
 }
 
-export default function InputTab({ store, supabase }: { store: Store; supabase: SupabaseClient }) {
+interface Props {
+  store: Store
+  supabase: SupabaseClient
+  /** 履歴カレンダーの「この日で入力する」から渡ってくる日付(機能053) */
+  datePrefill?: DatePrefill
+}
+
+export default function InputTab({ store, supabase, datePrefill }: Props) {
   const [saved, setSaved] = useState(false)
+  const formCardRef = useRef<HTMLDivElement>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [prefill, setPrefill] = useState<FormPrefill | undefined>(undefined)
   const [pendingPartner, setPendingPartner] = useState(0)
@@ -72,6 +80,13 @@ export default function InputTab({ store, supabase }: { store: Store; supabase: 
   }, [store.transactions])
 
   const handlePartnerAmountChange = useCallback((n: number) => setPendingPartner(n), [])
+
+  // カレンダーから来たときは、入力フォームまで運んであげる
+  // (残高カードやレシートの導線が先にあるので、そのままだと入力欄が画面外にある)
+  useEffect(() => {
+    if (!datePrefill) return
+    formCardRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }, [datePrefill])
 
   const applyRecent = (t: Transaction) => {
     setPrefill((prev) => ({
@@ -254,7 +269,7 @@ export default function InputTab({ store, supabase }: { store: Store; supabase: 
         </div>
       )}
 
-      <div className="card">
+      <div className="card" ref={formCardRef}>
         <h2>支出を記録</h2>
         {saved && (
           <p className="positive" style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
@@ -265,6 +280,7 @@ export default function InputTab({ store, supabase }: { store: Store; supabase: 
           fixedType="expense"
           submitLabel="記録する"
           prefill={prefill}
+          datePrefill={datePrefill}
           onPartnerAmountChange={handlePartnerAmountChange}
           onSubmit={async (input) => {
             await store.add(input)
