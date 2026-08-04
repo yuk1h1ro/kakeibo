@@ -4,7 +4,9 @@ import {
   addCategory,
   archiveCategory,
   moveCategory,
+  unarchiveCategory,
   updateCategory,
+  useArchivedCategories,
   useCategories,
   visualFromEmojiValue,
   type Category,
@@ -62,6 +64,8 @@ function IconPicker({
 
 export default function CategorySettingsSheet({ supabase, onClose }: Props) {
   const categories = useCategories()
+  // 隠したカテゴリ (機能086)。戻せる場所が無いと「隠す」は怖くて押せない
+  const archived = useArchivedCategories()
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [editLabel, setEditLabel] = useState('')
   const [editIcon, setEditIcon] = useState('box')
@@ -113,12 +117,19 @@ export default function CategorySettingsSheet({ supabase, onClose }: Props) {
     })
   }
 
-  const remove = (c: Category) => {
-    if (!confirm('このカテゴリを削除しますか?過去の記録の表示はそのまま残ります')) return
+  // 機能086: 消すのではなく隠す。過去の記録は隠したカテゴリ名のまま表示され、
+  // ここからいつでも戻せる。だから確認は「削除しますか」ではなく「隠しますか」
+  const hide = (c: Category) => {
+    if (!confirm(`「${c.label}」を選択肢から隠しますか?過去の記録の表示はそのまま残り、あとで戻せます`))
+      return
     void run(async () => {
       await archiveCategory(supabase, c.catKey)
       if (editingKey === c.catKey) setEditingKey(null)
     })
+  }
+
+  const restore = (c: Category) => {
+    void run(() => unarchiveCategory(supabase, c.catKey))
   }
 
   const add = () => {
@@ -202,15 +213,40 @@ export default function CategorySettingsSheet({ supabase, onClose }: Props) {
                   <button
                     className="btn-ghost cat-action cat-delete"
                     disabled={busy}
-                    onClick={() => remove(c)}
+                    onClick={() => hide(c)}
                   >
-                    削除
+                    隠す
                   </button>
                 </>
               )}
             </li>
           ))}
         </ul>
+
+        {/* 機能086: 隠したカテゴリ。1件も無いときは節ごと出さない */}
+        {archived.length > 0 && (
+          <div className="settings-section cat-archived">
+            <h3>隠しているカテゴリ</h3>
+            <p className="muted">
+              入力の選択肢には出ませんが、過去の記録では今までどおりこの名前で表示されます
+            </p>
+            <ul className="cat-list">
+              {archived.map((c) => (
+                <li key={c.catKey} className="cat-row is-archived">
+                  <CategoryVisualBadge visual={visualFromEmojiValue(c.emoji)} size={32} />
+                  <span className="cat-name">{c.label}</span>
+                  <button
+                    className="btn-ghost cat-action"
+                    disabled={busy}
+                    onClick={() => restore(c)}
+                  >
+                    戻す
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="cat-add">
           <h3>+ カテゴリを追加</h3>

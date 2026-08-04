@@ -1,0 +1,302 @@
+/* ============================================================
+   預かり金まわりと、タグ・分割の見た目
+     機能010 残高の低下アラート
+     機能011 マイナス残高(= 彼女への貸し)
+     機能012 返金・現金受け取り・手動調整
+     機能018 支払った人
+     機能086 隠したカテゴリ
+     機能088 タグ
+     機能096 分割
+   共有のデザイントークン(styles.css)だけを使い、色や角丸は自前で決めない。
+   iPhone が主な利用環境なので、押せるものは 44px 以上・文字は 16px 以上。
+   横スクロールを絶対に出さないため、並ぶものは必ず flex-wrap で折り返す。
+   ============================================================ */
+
+/* ---------- 残高の見出し (機能011) ---------- */
+
+.balance-headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.balance-direction {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--fill);
+  color: var(--text-secondary);
+}
+
+.balance-direction.is-lent {
+  background: rgba(201, 59, 59, 0.12);
+  color: var(--expense);
+}
+
+.balance-direction.is-holding {
+  background: rgba(21, 127, 61, 0.12);
+  color: var(--income);
+}
+
+/* ---------- 低下アラート (機能010) ---------- */
+
+.low-balance-alert {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-btn);
+  background: var(--warning-bg);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.low-balance-alert strong {
+  font-weight: 700;
+}
+
+.low-balance-setting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.low-balance-setting input {
+  flex: 1 1 120px;
+  min-width: 0;
+  min-height: 44px;
+  font-size: 16px; /* iOS が拡大しない最小サイズ */
+}
+
+/* ---------- 精算シート (機能012) ---------- */
+
+.settle-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settle-mode {
+  flex: 1 1 auto;
+  min-width: 96px;
+  min-height: 44px;
+  padding: 10px 12px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  cursor: pointer;
+}
+
+.settle-mode.selected {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.settle-hint,
+.settle-note {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.settle-preview {
+  padding: 10px 12px;
+  border-radius: var(--radius-btn);
+  background: var(--fill);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.settle-open-btn {
+  width: 100%;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+/* ---------- 支払った人 (機能018) ---------- */
+
+.payer-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.payer-chip {
+  flex: 1 1 auto;
+  min-width: 92px;
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  cursor: pointer;
+}
+
+.payer-chip.selected {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.payer-note {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ---------- タグ (機能088) ---------- */
+
+.tag-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  background: var(--fill);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.tag-chip.is-on {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* 付いているタグの「×」は指で押せる大きさを確保する */
+.tag-chip-remove {
+  min-width: 28px;
+  min-height: 28px;
+  font-size: 15px;
+  line-height: 1;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.tag-row-label {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ---------- 分割 (機能096) ---------- */
+
+.split-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  background: var(--fill);
+}
+
+.split-part {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--radius-btn);
+  background: var(--surface);
+}
+
+.split-part-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.split-cat-select,
+.split-part input {
+  width: 100%;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.split-remaining {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.split-remaining.is-off {
+  color: var(--expense);
+  font-weight: 600;
+}
+
+.split-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.split-actions button {
+  flex: 1 1 auto;
+  min-height: 44px;
+  font-size: 15px;
+}
+
+.split-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--fill);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ---------- 隠したカテゴリ (機能086) ---------- */
+
+.cat-archived .cat-row.is-archived {
+  opacity: 0.7;
+}
+
+/* ---------- 共有ページ側 (機能011 / 012 / 018) ---------- */
+
+.share-settlement-note {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.share-row-paid {
+  color: var(--income);
+  font-size: 13px;
+}

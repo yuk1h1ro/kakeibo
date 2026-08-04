@@ -16,9 +16,13 @@ import {
   PERIOD_OPTIONS,
   SORT_OPTIONS,
   describeFilter,
+  filterTags,
   isFilterActive,
   type HistoryFilter,
 } from '../lib/historyFilter'
+import { collectTags } from '../lib/tags'
+import type { Transaction } from '../lib/types'
+import '../ledger.css'
 import {
   addSavedFilter,
   canSaveFilter,
@@ -32,10 +36,15 @@ import {
 interface Props {
   filter: HistoryFilter
   onChange: (next: HistoryFilter) => void
+  /** タグの選択肢を出すための記録一覧 (機能088)。使われているタグだけを出す */
+  transactions?: readonly Transaction[]
 }
 
-export default function HistoryFilterBar({ filter, onChange }: Props) {
+export default function HistoryFilterBar({ filter, onChange, transactions }: Props) {
   const categories = useCategories()
+  // 実際に使われているタグだけを候補にする(空の選択肢を並べない)
+  const tagOptions = collectTags(transactions ?? [], 40)
+  const activeTags = filterTags(filter)
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState(filter.query)
   const [saved, setSaved] = useState<SavedFilter[]>(() => loadSavedFilters())
@@ -72,6 +81,13 @@ export default function HistoryFilterBar({ filter, onChange }: Props) {
       ? filter.categories.filter((c) => c !== key)
       : [...filter.categories, key]
     patch({ categories: next })
+  }
+
+  const toggleTag = (tag: string) => {
+    const next = activeTags.includes(tag)
+      ? activeTags.filter((t) => t !== tag)
+      : [...activeTags, tag]
+    patch({ tags: next })
   }
 
   const active = isFilterActive(filter)
@@ -211,6 +227,25 @@ export default function HistoryFilterBar({ filter, onChange }: Props) {
               </button>
             </div>
           </div>
+
+          {/* 機能088: タグ。使われているタグが1つも無ければ節ごと出さない */}
+          {tagOptions.length > 0 && (
+            <div>
+              <span className="hist-field-label">タグ(選ばなければすべて)</span>
+              <div className="tag-chips">
+                {tagOptions.map((t) => (
+                  <button
+                    key={t.tag}
+                    className={`tag-chip${activeTags.includes(t.tag) ? ' is-on' : ''}`}
+                    aria-pressed={activeTags.includes(t.tag)}
+                    onClick={() => toggleTag(t.tag)}
+                  >
+                    #{t.tag}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {saved.length > 0 && (
             <div>

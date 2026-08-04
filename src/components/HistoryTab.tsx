@@ -366,7 +366,8 @@ export default function HistoryTab({ store, onEdit, onStartInput }: Props) {
           </button>
         </div>
 
-        <HistoryFilterBar filter={filter} onChange={setFilter} />
+        {/* タグの選択肢は実際に使われているものだけを出す (機能088) */}
+        <HistoryFilterBar filter={filter} onChange={setFilter} transactions={store.transactions} />
 
         {!searching && (
           <>

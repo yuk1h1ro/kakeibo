@@ -25,8 +25,21 @@ import {
   useStoreCategories,
 } from '../lib/storeCategories'
 import type { Satisfaction, Transaction } from '../lib/types'
-import { satisfactionOf } from '../lib/types'
+import { partnerPaid, satisfactionOf, tagsOf } from '../lib/types'
+import { useTxFeature } from '../lib/txExtensions'
+import { collectTags, parseTagInput, sanitizeTags, MAX_TAGS_PER_TX } from '../lib/tags'
+import {
+  buildSplitInputs,
+  evenSplit,
+  isSplitPart,
+  splitTotal,
+  validateSplit,
+  MAX_SPLIT_PARTS,
+  MIN_SPLIT_PARTS,
+  type SplitPart,
+} from '../lib/splits'
 import type { TransactionInput } from '../hooks/useTransactions'
+import '../ledger.css'
 
 // 「最近の記録から入力」などの外部プリフィル。nonce が変わるたびに適用される(日付は現在の選択を維持)
 export interface FormPrefill {
@@ -57,9 +70,42 @@ interface Props {
   prefill?: FormPrefill
   // 任意: 日付だけの差し替え(履歴カレンダーから「その日で入力する」)
   datePrefill?: DatePrefill
-  // 任意: 「彼女の負担分」の現在入力値を親に通知(トグルOFF・非支出時は 0)
-  onPartnerAmountChange?: (amount: number) => void
+  /**
+   * 任意: 入力中の1件が預かり残高に与える影響額を親に通知する(符号つき)。
+   * 彼女の負担分だけならマイナス、彼女が払いすぎた回はプラス (機能018)。
+   * トグルOFF・非支出時は 0。
+   */
+  onPartnerImpactChange?: (impact: number) => void
+  /**
+   * 任意: 1件を複数カテゴリに分けて保存する (機能096)。
+   * 渡されたときだけ分割の導線を出す(編集シートでは分割しない)。
+   */
+  onSubmitSplit?: (inputs: TransactionInput[]) => Promise<void>
+  /** 任意: タグの候補を出すための既存の記録 (機能088) */
+  knownTransactions?: readonly Transaction[]
 }
+
+/**
+ * 支払った人 (機能018)。
+ * 既定は 'me'(自分が全額)で、これは機能018 より前の唯一の前提でもある。
+ */
+type Payer = 'me' | 'partner' | 'both'
+
+function initialPayer(initial?: Transaction): Payer {
+  if (!initial) return 'me'
+  const paid = partnerPaid(initial)
+  if (paid <= 0) return 'me'
+  return paid >= initial.amount ? 'partner' : 'both'
+}
+
+const PAYER_OPTIONS: readonly { id: Payer; label: string }[] = [
+  { id: 'me', label: '自分が全額' },
+  { id: 'partner', label: '彼女が全額' },
+  { id: 'both', label: '分けて払った' },
+]
+
+/** タグの候補に出す件数。多すぎると詳細欄が縦に伸びて入力の邪魔になる */
+const TAG_SUGGESTION_LIMIT = 8
 
 export default function TransactionForm({
   initial,
@@ -69,7 +115,9 @@ export default function TransactionForm({
   fixedType,
   prefill,
   datePrefill,
-  onPartnerAmountChange,
+  onPartnerImpactChange,
+  onSubmitSplit,
+  knownTransactions,
 }: Props) {
   const type = fixedType ?? initial?.type ?? 'expense'
   const isExpense = type === 'expense'
@@ -86,6 +134,24 @@ export default function TransactionForm({
   )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // ---- 後から足した列に依存する項目。列が無い環境では導線ごと出さない ----
+  const settlementAvailable = useTxFeature('settlement') // 機能018
+  const taggingAvailable = useTxFeature('tagging') // 機能088 / 096
+
+  // 機能018: 支払った人。既定は「自分が全額」= これまでの前提なので、
+  // 何も触らなければ入力の手数はまったく増えない
+  const [payer, setPayer] = useState<Payer>(() => initialPayer(initial))
+  const [partnerPaidInput, setPartnerPaidInput] = useState(
+    initial && partnerPaid(initial) > 0 ? String(partnerPaid(initial)) : ''
+  )
+
+  // 機能088: タグ
+  const [tags, setTags] = useState<string[]>(() => (initial ? tagsOf(initial) : []))
+  const [tagDraft, setTagDraft] = useState('')
+
+  // 機能096: 分割。開いている間だけ内訳を持つ(閉じれば普通の1件に戻る)
+  const [splitParts, setSplitParts] = useState<SplitPart[] | null>(null)
   // 金額入力の簡易電卓(保留中の値と演算子)。数字は入力欄か自前テンキーから入る
   const [calc, setCalc] = useState<{ pendingValue: number | null; pendingOp: CalcOp | null }>({
     pendingValue: null,
@@ -215,6 +281,13 @@ export default function TransactionForm({
     setStore(prefill.store)
     setWithPartner(prefill.partner_amount > 0)
     setPartnerAmount(prefill.partner_amount > 0 ? String(prefill.partner_amount) : '')
+    // テンプレート・レシート・最近の記録から入れ直すときは、
+    // 前の1件の「支払った人」「タグ」「分割」を持ち越さない
+    setPayer('me')
+    setPartnerPaidInput('')
+    setTags([])
+    setTagDraft('')
+    setSplitParts(null)
     // レシート読み取りのように店名だけ入ってくる場合も、手入力と同じ経路でカテゴリを補う
     setCategory(prefill.category)
     setAutoCategory(null)
@@ -243,6 +316,43 @@ export default function TransactionForm({
   const amountNum = Number(resolvedAmount)
   const partnerNum = withPartner ? Number(partnerAmount || 0) : 0
 
+  // 機能018: 彼女が実際に払った額。
+  // 「彼女が全額」は金額を打ち直させない(支払い総額と必ず一致させる)
+  const partnerPaidNum = !isExpense
+    ? 0
+    : payer === 'partner'
+      ? amountNum
+      : payer === 'both'
+        ? Number(partnerPaidInput || 0)
+        : 0
+
+  // 機能096: 分割中か。編集シート(onSubmitSplit 無し)では分割しない
+  const splitting = splitParts !== null
+  const splitValidation = splitting ? validateSplit(splitParts, amountNum) : null
+
+  // 機能088: 打ちかけの文字列をタグとして確定する(Enter と、欄から離れたとき)
+  const commitTagDraft = () => {
+    const parsed = parseTagInput(tagDraft)
+    if (parsed.length === 0) {
+      setTagDraft('')
+      return
+    }
+    setTags(sanitizeTags([...tags, ...parsed]))
+    setTagDraft('')
+  }
+
+  // 過去に使ったタグの候補。すでに付いているものは出さない
+  const tagSuggestions = collectTags(knownTransactions ?? [], 30)
+    .filter((t) => !tags.includes(t.tag))
+    .slice(0, TAG_SUGGESTION_LIMIT)
+
+  // 機能096: 内訳の1つを書き換える
+  const updatePart = (index: number, patch: Partial<SplitPart>) => {
+    setSplitParts((prev) =>
+      prev === null ? prev : prev.map((p, i) => (i === index ? { ...p, ...patch } : p))
+    )
+  }
+
   const runOperator = (op: CalcOp) => {
     const next = pressOperator(calcState, op)
     setAmount(next.input)
@@ -270,18 +380,46 @@ export default function TransactionForm({
     setAmount(pressBackspace(calcState).input)
   }
 
-  // 彼女の負担分の入力値を親に通知(残高カードの「差引後」表示用)
+  // 入力中の1件が残高に与える影響額を親に通知(残高カードの見込み表示用)。
+  // 分割中は内訳の負担分の合計で見る(機能096 は各行が負担分を持つ)
   useEffect(() => {
-    if (!onPartnerAmountChange) return
-    const n = isExpense && withPartner ? Number(partnerAmount || 0) : 0
-    onPartnerAmountChange(Number.isFinite(n) && n > 0 ? n : 0)
-  }, [isExpense, withPartner, partnerAmount, onPartnerAmountChange])
+    if (!onPartnerImpactChange) return
+    if (!isExpense) {
+      onPartnerImpactChange(0)
+      return
+    }
+    if (splitting && splitParts) {
+      const sum = splitParts.reduce((s, p) => s + (Number.isFinite(p.partnerAmount) ? p.partnerAmount : 0), 0)
+      onPartnerImpactChange(-sum)
+      return
+    }
+    const owed = withPartner ? Number(partnerAmount || 0) : 0
+    const paid = Number.isFinite(partnerPaidNum) ? partnerPaidNum : 0
+    const impact = paid - (Number.isFinite(owed) && owed > 0 ? owed : 0)
+    onPartnerImpactChange(Number.isFinite(impact) ? impact : 0)
+  }, [
+    isExpense,
+    withPartner,
+    partnerAmount,
+    partnerPaidNum,
+    splitting,
+    splitParts,
+    onPartnerImpactChange,
+  ])
+
+  const partnerPaidValid =
+    !isExpense ||
+    payer === 'me' ||
+    (Number.isInteger(partnerPaidNum) && partnerPaidNum > 0 && partnerPaidNum <= amountNum)
 
   const valid =
     Number.isInteger(amountNum) &&
     amountNum > 0 &&
     (!isExpense || !withPartner || (Number.isInteger(partnerNum) && partnerNum >= 0 && partnerNum <= amountNum)) &&
-    (!isExpense || category !== null)
+    partnerPaidValid &&
+    // 分割中は内訳が完全に揃っていることが保存の条件。
+    // ここを緩めると支出の合計と預かり残高が静かにずれる
+    (!splitting ? !isExpense || category !== null : (splitValidation?.ok ?? false))
 
   const dateChips = [
     { label: '今日', value: daysAgoISO(0) },
@@ -297,6 +435,10 @@ export default function TransactionForm({
     store.trim(),
     memo.trim(),
     withPartner && partnerNum > 0 ? `彼女 ${yen(partnerNum)}` : '',
+    // 畳んだままでも「誰が払ったか」「タグ」「分割中か」が分かるようにする
+    isExpense && payer !== 'me' ? (payer === 'partner' ? '彼女が支払い' : '割り勘払い') : '',
+    tags.length > 0 ? tags.map((t) => `#${t}`).join(' ') : '',
+    splitting ? '分割中' : '',
   ]
     .filter((s) => s !== '')
     .join('・')
@@ -319,7 +461,9 @@ export default function TransactionForm({
     setBusy(true)
     setError(null)
     try {
-      await onSubmit({
+      // 打ちかけのタグ(確定していない文字列)も取りこぼさずに拾う
+      const finalTags = sanitizeTags([...tags, ...parseTagInput(tagDraft)])
+      const payload: TransactionInput = {
         date,
         type,
         amount: amountNum,
@@ -329,7 +473,17 @@ export default function TransactionForm({
         partner_amount: isExpense ? partnerNum : 0,
         // 列が無い環境では送らない(同期が止まらないように)
         ...(isExpense && satisfactionAvailable ? { satisfaction } : {}),
-      })
+        ...(isExpense && settlementAvailable ? { partner_paid: partnerPaidNum } : {}),
+        ...(taggingAvailable ? { tags: finalTags } : {}),
+      }
+
+      // 機能096: 分割は「カテゴリごとの独立した記録」としてまとめて保存する。
+      // 1行にまとめないので、レポートの集計も残高の足し算も既存のまま正しい
+      if (splitting && splitParts && onSubmitSplit) {
+        await onSubmitSplit(buildSplitInputs(payload, splitParts, crypto.randomUUID()))
+      } else {
+        await onSubmit(payload)
+      }
       // 新規入力時のみリセット(編集モーダルは親が閉じる)
       if (!initial) {
         setAmount('')
@@ -340,6 +494,12 @@ export default function TransactionForm({
         setPartnerAmount('')
         setAutoCategory(null)
         setSatisfaction(null)
+        // 支払った人・タグ・分割も1件ごとの事実なので次には持ち越さない
+        setPayer('me')
+        setPartnerPaidInput('')
+        setTags([])
+        setTagDraft('')
+        setSplitParts(null)
         if (continueAfter) {
           setStreak((n) => n + 1)
           setLastSavedAmount(amountNum)
@@ -360,6 +520,14 @@ export default function TransactionForm({
 
   return (
     <div className="form-col">
+      {/* 機能096: 分割された記録であることを編集画面で明示する。
+          この行だけを直しても他の内訳は変わらない、と分かるようにするため */}
+      {initial && isSplitPart(initial) && (
+        <p className="muted">
+          <span className="split-badge">分割</span> 1回の会計を分けた記録のうちの1件です(この行だけが変わります)
+        </p>
+      )}
+
       {/* 機能051: カテゴリ → 金額の順に並べる(最短2タップ+数字で保存まで届く) */}
       {isExpense && (
         <div>
@@ -497,7 +665,10 @@ export default function TransactionForm({
           aria-expanded={detailsOpen}
           onClick={() => setDetailsOpen(!detailsOpen)}
         >
-          <span className="detail-toggle-label">日付・お店・メモ{isExpense ? '・彼女の分' : ''}</span>
+          <span className="detail-toggle-label">
+            日付・お店・メモ{isExpense ? '・彼女の分' : ''}
+            {taggingAvailable ? '・タグ' : ''}
+          </span>
           <span className="detail-toggle-summary">{detailSummary}</span>
           <span className="detail-toggle-caret" aria-hidden="true">
             {detailsOpen ? '▲' : '▼'}
@@ -619,6 +790,196 @@ export default function TransactionForm({
                       </button>
                     </div>
                   </>
+                )}
+              </div>
+            )}
+
+            {/* 機能018: 誰が払ったか。既定の「自分が全額」は今までの前提そのものなので、
+                触らなければ手数は増えない。分割中は使わない(splits.ts の理由を参照) */}
+            {isExpense && settlementAvailable && !splitting && (
+              <div className="field">
+                <span>支払った人</span>
+                <div className="payer-row" role="group" aria-label="支払った人">
+                  {PAYER_OPTIONS.map((o) => (
+                    <button
+                      key={o.id}
+                      type="button"
+                      className={`payer-chip${payer === o.id ? ' selected' : ''}`}
+                      aria-pressed={payer === o.id}
+                      onClick={() => setPayer(o.id)}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+                {payer === 'both' && (
+                  <>
+                    <div className="field">
+                      <span>そのうち彼女が払った額(円)</span>
+                      <AmountTextInput
+                        ariaLabel="彼女が払った額"
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={partnerPaidInput}
+                        onChange={setPartnerPaidInput}
+                      />
+                    </div>
+                    {!partnerPaidValid && partnerPaidInput !== '' && (
+                      <p className="error-text">彼女が払った額は、支払い金額までにしてください</p>
+                    )}
+                  </>
+                )}
+                {payer !== 'me' && (
+                  <p className="muted payer-note">
+                    彼女が払った {yen(partnerPaidNum || 0)} と負担分 {yen(partnerNum)} の差が、
+                    預かり残高に反映されます
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* 機能088: タグ。付けたい人だけが開く「詳細」の中に置く */}
+            {taggingAvailable && (
+              <div className="field tag-field">
+                <span>タグ(任意・{MAX_TAGS_PER_TX}個まで)</span>
+                {tags.length > 0 && (
+                  <div className="tag-chips">
+                    {tags.map((tag) => (
+                      <span key={tag} className="tag-chip is-on">
+                        #{tag}
+                        <button
+                          type="button"
+                          className="tag-chip-remove"
+                          aria-label={`タグ ${tag} を外す`}
+                          onClick={() => setTags(tags.filter((x) => x !== tag))}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <input
+                  type="text"
+                  aria-label="タグ"
+                  placeholder="例: 旅行2026 デート(空白で区切る)"
+                  value={tagDraft}
+                  autoComplete="off"
+                  onChange={(e) => setTagDraft(e.target.value)}
+                  onBlur={commitTagDraft}
+                  onKeyDown={(e) => {
+                    // Enter で確定。フォーム送信は起きない(button type=button のため)
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      commitTagDraft()
+                    }
+                  }}
+                />
+                {tagSuggestions.length > 0 && (
+                  <div className="tag-chips">
+                    {tagSuggestions.map((s) => (
+                      <button
+                        key={s.tag}
+                        type="button"
+                        className="tag-chip"
+                        onClick={() => setTags(sanitizeTags([...tags, s.tag]))}
+                      >
+                        #{s.tag}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 機能096: 分割。入力タブからのみ(編集シートでは各行を個別に直す) */}
+            {isExpense && taggingAvailable && onSubmitSplit && (
+              <div className="form-col">
+                {!splitting ? (
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    disabled={!Number.isInteger(amountNum) || amountNum <= 0}
+                    onClick={() => setSplitParts(evenSplit(amountNum, 2, category))}
+                  >
+                    カテゴリを分けて記録する
+                  </button>
+                ) : (
+                  <div className="split-block">
+                    <p className="muted">
+                      内訳ごとに1件ずつ記録します。上のカテゴリではなく、下の内訳のカテゴリで残ります
+                    </p>
+                    {splitParts.map((p, i) => (
+                      <div className="split-part" key={i}>
+                        <div className="split-part-head">
+                          <span>内訳 {i + 1}</span>
+                          {splitParts.length > MIN_SPLIT_PARTS && (
+                            <button
+                              type="button"
+                              className="btn-ghost"
+                              onClick={() => setSplitParts(splitParts.filter((_, j) => j !== i))}
+                            >
+                              削除
+                            </button>
+                          )}
+                        </div>
+                        <select
+                          className="split-cat-select"
+                          aria-label={`内訳 ${i + 1} のカテゴリ`}
+                          value={p.category ?? ''}
+                          onChange={(e) =>
+                            updatePart(i, { category: e.target.value === '' ? null : e.target.value })
+                          }
+                        >
+                          <option value="">カテゴリを選ぶ</option>
+                          {categories.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.label}
+                            </option>
+                          ))}
+                        </select>
+                        <AmountTextInput
+                          ariaLabel={`内訳 ${i + 1} の金額`}
+                          inputMode="numeric"
+                          placeholder="金額"
+                          value={p.amount > 0 ? String(p.amount) : ''}
+                          onChange={(v) => updatePart(i, { amount: Number(v || 0) })}
+                        />
+                        <AmountTextInput
+                          ariaLabel={`内訳 ${i + 1} の彼女の負担分`}
+                          inputMode="numeric"
+                          placeholder="彼女の負担分(任意)"
+                          value={p.partnerAmount > 0 ? String(p.partnerAmount) : ''}
+                          onChange={(v) => updatePart(i, { partnerAmount: Number(v || 0) })}
+                        />
+                      </div>
+                    ))}
+                    <p
+                      className={`split-remaining${splitValidation && !splitValidation.ok ? ' is-off' : ''}`}
+                      aria-live="polite"
+                    >
+                      内訳の合計 {yen(splitTotal(splitParts))} / 支払い {yen(amountNum || 0)}
+                      {splitValidation?.message ? ` — ${splitValidation.message}` : ' — そろっています'}
+                    </p>
+                    <div className="split-actions">
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        disabled={splitParts.length >= MAX_SPLIT_PARTS}
+                        onClick={() =>
+                          setSplitParts([
+                            ...splitParts,
+                            { category: null, amount: 0, partnerAmount: 0 },
+                          ])
+                        }
+                      >
+                        内訳を足す
+                      </button>
+                      <button type="button" className="btn-ghost" onClick={() => setSplitParts(null)}>
+                        分割をやめる
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             )}

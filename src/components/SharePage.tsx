@@ -7,8 +7,10 @@ import {
 } from '../lib/shareView'
 import { formatDate, yen } from '../lib/format'
 import { categoryLabel } from '../lib/categories'
+import { partnerViewWording } from '../lib/partnerBalance'
 import CommentThread from './CommentThread'
 import '../share.css'
+import '../ledger.css'
 
 // ============================================================
 // 閲覧専用の共有ページ (機能179 / 185)
@@ -102,7 +104,9 @@ function ShareContent({
     return out
   }, [data.comments])
 
-  const balanceText = data.balance < 0 ? `-${yen(Math.abs(data.balance))}` : yen(data.balance)
+  // 機能011: 符号ではなく言葉で意味を伝える。
+  // 主語が彼女側になるので、利用者の画面とは別の言い回しを使う
+  const wording = partnerViewWording(data.balance)
 
   const submitComment = async (transactionId: string, body: string): Promise<string | null> => {
     const r = await postShareComment(token, transactionId, body)
@@ -128,13 +132,9 @@ function ShareContent({
       </header>
 
       <div className="card share-hero">
-        <div className="label">のこっているお金</div>
-        <div className={`value ${data.balance < 0 ? 'negative' : ''}`}>{balanceText}</div>
-        <p className="note">
-          {data.balance < 0
-            ? 'あずけた分より多く使っています'
-            : 'あずけたお金から、あなたの分を引いた残りです'}
-        </p>
+        <div className="label">{wording.title}</div>
+        <div className={`value ${data.balance < 0 ? 'negative' : ''}`}>{yen(wording.magnitude)}</div>
+        <p className="note">{wording.note}</p>
       </div>
 
       <div className="card">
@@ -152,8 +152,17 @@ function ShareContent({
                   <span className="share-row-body">
                     <span className="share-row-title">{c.store || label || 'お買いもの'}</span>
                     <span className="share-row-sub">{sub}</span>
+                    {/* 機能018: あなたが払った回は、そのことも書かないと
+                        「引かれただけ」に見えてしまう */}
+                    {c.paid > 0 && (
+                      <span className="share-row-sub share-row-paid">
+                        このお会計は、あなたが {yen(c.paid)} 払いました
+                      </span>
+                    )}
                   </span>
-                  <span className="share-row-amount">-{yen(c.amount)}</span>
+                  <span className="share-row-amount">
+                    {c.amount > 0 ? `-${yen(c.amount)}` : '—'}
+                  </span>
                 </div>
                 <CommentThread
                   comments={comments}
@@ -194,6 +203,45 @@ function ShareContent({
           })
         )}
       </div>
+
+      {/* 機能012: 返金と調整。残高が動いた理由を隠さないために必ず出す。
+          1件も無いとき(または古いサーバー)は節ごと出さない */}
+      {data.settlements.length > 0 && (
+        <div className="card">
+          <h2>返したお金・直したところ</h2>
+          {data.settlements.map((s) => {
+            const comments = commentsByTx[s.id] ?? []
+            const title =
+              s.kind === 'partner_refund'
+                ? 'あなたに返しました'
+                : s.amount >= 0
+                  ? 'のこりを増やす直し'
+                  : 'のこりを減らす直し'
+            return (
+              <div className="movement-item" key={s.id}>
+                <div className="share-row">
+                  <span className="share-row-body">
+                    <span className="share-row-title">{title}</span>
+                    <span className="share-row-sub">{formatDate(s.date)}</span>
+                    {s.memo !== '' && (
+                      <span className="share-row-sub share-settlement-note">{s.memo}</span>
+                    )}
+                  </span>
+                  <span className={`share-row-amount${s.amount > 0 ? ' positive' : ''}`}>
+                    {s.amount > 0 ? `+${yen(s.amount)}` : `-${yen(-s.amount)}`}
+                  </span>
+                </div>
+                <CommentThread
+                  comments={comments}
+                  viewer="partner"
+                  maxLength={data.maxCommentLength}
+                  onSubmit={(body) => submitComment(s.id, body)}
+                />
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       <p className="share-footer">
         このページは、リンクを知っている人なら誰でも見られます。
