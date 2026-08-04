@@ -2,6 +2,16 @@ import { useEffect, useState } from 'react'
 import { useCategories, visualFromEmojiValue } from '../lib/categories'
 import { CategoryVisualBadge } from './categoryIcons'
 import { daysAgoISO, todayISO } from '../lib/format'
+import {
+  EMPTY_CALC,
+  OP_LABEL,
+  clearAll,
+  pressEquals,
+  pressOperator,
+  resolveForSubmit,
+  type CalcOp,
+  type CalcState,
+} from '../lib/calc'
 import type { Transaction } from '../lib/types'
 import type { TransactionInput } from '../hooks/useTransactions'
 
@@ -54,10 +64,21 @@ export default function TransactionForm({
   )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 金額入力の簡易電卓(保留中の値と演算子)。数字は既存の入力欄から入る
+  const [calc, setCalc] = useState<{ pendingValue: number | null; pendingOp: CalcOp | null }>({
+    pendingValue: null,
+    pendingOp: null,
+  })
+
+  // 編集モーダルの対象が変わったら計算途中の状態を持ち越さない
+  useEffect(() => {
+    setCalc(EMPTY_CALC)
+  }, [initial])
 
   // 外部プリフィル適用(日付は prefill.date があるときだけ更新)
   useEffect(() => {
     if (!prefill) return
+    setCalc(EMPTY_CALC) // 計算途中の状態が混ざらないようにリセット
     setAmount(String(prefill.amount))
     if (prefill.date) setDate(prefill.date)
     setCategory(prefill.category)
@@ -67,8 +88,29 @@ export default function TransactionForm({
     setPartnerAmount(prefill.partner_amount > 0 ? String(prefill.partner_amount) : '')
   }, [prefill])
 
-  const amountNum = Number(amount)
+  const calcState: CalcState = { input: amount, pendingValue: calc.pendingValue, pendingOp: calc.pendingOp }
+  // ＝ の押し忘れに備え、保留中の計算を評価した値を「確定した金額」として扱う
+  const resolvedAmount = resolveForSubmit(calcState).input
+  const amountNum = Number(resolvedAmount)
   const partnerNum = withPartner ? Number(partnerAmount || 0) : 0
+
+  const runOperator = (op: CalcOp) => {
+    const next = pressOperator(calcState, op)
+    setAmount(next.input)
+    setCalc({ pendingValue: next.pendingValue, pendingOp: next.pendingOp })
+  }
+
+  const runEquals = () => {
+    const next = pressEquals(calcState)
+    setAmount(next.input)
+    setCalc({ pendingValue: next.pendingValue, pendingOp: next.pendingOp })
+  }
+
+  const runClear = () => {
+    const next = clearAll()
+    setAmount(next.input)
+    setCalc({ pendingValue: next.pendingValue, pendingOp: next.pendingOp })
+  }
 
   // 彼女の負担分の入力値を親に通知(残高カードの「差引後」表示用)
   useEffect(() => {
@@ -90,6 +132,11 @@ export default function TransactionForm({
   ]
 
   const submit = async () => {
+    // 保留中の計算があれば評価してから保存する(＝の押し忘れ対策)。画面にも結果を反映
+    if (calc.pendingOp !== null) {
+      setAmount(resolvedAmount)
+      setCalc(EMPTY_CALC)
+    }
     setBusy(true)
     setError(null)
     try {
@@ -105,6 +152,7 @@ export default function TransactionForm({
       // 新規入力時のみリセット(編集モーダルは親が閉じる)
       if (!initial) {
         setAmount('')
+        setCalc(EMPTY_CALC)
         setMemo('')
         setStore('')
         setWithPartner(false)
@@ -123,7 +171,7 @@ export default function TransactionForm({
         <span>{isExpense ? '支払い金額(円)' : '預かり金額(円)'}</span>
         <div className="amount-row">
           <input
-            className="amount-input"
+            className={`amount-input ${amountNum < 0 ? 'negative' : ''}`}
             type="number"
             inputMode="numeric"
             min={1}
@@ -131,14 +179,38 @@ export default function TransactionForm({
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
           />
-          <button
-            type="button"
-            className="amount-clear"
-            aria-label="金額をクリア"
-            onClick={() => setAmount('')}
-          >
+          <button type="button" className="amount-clear" aria-label="金額をクリア" onClick={runClear}>
             C
           </button>
+        </div>
+        <div className="calc-bar">
+          <div className="calc-status" aria-live="polite">
+            {calc.pendingOp !== null && calc.pendingValue !== null && (
+              <span className="calc-pending">
+                {calc.pendingValue.toLocaleString('ja-JP')} {OP_LABEL[calc.pendingOp]}
+              </span>
+            )}
+            {amountNum < 0 && <span className="calc-warn">マイナスの金額は保存できません</span>}
+          </div>
+          <div className="calc-keys">
+            <button type="button" className="calc-key" aria-label="足す" onClick={() => runOperator('+')}>
+              ＋
+            </button>
+            <button type="button" className="calc-key" aria-label="引く" onClick={() => runOperator('-')}>
+              −
+            </button>
+            <button type="button" className="calc-key" aria-label="掛ける" onClick={() => runOperator('×')}>
+              ×
+            </button>
+            <button
+              type="button"
+              className="calc-key calc-key-equals"
+              aria-label="計算する"
+              onClick={runEquals}
+            >
+              ＝
+            </button>
+          </div>
         </div>
       </div>
 
