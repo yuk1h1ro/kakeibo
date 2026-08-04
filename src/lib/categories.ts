@@ -152,12 +152,6 @@ export function categoryLabel(id: string | null): string {
   return c ? c.label : id
 }
 
-export function categoryEmoji(id: string | null): string {
-  if (!id) return '📦'
-  const c = resolve(id)
-  return c ? c.emoji : '📦'
-}
-
 // ---------- カテゴリの見た目の解決(絵文字 / 線画アイコン) ----------
 
 /** カテゴリの表示形態。icon は categoryIcons.tsx の CategoryIcon で描画する */

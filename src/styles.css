@@ -881,13 +881,6 @@ textarea:focus {
 
 /* ---------- 履歴リスト ---------- */
 
-.tx-group-date {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
-  margin: 6px 0 4px;
-}
-
 .tx-row {
   display: flex;
   align-items: center;

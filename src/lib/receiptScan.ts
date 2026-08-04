@@ -417,11 +417,6 @@ export function extractModelEntries(payload: unknown): GeminiModelInfo[] {
   return entries
 }
 
-/** models 一覧レスポンスからモデルID(models/ を除いた形)を取り出す。(純粋関数) */
-export function extractModelIds(payload: unknown): string[] {
-  return extractModelEntries(payload).map(toModelId)
-}
-
 /** "models/gemini-3-flash" → "gemini-3-flash" */
 function toModelId(m: { name: string }): string {
   return m.name.trim().replace(/^models\//, '')

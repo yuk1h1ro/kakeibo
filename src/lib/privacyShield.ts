@@ -280,11 +280,6 @@ function notify(): void {
   for (const l of listeners) l()
 }
 
-/** 設置済みの目隠し。まだ設置されていなければ null */
-export function getPrivacyShield(): PrivacyShieldHandle | null {
-  return installed
-}
-
 /**
  * いまオンかどうか。
  * 目隠しが設置されていない場面 (テスト等) でも設定は表示できるべきなので、

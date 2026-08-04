@@ -41,10 +41,6 @@ export function satisfactionLabel(value: Satisfaction | null): string {
   return SATISFACTION_OPTIONS.find((o) => o.value === value)?.label ?? '未設定'
 }
 
-export function satisfactionEmoji(value: Satisfaction | null): string {
-  return SATISFACTION_OPTIONS.find((o) => o.value === value)?.emoji ?? ''
-}
-
 /**
  * まとめて仕分ける対象(機能143)。スタンプが未設定の支出を新しい順に返す。(純粋関数)
  * 古い記録ほど「どう感じたか」を思い出せないので、新しい順のまま上限で打ち切る。

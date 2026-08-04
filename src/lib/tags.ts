@@ -95,8 +95,3 @@ export function matchesAnyTag(t: Transaction, selected: readonly string[]): bool
   const own = tagsOf(t)
   return selected.some((tag) => own.includes(tag))
 }
-
-/** 表示用の「#タグ」文字列。(純粋関数) */
-export function tagChipLabel(tag: string): string {
-  return `#${tag}`
-}

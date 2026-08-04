@@ -43,11 +43,3 @@ export function removeOp(opId: string): PendingOp[] {
   saveQueue(ops)
   return ops
 }
-
-export function clearQueue(): void {
-  try {
-    localStorage.removeItem(QUEUE_KEY)
-  } catch {
-    // no-op
-  }
-}

@@ -205,14 +205,6 @@
   cursor: pointer;
 }
 
-.tag-row-label {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
 /* ---------- 分割 (機能096) ---------- */
 
 .split-block {
