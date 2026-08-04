@@ -24,7 +24,7 @@ import {
   matchStoreSuggestions,
   useStoreCategories,
 } from '../lib/storeCategories'
-import type { Satisfaction, Transaction } from '../lib/types'
+import type { Satisfaction, Transaction, TransactionType } from '../lib/types'
 import { partnerPaid, satisfactionOf, tagsOf } from '../lib/types'
 import { useTxFeature } from '../lib/txExtensions'
 import { collectTags, parseTagInput, sanitizeTags, MAX_TAGS_PER_TX } from '../lib/tags'
@@ -98,6 +98,14 @@ function initialPayer(initial?: Transaction): Payer {
   return paid >= initial.amount ? 'partner' : 'both'
 }
 
+/** 金額欄の見出し。種別ごとに何の金額を打つのかを明示する */
+const AMOUNT_LABEL: Record<TransactionType, string> = {
+  expense: '支払い金額(円)',
+  partner_deposit: '預かり金額(円)',
+  partner_refund: '返した金額(円)',
+  partner_adjust: '調整する金額(円)',
+}
+
 const PAYER_OPTIONS: readonly { id: Payer; label: string }[] = [
   { id: 'me', label: '自分が全額' },
   { id: 'partner', label: '彼女が全額' },
@@ -121,9 +129,18 @@ export default function TransactionForm({
 }: Props) {
   const type = fixedType ?? initial?.type ?? 'expense'
   const isExpense = type === 'expense'
+  // 手動調整 (機能012) だけは残高への影響が符号つき。
+  // 入力欄では絶対値を扱い、向きは専用のボタンで選ばせる
+  // (符号を数字に打たせると、マイナスの打ち間違いが残高に直結する)
+  const isAdjust = type === 'partner_adjust'
   const categories = useCategories()
 
-  const [amount, setAmount] = useState(initial ? String(initial.amount) : '')
+  const [amount, setAmount] = useState(
+    initial ? String(isAdjust ? Math.abs(initial.amount) : initial.amount) : ''
+  )
+  const [adjustSign, setAdjustSign] = useState<1 | -1>(
+    initial && isAdjust && initial.amount < 0 ? -1 : 1
+  )
   const [category, setCategory] = useState<string | null>(initial?.category ?? null)
   const [date, setDate] = useState(initial?.date ?? todayISO())
   const [memo, setMemo] = useState(initial?.memo ?? '')
@@ -466,7 +483,7 @@ export default function TransactionForm({
       const payload: TransactionInput = {
         date,
         type,
-        amount: amountNum,
+        amount: isAdjust ? adjustSign * amountNum : amountNum,
         category: isExpense ? category : null,
         memo: memo.trim(),
         store: isExpense ? store.trim() : '',
@@ -555,13 +572,38 @@ export default function TransactionForm({
         </div>
       )}
 
+      {/* 機能012: 調整の向き。編集シートから開いたときもここで直せる */}
+      {isAdjust && (
+        <div className="field">
+          <span>どちらに直しますか</span>
+          <div className="payer-row" role="group" aria-label="調整の向き">
+            <button
+              type="button"
+              className={`payer-chip${adjustSign === 1 ? ' selected' : ''}`}
+              aria-pressed={adjustSign === 1}
+              onClick={() => setAdjustSign(1)}
+            >
+              残高を増やす
+            </button>
+            <button
+              type="button"
+              className={`payer-chip${adjustSign === -1 ? ' selected' : ''}`}
+              aria-pressed={adjustSign === -1}
+              onClick={() => setAdjustSign(-1)}
+            >
+              残高を減らす
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="field">
-        <span>{isExpense ? '支払い金額(円)' : '預かり金額(円)'}</span>
+        <span>{AMOUNT_LABEL[type]}</span>
         <div className="amount-row">
           <AmountTextInput
             inputRef={amountRef}
             className={`amount-input ${amountNum < 0 ? 'negative' : ''}`}
-            ariaLabel={isExpense ? '支払い金額' : '預かり金額'}
+            ariaLabel={AMOUNT_LABEL[type]}
             /* テンキー使用中も readOnly にはしない — 貼り付け・選択を殺さず、
                OS のキーボードだけを呼ばないようにする */
             inputMode={keypadEnabled ? 'none' : 'numeric'}

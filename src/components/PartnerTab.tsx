@@ -28,6 +28,7 @@ import {
   DEFAULT_LOW_BALANCE_THRESHOLD,
   balanceWording,
   isLowBalance,
+  ledgerRowTitle,
   partnerBalance,
   partnerImpact,
   partnerMovements,
@@ -343,20 +344,6 @@ interface MovementRowProps {
   onSubmitComment: (body: string) => Promise<string | null>
 }
 
-/** 支出以外(預かり・返金・調整)の見出し。何で残高が動いたのかを言葉で出す */
-function ledgerTitle(tx: Transaction): string {
-  switch (tx.type) {
-    case 'partner_deposit':
-      return '彼女から預かり'
-    case 'partner_refund':
-      return '彼女に返金'
-    case 'partner_adjust':
-      return tx.amount >= 0 ? '調整(残高を増やした)' : '調整(残高を減らした)'
-    default:
-      return ''
-  }
-}
-
 function MovementRow({ tx, onEdit, comments, onOpenThread, onSubmitComment }: MovementRowProps) {
   const [open, setOpen] = useState(false)
   const isExpense = tx.type === 'expense'
@@ -366,7 +353,7 @@ function MovementRow({ tx, onEdit, comments, onOpenThread, onSubmitComment }: Mo
     ? resolveCategoryVisual(tx.category)
     : ({ kind: 'icon', icon: 'wallet' } as const)
   // タイトルの優先順位: お店 → メモ → カテゴリ名
-  const title = isExpense ? tx.store || tx.memo || categoryLabel(tx.category) : ledgerTitle(tx)
+  const title = isExpense ? tx.store || tx.memo || categoryLabel(tx.category) : ledgerRowTitle(tx)
 
   const subParts: string[] = [formatDate(tx.date)]
   if (!isExpense) {

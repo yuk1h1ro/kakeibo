@@ -137,6 +137,24 @@ export function partnerViewWording(balance: number): BalanceWording {
   }
 }
 
+/**
+ * 支出以外(預かり・返金・調整)の行の見出し。(純粋関数)
+ * 履歴・彼女タブ・長押しメニューで同じ言い方をするために1か所に置く。
+ * 支出のときは空文字(呼び出し側がお店・メモ・カテゴリ名から作る)。
+ */
+export function ledgerRowTitle(t: { type: TransactionType; amount: number }): string {
+  switch (t.type) {
+    case 'partner_deposit':
+      return '彼女から預かり'
+    case 'partner_refund':
+      return '彼女に返金'
+    case 'partner_adjust':
+      return t.amount >= 0 ? '調整(残高を増やした)' : '調整(残高を減らした)'
+    case 'expense':
+      return ''
+  }
+}
+
 // ---------- 残高の低下アラート (機能010) ----------
 
 /** しきい値の既定値(円)。設定画面から変えられる */

@@ -11,6 +11,7 @@ import type { Transaction } from '../lib/types'
 import { categoryLabel } from '../lib/categories'
 import { formatDate, yen } from '../lib/format'
 import { ownAmount } from '../lib/types'
+import { ledgerRowTitle, partnerImpact } from '../lib/partnerBalance'
 import { IconCopy, IconEdit, IconTrash } from './historyIcons'
 
 interface Props {
@@ -22,9 +23,11 @@ interface Props {
 }
 
 export default function RowActionMenu({ tx, onDuplicate, onEdit, onDelete, onClose }: Props) {
-  const isDeposit = tx.type === 'partner_deposit'
-  const what = isDeposit ? '彼女から預かり' : tx.store || tx.memo || categoryLabel(tx.category)
-  const amount = isDeposit ? tx.amount : ownAmount(tx)
+  // 預かり・返金・調整は専用の見出しと「残高への影響額」で出す
+  // (支出と同じ書き方にすると、返金・調整が ¥0 の行に見えてしまう)
+  const isExpense = tx.type === 'expense'
+  const what = isExpense ? tx.store || tx.memo || categoryLabel(tx.category) : ledgerRowTitle(tx)
+  const amount = isExpense ? ownAmount(tx) : Math.abs(partnerImpact(tx))
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
