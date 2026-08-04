@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PendingOp } from './offlineQueue'
 import type { Guidance } from './errorGuidance'
 import {
@@ -251,5 +251,131 @@ describe('quarantineGuidance', () => {
     const g = quarantineGuidance(base, 1)
     expect(g.actions).toContain('入力内容を確かめてください。')
     expect(g.detail).toBe('23514')
+  })
+})
+
+// ============================================================
+// 隔離箱の出し入れ(ここが壊れると記録が本当に消えるので、実物の入出力を確かめる)
+// node には localStorage が無いので、最小の代役を差し込んでから読み込む。
+// ============================================================
+
+function installStorage(options: { failWrites?: boolean } = {}): Map<string, string> {
+  const map = new Map<string, string>()
+  const storage = {
+    getItem: (k: string) => map.get(k) ?? null,
+    setItem: (k: string, v: string) => {
+      if (options.failWrites) throw new Error('QuotaExceededError')
+      map.set(k, v)
+    },
+    removeItem: (k: string) => {
+      map.delete(k)
+    },
+  }
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: storage,
+    configurable: true,
+    writable: true,
+  })
+  return map
+}
+
+/** モジュール内のキャッシュを持ち越さないよう、毎回読み込み直す */
+async function freshModule() {
+  vi.resetModules()
+  return await import('./quarantine')
+}
+
+const sampleOps = [
+  op({ opId: 'o1', payload: payload({ amount: 1000, split_group: 'g1' }) }),
+  op({ opId: 'o2', payload: payload({ amount: 2000, split_group: 'g1' }) }),
+]
+
+describe('隔離箱の保存と取り出し', () => {
+  beforeEach(() => {
+    installStorage()
+  })
+
+  it('入れたものがそのまま出てくる', async () => {
+    const q = await freshModule()
+    expect(q.quarantineOps(sampleOps, 'rejected', '23514')).toBe(true)
+    const list = q.loadQuarantine()
+    expect(list).toHaveLength(1)
+    expect(list[0].ops.map((o) => o.opId)).toEqual(['o1', 'o2'])
+    expect(list[0].detail).toBe('23514')
+    expect(q.quarantineCount()).toBe(1)
+  })
+
+  it('再読み込みしても残る(痕跡がゼロにならない)', async () => {
+    const first = await freshModule()
+    first.quarantineOps(sampleOps, 'repeated', null)
+    // 端末を開き直したのと同じ状態にする
+    const second = await freshModule()
+    expect(second.quarantineCount()).toBe(1)
+    expect(second.loadQuarantine()[0].ops).toHaveLength(2)
+  })
+
+  it('保存できなかったときは false を返し、何も起きない(捨てない判断ができる)', async () => {
+    installStorage({ failWrites: true })
+    const q = await freshModule()
+    expect(q.quarantineOps(sampleOps, 'rejected', null)).toBe(false)
+    expect(q.quarantineCount()).toBe(0)
+  })
+
+  it('破棄したものだけが消える', async () => {
+    const q = await freshModule()
+    q.quarantineOps([sampleOps[0]], 'rejected', null)
+    q.quarantineOps([sampleOps[1]], 'rejected', null)
+    const [newer, older] = q.loadQuarantine()
+    expect(q.discardQuarantineEntry(newer.id)).toBe(true)
+    expect(q.loadQuarantine().map((e) => e.id)).toEqual([older.id])
+    expect(q.findQuarantineEntry(newer.id)).toBeNull()
+    // 先に隔離したほう(古い箱)がそのまま残っている
+    expect(q.findQuarantineEntry(older.id)?.ops[0].opId).toBe('o1')
+  })
+
+  it('op が空なら箱を作らない', async () => {
+    const q = await freshModule()
+    expect(q.quarantineOps([], 'rejected', null)).toBe(true)
+    expect(q.quarantineCount()).toBe(0)
+  })
+
+  it('壊れた JSON が入っていても落ちない(空として扱う)', async () => {
+    const map = installStorage()
+    map.set('kakeibo.quarantine', '{壊れている')
+    const q = await freshModule()
+    expect(q.loadQuarantine()).toEqual([])
+  })
+})
+
+describe('断られた回数の記録', () => {
+  beforeEach(() => {
+    installStorage()
+  })
+
+  it('同じ op を数え、成功したら忘れる', async () => {
+    const q = await freshModule()
+    expect(q.recordSyncFailure('op1')).toBe(1)
+    expect(q.recordSyncFailure('op1')).toBe(2)
+    expect(q.recordSyncFailure('op2')).toBe(1)
+    q.clearSyncFailures(['op1'])
+    expect(q.recordSyncFailure('op1')).toBe(1)
+    expect(q.recordSyncFailure('op2')).toBe(2)
+  })
+
+  it('端末を開き直しても回数が続く(詰まったキューがいつまでも進まないのを防ぐ)', async () => {
+    const first = await freshModule()
+    first.recordSyncFailure('op1')
+    first.recordSyncFailure('op1')
+    const second = await freshModule()
+    expect(second.recordSyncFailure('op1')).toBe(3)
+  })
+
+  it('限度に達するまでは隔離しない(migration を実行すれば通る失敗を守る)', async () => {
+    const q = await freshModule()
+    let n = 0
+    for (let i = 0; i < SYNC_ATTEMPT_LIMIT; i++) {
+      n = q.recordSyncFailure('op1')
+      expect(reachedAttemptLimit(n)).toBe(i === SYNC_ATTEMPT_LIMIT - 1)
+    }
   })
 })

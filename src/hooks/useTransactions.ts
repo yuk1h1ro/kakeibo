@@ -277,6 +277,9 @@ export function useTransactions(supabase: SupabaseClient) {
       rows: readonly Transaction[]
     ): number | null => {
       const group = opsToQuarantine(loadQueue(), op)
+      // 取り消す相手は「手元で内容が分かっている行」だけに限る。
+      // split_group でまとめてサーバーから消す手もあるが、それだと中身を
+      // 隔離箱に持っていけない = 記録を失う。見えている範囲だけを丁寧に扱う
       const siblings = persistedSplitSiblings(rows, splitGroupOf(op), group)
       // 消す前に、同じ内容で入れ直せる形にして隔離箱へ持っていく
       const undoOps: PendingOp[] = siblings.map((row) => ({
