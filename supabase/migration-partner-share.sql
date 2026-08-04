@@ -116,8 +116,15 @@ create table if not exists public.partner_share_comments (
   -- データの持ち主(= 利用者)。彼女の書き込みでは RPC がリンクの持ち主を入れる。
   user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
 
-  -- コメント先の明細。明細が消えたらコメントも消える。
-  transaction_id uuid not null references public.transactions (id) on delete cascade,
+  -- コメント先の明細のID。
+  --
+  -- **わざと外部キーを張っていません。** 以前は on delete cascade 付きの
+  -- 外部キーだったため、削除の取り消し (機能159) で同じIDの行を入れ直しても、
+  -- delete がサーバーに届いた時点でコメントが物理削除されており、戻りませんでした。
+  -- 明細が消えている間はコメントが見えなくなるだけ(下の関数が
+  -- transactions と join しているので、見えない明細のコメントは返らない)で、
+  -- 行そのものは残ります。行を戻せばコメントも一緒に戻ります。
+  transaction_id uuid not null,
 
   -- 書いた人。'owner' = 利用者(アプリから) / 'partner' = 彼女(共有ページから)
   author text not null check (author in ('owner', 'partner')),
@@ -163,6 +170,33 @@ create policy "delete_own_partner_share_comments"
   on public.partner_share_comments
   for delete
   using (auth.uid() = user_id);
+
+-- すでにこのテーブルを作ってある環境から、明細への外部キー(on delete cascade)を外す。
+-- 制約を落とすだけなので、**いま入っているコメントは1件も消えません**。
+-- 名前を決め打ちにしないのは、作られた時期によって制約名が違い得るため。
+do $$
+declare
+  c record;
+begin
+  if to_regclass('public.partner_share_comments') is null then
+    return;
+  end if;
+  for c in
+    select con.conname
+      from pg_constraint con
+      join pg_class rel on rel.oid = con.conrelid
+      join pg_namespace ns on ns.oid = rel.relnamespace
+     where ns.nspname = 'public'
+       and rel.relname = 'partner_share_comments'
+       and con.contype = 'f'
+       and con.confrelid = to_regclass('public.transactions')
+  loop
+    execute format(
+      'alter table public.partner_share_comments drop constraint %I', c.conname
+    );
+  end loop;
+end
+$$;
 
 create index if not exists idx_partner_share_comments_user_id
   on public.partner_share_comments (user_id);
@@ -256,25 +290,55 @@ $$;
 --
 -- security definer なので RLS を越えて transactions を読めますが、
 -- **返すのは彼女に関係する行だけ**です:
---   - 預かり金の残高
+--   - 預かり金の残高(返金・調整・彼女が払った分まで含めた、アプリと同じ式)
 --   - 預かった履歴 (type = 'partner_deposit')
---   - 彼女の負担分がある支出だけ (partner_amount > 0)。しかも返す金額は
---     partner_amount のみで、支払い総額 (amount) は絶対に返しません。
---   - 利用者個人の支出 (partner_amount = 0) は1行も返しません。
+--   - 返金・手動調整 (機能012)
+--   - 彼女に関係する支出だけ(彼女の負担があるか、彼女が払った回)。
+--     返す金額は彼女の負担額と彼女が払った額だけで、
+--     支払い総額 (amount) は絶対に返しません。
+--   - 利用者個人の支出は1行も返しません。
 --
 -- トークンが無い・無効化済み・期限切れのときは、区別せず {"ok": false} を返します
 -- (存在の有無を漏らさないため)。
+--
+-- ---- ここが migration-partner-ledger.sql と同じ内容である理由 ----
+-- 以前このファイルには返金・調整・partner_paid を知らない古い定義が残っており、
+-- ledger を適用したあとにこのファイルをもう一度実行すると create or replace で
+-- **古い定義に巻き戻り**、彼女の画面の残高が返金分だけ増え、
+-- 「返したお金・直したところ」が消えていました。
+-- 両方のファイルが「何度実行しても安全」であるためには、定義が一致している必要があります。
+--
+-- partner_paid 列は migration-partner-ledger.sql で足すものなので、
+-- **この列がまだ無い環境でも通る**ように、列の有無を見て関数本文を組み立てます
+-- (plpgsql の本文は作成時に列の存在を確かめないため、素直に書くと
+--  実行した瞬間ではなく彼女がページを開いた瞬間に落ちてしまう)。
 -- ------------------------------------------------------------
+do $mig$
+declare
+  -- 列がまだ無ければ「彼女は1円も払っていない」= 0 として扱う。
+  -- ledger を適用済みの環境では本物の列を読む
+  v_paid text := case
+    when exists (
+      select 1 from information_schema.columns
+       where table_schema = 'public'
+         and table_name = 'transactions'
+         and column_name = 'partner_paid'
+    ) then 'coalesce(t.partner_paid, 0)'
+    else '0'
+  end;
+begin
+  execute replace($tpl$
 create or replace function public.partner_share_view(p_token text)
 returns jsonb
 language plpgsql
 security definer
 set search_path = public, pg_temp
-as $$
+as $fn$
 declare
   v_link public.partner_share_links;
   v_balance integer;
   v_deposits jsonb;
+  v_settlements jsonb;
   v_charges jsonb;
   v_comments jsonb;
 begin
@@ -297,8 +361,15 @@ begin
   -- 「最後に見られた日」を利用者の画面に出すために更新する
   update public.partner_share_links set last_viewed_at = now() where id = v_link.id;
 
-  -- 残高 = 預かった額の合計 − 彼女の負担分の合計
-  select coalesce(sum(case when t.type = 'partner_deposit' then t.amount else -t.partner_amount end), 0)
+  -- 残高 = Σ(1件ごとの影響額)。アプリ側 (partnerBalance.ts) と同じ式にすること
+  select coalesce(sum(
+           case t.type
+             when 'partner_deposit' then t.amount
+             when 'partner_refund'  then -t.amount
+             when 'partner_adjust'  then t.amount
+             else @PAID@ - t.partner_amount
+           end
+         ), 0)
     into v_balance
     from public.transactions t
    where t.user_id = v_link.user_id;
@@ -316,7 +387,27 @@ begin
    where t.user_id = v_link.user_id
      and t.type = 'partner_deposit';
 
-  -- 彼女の負担分がある支出だけ。amount(支払い総額)は含めない。
+  -- 返金・調整 (機能012)。amount は残高への影響額(符号つき)で返す
+  select coalesce(
+           jsonb_agg(
+             jsonb_build_object(
+               'id', t.id,
+               'date', t.date,
+               'kind', t.type,
+               'amount', case when t.type = 'partner_refund' then -t.amount else t.amount end,
+               'memo', t.memo
+             )
+             order by t.date desc, t.created_at desc
+           ),
+           '[]'::jsonb
+         )
+    into v_settlements
+    from public.transactions t
+   where t.user_id = v_link.user_id
+     and t.type in ('partner_refund', 'partner_adjust');
+
+  -- 彼女に関係する支出。支払い総額 (amount) は含めない。
+  -- paid = 彼女自身が払った額 (機能018)。
   -- カテゴリ名は彼女の端末では解決できないので、ここで表示名まで解決して返す。
   select coalesce(
            jsonb_agg(
@@ -325,6 +416,7 @@ begin
                'date', t.date,
                'store', t.store,
                'amount', t.partner_amount,
+               'paid', @PAID@,
                'category', t.category,
                'category_label', c.label
              )
@@ -338,9 +430,11 @@ begin
       on c.user_id = t.user_id and c.cat_key = t.category
    where t.user_id = v_link.user_id
      and t.type = 'expense'
-     and t.partner_amount > 0;
+     and (t.partner_amount > 0 or @PAID@ > 0);
 
-  -- 上で返した明細に紐づくコメントだけを返す
+  -- 上で返した明細に紐づくコメントだけを返す。
+  -- transactions と join しているので、明細が消えている間のコメント(orphan)は
+  -- 返らない = 彼女には見えない。行を戻せばまた見えるようになる
   select coalesce(
            jsonb_agg(
              jsonb_build_object(
@@ -359,19 +453,26 @@ begin
     join public.transactions t on t.id = cm.transaction_id
    where cm.user_id = v_link.user_id
      and t.user_id = v_link.user_id
-     and (t.type = 'partner_deposit' or (t.type = 'expense' and t.partner_amount > 0));
+     and (
+       t.type in ('partner_deposit', 'partner_refund', 'partner_adjust')
+       or (t.type = 'expense' and (t.partner_amount > 0 or @PAID@ > 0))
+     );
 
   return jsonb_build_object(
     'ok', true,
     'balance', v_balance,
     'deposits', v_deposits,
+    'settlements', v_settlements,
     'charges', v_charges,
     'comments', v_comments,
     'expires_at', v_link.expires_at,
     'max_comment_length', 300
   );
 end;
-$$;
+$fn$;
+  $tpl$, '@PAID@', v_paid);
+end
+$mig$;
 
 -- ------------------------------------------------------------
 -- 6. partner_share_add_comment(token, transaction_id, body) — 彼女の書き込み
@@ -382,7 +483,24 @@ $$;
 --   c. 直近1分間に3件まで、直近24時間に50件まで(リンク単位)
 --   d. コメントを付けられるのは「彼女に見えている明細」だけ。
 --      他人の明細IDを当てても書けないし、存在の有無も返さない
+--
+-- 見える範囲は上の partner_share_view と必ずそろえること
+-- (返金・調整・彼女が払った回にもコメントを書けるようにするため)。
+-- こちらも partner_paid 列が無い環境で通るように組み立てます。
 -- ------------------------------------------------------------
+do $mig$
+declare
+  v_paid text := case
+    when exists (
+      select 1 from information_schema.columns
+       where table_schema = 'public'
+         and table_name = 'transactions'
+         and column_name = 'partner_paid'
+    ) then 'coalesce(t.partner_paid, 0)'
+    else '0'
+  end;
+begin
+  execute replace($tpl$
 create or replace function public.partner_share_add_comment(
   p_token text,
   p_transaction_id uuid,
@@ -392,7 +510,7 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = public, pg_temp
-as $$
+as $fn$
 declare
   v_link public.partner_share_links;
   v_body text;
@@ -448,7 +566,10 @@ begin
     from public.transactions t
    where t.id = p_transaction_id
      and t.user_id = v_link.user_id
-     and (t.type = 'partner_deposit' or (t.type = 'expense' and t.partner_amount > 0))
+     and (
+       t.type in ('partner_deposit', 'partner_refund', 'partner_adjust')
+       or (t.type = 'expense' and (t.partner_amount > 0 or @PAID@ > 0))
+     )
    limit 1;
 
   if v_visible is not true then
@@ -473,7 +594,10 @@ begin
     )
   );
 end;
-$$;
+$fn$;
+  $tpl$, '@PAID@', v_paid);
+end
+$mig$;
 
 -- ------------------------------------------------------------
 -- 7. 関数の実行権限

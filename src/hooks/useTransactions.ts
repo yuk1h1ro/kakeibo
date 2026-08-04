@@ -658,7 +658,14 @@ export function useTransactions(supabase: SupabaseClient) {
    * 抜き取る方式だと「まさに送信中だった delete」と競合し、
    * サーバー上は消えたのに取り消せたつもりになる = データを失う恐れがあるため。
    * delete → insert の順で送れば、どちらのタイミングでも最後は「在る」に落ち着く。
-   * 行IDを変えないので、共有ページのコメントなど取引IDを指すものとの縁も切れない。
+   *
+   * 共有ページのコメントとの結び付きも、行IDを変えないことで戻る。
+   * ただし「縁が切れない」わけではない — delete がサーバーに届いた瞬間、
+   * コメントは *見えなくなる*(共有ページの関数が transactions と join しているため)。
+   * 以前は partner_share_comments の外部キーが on delete cascade で、
+   * この瞬間にコメントが **物理削除** され、同じIDで入れ直しても戻らなかった。
+   * 外部キーを外して orphan を許すようにしたので、いまは行を戻せば
+   * コメントもそのまま戻る(supabase/migration-partner-share.sql)。
    */
   const restoreMany = useCallback(
     async (txs: readonly Transaction[]) => {
