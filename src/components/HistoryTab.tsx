@@ -13,6 +13,8 @@ type Store = ReturnType<typeof useTransactions>
 interface Props {
   store: Store
   onEdit: (t: Transaction) => void
+  /** その日付で入力タブを開く(機能053) */
+  onStartInput: (date: string) => void
 }
 
 interface DaySummary {
@@ -20,7 +22,7 @@ interface DaySummary {
   deposit: number
 }
 
-export default function HistoryTab({ store, onEdit }: Props) {
+export default function HistoryTab({ store, onEdit, onStartInput }: Props) {
   const today = todayISO()
   const currentMonth = monthKey(today)
   const [month, setMonth] = useState(currentMonth)
@@ -123,7 +125,8 @@ export default function HistoryTab({ store, onEdit }: Props) {
                 key={cell.iso}
                 className={cls}
                 onClick={() => setSelected(cell.iso)}
-                aria-label={`${formatDate(cell.iso)}を選択`}
+                // タップは「その日の明細を見る」— 入力を始めるのは下の専用ボタン(機能053)
+                aria-label={`${formatDate(cell.iso)}の明細を見る`}
                 aria-pressed={isSelected}
               >
                 <span className="cal-day">{cell.day}</span>
@@ -139,6 +142,8 @@ export default function HistoryTab({ store, onEdit }: Props) {
             )
           })}
         </div>
+        {/* 日付タップの意味を明示する。入力を始めるのは下の専用ボタン(機能053) */}
+        <p className="muted cal-tap-hint">日付をタップすると、その日の明細が下に出ます</p>
       </div>
 
       <div className="card">
@@ -151,6 +156,9 @@ export default function HistoryTab({ store, onEdit }: Props) {
         ) : (
           dayTx.map((t) => <TxRow key={t.id} tx={t} onEdit={onEdit} />)
         )}
+        <button className="btn-ghost day-input-btn" onClick={() => onStartInput(selected)}>
+          ＋ {formatDate(selected)}で入力する
+        </button>
       </div>
     </>
   )

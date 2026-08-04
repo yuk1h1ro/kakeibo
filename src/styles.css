@@ -1410,3 +1410,317 @@ body.keypad-open .app-main {
 body.keypad-open .modal-sheet {
   padding-bottom: calc(340px + env(safe-area-inset-bottom));
 }
+
+/* ============================================================
+   入力導線の作り直し (機能051 / 047 / 048) と感情スタンプ (機能219)
+   ここから下はこの一連の機能のためのセクション。既存の定義には触れていない。
+   ============================================================ */
+
+/* ---------- 詳細(必須でない項目)の折りたたみ ---------- */
+
+.detail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 畳んでいても中身が分かるよう、ラベル・要約・開閉印を1行に並べる */
+.detail-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--baseline);
+  border-radius: var(--radius-btn);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 16px;
+  text-align: left;
+}
+
+.detail-toggle-label {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+/* 要約は長くなりがちなので、横スクロールを出さずに省略する */
+.detail-toggle-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.detail-toggle-caret {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.detail-body {
+  padding-top: 2px;
+}
+
+/* ---------- 保存ボタン(主 = 記録する / 副 = 保存して続ける) ---------- */
+
+.save-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+/* 主のほうを広く取り、色で塗る。副は枠線だけにして役割の差を出す */
+.save-main {
+  flex: 1.4;
+  min-width: 0;
+}
+
+.btn-secondary {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  padding: 13px 8px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-btn);
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 16px;
+  font-weight: 700;
+  transition: transform 0.08s ease, filter 0.08s ease;
+}
+
+.btn-secondary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn-secondary:active:not(:disabled) {
+  transform: scale(0.97);
+  filter: brightness(0.92);
+}
+
+@media (prefers-color-scheme: dark) {
+  .btn-secondary:active:not(:disabled) {
+    filter: brightness(1.25);
+  }
+}
+
+/* 連続保存の手応え(何件目まで入ったかが分かる1行) */
+.streak-note {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--income);
+  text-align: center;
+}
+
+/* ---------- 感情スタンプ (機能219) ---------- */
+
+.stamp-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.stamp-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 8px 4px;
+  border: 1px solid var(--baseline);
+  border-radius: var(--radius-btn);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 16px;
+  font-weight: 600;
+  transition: transform 0.08s ease, filter 0.08s ease, background-color 0.08s ease;
+}
+
+.stamp-btn .stamp-emoji {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.stamp-btn.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.stamp-btn:active:not(:disabled) {
+  transform: scale(0.97);
+  filter: brightness(0.92);
+}
+
+@media (prefers-color-scheme: dark) {
+  .stamp-btn:active:not(:disabled) {
+    filter: brightness(1.25);
+  }
+}
+
+.stamp-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---------- レポートの振り返りカード (機能219) ---------- */
+
+.sat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sat-lead {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.sat-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.sat-strong {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.sat-counts {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sat-count {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 4px;
+  border-radius: var(--radius-btn);
+  background: var(--fill);
+}
+
+.sat-count-emoji {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.sat-count-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sat-count-value {
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.sat-sort-btn {
+  width: 100%;
+  font-size: 16px;
+}
+
+/* ---------- まとめて仕分ける画面 (機能143) ---------- */
+
+.sort-progress {
+  text-align: center;
+}
+
+/* 1件ずつ大きく出す。横に払う操作の対象なので、内側に余白を多めに取る */
+.sort-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  margin: 8px 0 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-1);
+  touch-action: pan-y;
+}
+
+.sort-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sort-card-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sort-store {
+  font-size: 16px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sort-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.sort-amount {
+  font-size: 28px;
+  font-weight: 700;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sort-hint {
+  line-height: 1.5;
+}
+
+.sort-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sort-action {
+  flex-direction: column;
+  gap: 2px;
+  min-height: 60px;
+  font-size: 16px;
+}
+
+.sort-skip {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 16px;
+}
+
+.sort-done {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 0 8px;
+  text-align: center;
+}
+
+.sort-done-title {
+  font-size: 16px;
+  font-weight: 700;
+}

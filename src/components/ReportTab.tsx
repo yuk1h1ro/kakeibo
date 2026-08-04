@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import type { Transaction } from '../lib/types'
+import type { Satisfaction, Transaction } from '../lib/types'
 import {
   formatDate,
   formatMonth,
@@ -23,14 +23,21 @@ import {
   rankByCategory,
   rankByStore,
   rankByTransaction,
+  satisfactionSummary,
   totalOwn,
   totalPartner,
   weekdayStats,
 } from '../lib/report'
 import type { RankItem } from '../lib/report'
+import {
+  SATISFACTION_OPTIONS,
+  pendingSatisfactionTargets,
+  useSatisfactionAvailable,
+} from '../lib/satisfaction'
 import { useSwipeNav } from '../hooks/useSwipeNav'
 import CategoryBars from './charts/CategoryBars'
 import MonthlyTrend from './charts/MonthlyTrend'
+import SatisfactionSortSheet from './SatisfactionSortSheet'
 import VerticalBars from './charts/VerticalBars'
 
 // 月表示と任意期間表示。任意期間では「前月比」「月次推移」のような
@@ -42,7 +49,13 @@ type Metric = 'average' | 'total'
 // 最初に見せる件数。それ以上は「もっと見る」で開く
 const TOP_N = 5
 
-export default function ReportTab({ transactions }: { transactions: Transaction[] }) {
+interface ReportTabProps {
+  transactions: Transaction[]
+  /** 感情スタンプの付け直し(機能143)。列が無い環境では呼ばれない */
+  onSetSatisfaction: (t: Transaction, value: Satisfaction) => Promise<void>
+}
+
+export default function ReportTab({ transactions, onSetSatisfaction }: ReportTabProps) {
   const today = todayISO()
   const currentMonth = monthKey(today)
 
@@ -56,6 +69,9 @@ export default function ReportTab({ transactions }: { transactions: Transaction[
   const [metric, setMetric] = useState<Metric>('average')
   // スワイプ・月送りの向き。CSS のスライドイン方向に使う(reduced motion 時は CSS 側で無効)
   const [navDir, setNavDir] = useState<'prev' | 'next'>('next')
+  // 感情スタンプ (機能219 + 143)
+  const satisfactionAvailable = useSatisfactionAvailable()
+  const [showSortSheet, setShowSortSheet] = useState(false)
 
   const swipeRef = useRef<HTMLDivElement>(null)
 
@@ -100,8 +116,15 @@ export default function ReportTab({ transactions }: { transactions: Transaction[
       txRank: rankByTransaction(transactions, range),
       weekdays: weekdayStats(transactions, range),
       hours: hourBandStats(transactions, range),
+      satisfaction: satisfactionSummary(transactions, range),
     }
   }, [transactions, range.start, range.end])
+
+  // 仕分けの対象は期間に関係なく「まだ付いていない支出」全部(新しい順)
+  const sortTargets = useMemo(
+    () => (satisfactionAvailable ? pendingSatisfactionTargets(transactions) : []),
+    [transactions, satisfactionAvailable]
+  )
 
   // 前月比は月表示のときだけ意味を持つ
   const prevTotal = useMemo(
@@ -136,6 +159,10 @@ export default function ReportTab({ transactions }: { transactions: Transaction[
   const shownRank = rankExpanded ? rankItems : rankItems.slice(0, TOP_N)
 
   const shownStores = storeExpanded ? stats.stores : stats.stores.slice(0, TOP_N)
+
+  // 「今月の」「2026年7月の」「この期間の」— 振り返りの文章に使う
+  const periodLabel =
+    mode === 'range' ? 'この期間' : isCurrentMonth ? '今月' : formatMonth(month)
 
   const weekdayData = stats.weekdays.map((d) => ({
     label: d.label,
@@ -388,8 +415,73 @@ export default function ReportTab({ transactions }: { transactions: Transaction[
               )}
             </>
           )}
+
+          {/* 219 + 143: 感情スタンプの振り返り。既存のカードには手を触れず末尾に足す。
+              曜日は date から正確に出せるが、時間帯は出さない
+              (created_at は「記録した時刻」で、支出した時刻ではないため) */}
+          {satisfactionAvailable &&
+            (stats.satisfaction.stampedCount > 0 || sortTargets.length > 0) && (
+              <div className="card sat-card">
+                <h2>気分の振り返り</h2>
+                {stats.satisfaction.regretCount > 0 ? (
+                  <>
+                    <p className="sat-lead">
+                      {periodLabel}の後悔支出{' '}
+                      <span className="sat-strong">
+                        {stats.satisfaction.regretCount}件・{yen(stats.satisfaction.regretTotal)}
+                      </span>
+                    </p>
+                    {stats.satisfaction.worstWeekday && (
+                      <p className="sat-sub">
+                        後悔が多いのは{' '}
+                        <span className="sat-strong">
+                          {stats.satisfaction.worstWeekday.label}曜日
+                        </span>
+                        ({stats.satisfaction.worstWeekday.count}件・
+                        {yen(stats.satisfaction.worstWeekday.total)})
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="sat-lead">{periodLabel}に「後悔」は付いていません</p>
+                )}
+
+                {stats.satisfaction.stampedCount > 0 && (
+                  <ul className="sat-counts">
+                    {SATISFACTION_OPTIONS.map((o) => (
+                      <li key={o.value} className="sat-count">
+                        <span className="sat-count-emoji" aria-hidden="true">
+                          {o.emoji}
+                        </span>
+                        <span className="sat-count-label">{o.label}</span>
+                        <span className="sat-count-value">
+                          {stats.satisfaction.counts[o.value]}件
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {sortTargets.length > 0 && (
+                  <button className="btn-ghost sat-sort-btn" onClick={() => setShowSortSheet(true)}>
+                    まだ気分が付いていない{sortTargets.length}件を仕分ける
+                  </button>
+                )}
+                <p className="caveat">
+                  曜日は記録の日付から出しています。支出した時刻は持っていないため、時間帯は出していません。
+                </p>
+              </div>
+            )}
         </div>
       </div>
+
+      {showSortSheet && (
+        <SatisfactionSortSheet
+          targets={sortTargets}
+          onAssign={onSetSatisfaction}
+          onClose={() => setShowSortSheet(false)}
+        />
+      )}
     </>
   )
 }

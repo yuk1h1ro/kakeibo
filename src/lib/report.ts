@@ -3,8 +3,8 @@
 // 日付は 'YYYY-MM-DD' の文字列で扱い、Date は「曜日」「日数差」を出すときだけ
 // ローカルタイムで組み立てて使う(toISOString を使うと TZ でずれるため)。
 
-import type { Transaction } from './types'
-import { ownAmount } from './types'
+import type { Satisfaction, Transaction } from './types'
+import { ownAmount, satisfactionOf } from './types'
 import { WEEKDAY_LABELS } from './calendar'
 
 /** 両端を含む期間 */
@@ -276,6 +276,71 @@ export function hourBandStats(txs: readonly Transaction[], r: DateRange): HourBa
       }
     }),
     unknownCount,
+  }
+}
+
+// ---------- 感情スタンプ (機能219 + 143) ----------
+// 曜日は date から正確に出せる。時間帯は出さない —
+// created_at は「記録した時刻」であって「支出した時刻」ではないため。
+
+export interface RegretWeekday {
+  dow: number // 0=日
+  label: string
+  count: number
+  total: number
+}
+
+export interface SatisfactionSummary {
+  /** スタンプ別の件数(未設定を含む) */
+  counts: Record<Satisfaction | 'unset', number>
+  regretCount: number
+  regretTotal: number
+  /** スタンプが付いている支出の件数(0 なら振り返りを出す意味がない) */
+  stampedCount: number
+  /** 後悔がいちばん多い曜日。後悔が1件も無ければ null */
+  worstWeekday: RegretWeekday | null
+}
+
+/** 期間内の支出を感情スタンプで集計する。金額は自分の実質支出で数える */
+export function satisfactionSummary(
+  txs: readonly Transaction[],
+  r: DateRange
+): SatisfactionSummary {
+  const counts: Record<Satisfaction | 'unset', number> = {
+    good: 0,
+    neutral: 0,
+    regret: 0,
+    unset: 0,
+  }
+  let regretTotal = 0
+  const byDow: RegretWeekday[] = WEEKDAY_LABELS.map((label, dow) => ({
+    dow,
+    label,
+    count: 0,
+    total: 0,
+  }))
+
+  for (const t of ownExpenses(txs, r)) {
+    const s = satisfactionOf(t)
+    counts[s ?? 'unset'] += 1
+    if (s !== 'regret') continue
+    regretTotal += ownAmount(t)
+    const d = byDow[dayOfWeek(t.date)]
+    d.count += 1
+    d.total += ownAmount(t)
+  }
+
+  // 件数 → 金額 → 曜日順で必ず決まる比較にする(同数のときに並びがブレないように)
+  const worst = byDow
+    .filter((d) => d.count > 0)
+    .sort((a, b) => b.count - a.count || b.total - a.total || a.dow - b.dow)[0]
+
+  return {
+    counts,
+    regretCount: counts.regret,
+    regretTotal,
+    stampedCount: counts.good + counts.neutral + counts.regret,
+    worstWeekday: worst ?? null,
   }
 }
 

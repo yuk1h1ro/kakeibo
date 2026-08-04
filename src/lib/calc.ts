@@ -115,8 +115,12 @@ export function clearAll(): CalcState {
    入力欄の文字列を組み立てるだけなので、pendingValue / pendingOp には触らない。
    ------------------------------------------------------------ */
 
-/** 金額として現実的な桁数の上限。押し続けても Number の精度を壊さないための歯止め */
-const MAX_DIGITS = 9
+/**
+ * 金額として現実的な桁数の上限。押し続けても Number の精度を壊さないための歯止め。
+ * 桁区切り(amountFormat.ts)も同じ上限で切るので export している。
+ */
+export const MAX_AMOUNT_DIGITS = 9
+const MAX_DIGITS = MAX_AMOUNT_DIGITS
 
 /**
  * テンキーの数字キー(0〜9 と 00)を押したときの遷移。

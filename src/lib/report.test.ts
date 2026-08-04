@@ -14,6 +14,7 @@ import {
   rankByCategory,
   rankByStore,
   rankByTransaction,
+  satisfactionSummary,
   totalOwn,
   totalPartner,
   weekdayStats,
@@ -337,5 +338,52 @@ describe('年換算', () => {
     expect(annualFromRange(1000, 10)).toBe(36500)
     expect(annualFromRange(0, 10)).toBe(0)
     expect(annualFromRange(1000, 0)).toBe(0) // 0除算を避ける
+  })
+})
+
+describe('satisfactionSummary — 感情スタンプの振り返り', () => {
+  const r = monthRange('2026-08')
+
+  it('スタンプ別の件数と後悔の合計を出す', () => {
+    const txs = [
+      tx({ date: '2026-08-03', amount: 1200, satisfaction: 'regret' }),
+      tx({ date: '2026-08-04', amount: 800, satisfaction: 'regret' }),
+      tx({ date: '2026-08-05', amount: 500, satisfaction: 'good' }),
+      tx({ date: '2026-08-06', amount: 300 }), // 未設定
+    ]
+    const got = satisfactionSummary(txs, r)
+    expect(got.counts).toEqual({ good: 1, neutral: 0, regret: 2, unset: 1 })
+    expect(got.regretCount).toBe(2)
+    expect(got.regretTotal).toBe(2000)
+    expect(got.stampedCount).toBe(3)
+  })
+
+  it('後悔の金額は彼女の負担分を除いた自分の実質支出で数える', () => {
+    const txs = [tx({ date: '2026-08-03', amount: 1000, partner_amount: 400, satisfaction: 'regret' })]
+    expect(satisfactionSummary(txs, r).regretTotal).toBe(600)
+  })
+
+  it('後悔が多い曜日を返す(2026-08-07 は金曜)', () => {
+    const txs = [
+      tx({ date: '2026-08-07', amount: 100, satisfaction: 'regret' }),
+      tx({ date: '2026-08-14', amount: 100, satisfaction: 'regret' }),
+      tx({ date: '2026-08-05', amount: 900, satisfaction: 'regret' }),
+    ]
+    const got = satisfactionSummary(txs, r)
+    expect(got.worstWeekday?.label).toBe('金')
+    expect(got.worstWeekday?.count).toBe(2)
+    expect(got.worstWeekday?.total).toBe(200)
+  })
+
+  it('後悔が1件も無ければ曜日は出さない', () => {
+    const txs = [tx({ date: '2026-08-03', satisfaction: 'good' })]
+    expect(satisfactionSummary(txs, r).worstWeekday).toBeNull()
+  })
+
+  it('期間外の記録は数えない', () => {
+    const txs = [tx({ date: '2026-07-31', satisfaction: 'regret' })]
+    const got = satisfactionSummary(txs, r)
+    expect(got.regretCount).toBe(0)
+    expect(got.stampedCount).toBe(0)
   })
 })

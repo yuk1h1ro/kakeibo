@@ -187,3 +187,21 @@
   padding: 12px 0 4px;
   text-align: center;
 }
+
+/* ---------- 日付タップの2つの意味を分ける (機能053) ---------- */
+
+/* セルのタップは「見る」— 入力を始めるのは日別カードの専用ボタン */
+.cal-tap-hint {
+  margin-top: 10px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.day-input-btn {
+  width: 100%;
+  margin-top: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--accent);
+  border-color: var(--accent);
+}
