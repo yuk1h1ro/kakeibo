@@ -200,7 +200,10 @@ export default function PartnerSettlementSheet({ balance, onSubmit, onClose }: P
           {busy ? '保存中…' : def.submitLabel}
         </button>
         <p className="muted settle-note">
-          どの操作も履歴に1件の記録として残ります(あとから編集・削除もできます)
+          どの操作も履歴に1件の記録として残ります(あとから編集・削除もできます)。
+          日付・金額と、ここに書いた{mode === 'adjust' ? '理由' : 'メモ'}は
+          <strong>共有リンクの画面にも表示されます</strong>
+          — 残高が動いた理由を彼女からも追えるようにするためです
         </p>
       </div>
     </div>
