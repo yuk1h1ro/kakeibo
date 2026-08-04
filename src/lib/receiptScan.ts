@@ -51,9 +51,23 @@ export function hasGeminiKey(): boolean {
   return key !== null && key.trim() !== ''
 }
 
-/** Gemini の APIキーらしい形式か(AIza で始まる39文字前後)。違っても保存自体は許可する */
+/**
+ * Gemini の APIキーらしい形式か。違っても保存自体は許可する(警告を出すだけ)。
+ * - 新形式(Auth key, 2026年〜): `AQ.` で始まる。文字種・長さは今後変わりうるので緩く見る
+ * - 旧形式(Standard key): `AIza` で始まる39文字前後
+ */
 export function looksLikeGeminiKey(key: string): boolean {
-  return /^AIza[0-9A-Za-z_-]{30,50}$/.test(key)
+  return /^AQ\.[A-Za-z0-9_.-]{20,}$/.test(key) || /^AIza[0-9A-Za-z_-]{30,50}$/.test(key)
+}
+
+/**
+ * APIキーの送り方。新形式(`AQ.…`)は `?key=` クエリでは通らず、
+ * `x-goog-api-key` ヘッダーでのみ受け付けられる。旧形式(`AIza…`)も
+ * このヘッダーで動くため、形式で分岐せずヘッダー方式に一本化する。
+ * URL にキーを載せないので、履歴やアクセスログへの漏洩も防げる。
+ */
+function apiKeyHeader(key: string): Record<string, string> {
+  return { 'x-goog-api-key': key }
 }
 
 export interface ReceiptScanResult {
@@ -313,7 +327,11 @@ export interface TestResponseLike {
   status: number
   text: () => Promise<string>
 }
-export type FetchLike = (url: string) => Promise<TestResponseLike>
+export interface RequestInitLike {
+  method?: string
+  headers?: Record<string, string>
+}
+export type FetchLike = (url: string, init?: RequestInitLike) => Promise<TestResponseLike>
 
 /**
  * 保存済みAPIキーで疎通確認する。モデル一覧の取得(GET)だけなので課金されない。
@@ -324,11 +342,12 @@ export async function testGeminiKey(fetchImpl?: FetchLike): Promise<GeminiTestRe
   const key = getGeminiKey()
   if (!key) return { ok: false, message: 'APIキーが設定されていません' }
 
-  const doFetch: FetchLike = fetchImpl ?? ((url) => fetch(url))
+  const doFetch: FetchLike = fetchImpl ?? ((url, init) => fetch(url, init))
 
   let res: TestResponseLike
   try {
-    res = await doFetch(`${MODELS_ENDPOINT}?key=${encodeURIComponent(key)}`)
+    // キーは URL ではなく x-goog-api-key ヘッダーで送る(新形式キー対応)
+    res = await doFetch(MODELS_ENDPOINT, { method: 'GET', headers: apiKeyHeader(key) })
   } catch {
     return { ok: false, message: '通信エラー。電波の良い場所でお試しください' }
   }
@@ -399,9 +418,10 @@ export async function scanReceipt(file: File): Promise<ReceiptScanResult> {
 
   let res: Response
   try {
-    res = await fetch(`${ENDPOINT}?key=${encodeURIComponent(key)}`, {
+    // キーは URL ではなく x-goog-api-key ヘッダーで送る(新形式キー対応)
+    res = await fetch(ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...apiKeyHeader(key) },
       body: JSON.stringify(body),
     })
   } catch {

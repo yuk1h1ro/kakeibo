@@ -86,7 +86,8 @@ export default function GeminiKeySheet({ onClose, onSaved }: Props) {
           </li>
           <li>Googleアカウントでログイン</li>
           <li>
-            「Create API key」を押してキーをコピー(コピーする値は <code>AIza</code> で始まります)
+            「Create API key」を押してキーをコピー(コピーする値は <code>AQ.</code>{' '}
+            で始まります。古い形式の <code>AIza</code> も使えます)
           </li>
         </ol>
 
@@ -126,7 +127,7 @@ export default function GeminiKeySheet({ onClose, onSaved }: Props) {
               <div className="gemini-key-row">
                 <input
                   type={showKey ? 'text' : 'password'}
-                  placeholder="AIza..."
+                  placeholder="AQ.Ab..."
                   autoComplete="off"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
@@ -143,9 +144,9 @@ export default function GeminiKeySheet({ onClose, onSaved }: Props) {
             </label>
             {formatWarning && (
               <p className="gemini-warn" role="alert">
-                ⚠ これはGemini APIキーではない可能性があります。Gemini APIキーは <code>AIza</code>{' '}
-                で始まる39文字前後の文字列です。AI Studio のAPIキー一覧で <code>AIza…</code>{' '}
-                と表示されている値をコピーしてください。
+                ⚠ APIキーの形式が一般的なものと異なります。AI Studio で発行したキー(
+                <code>AQ.</code> または <code>AIza</code>{' '}
+                で始まる文字列)をコピーしてください。このまま保存もできます。
               </p>
             )}
             <button
