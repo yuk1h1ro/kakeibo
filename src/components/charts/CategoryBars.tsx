@@ -14,7 +14,14 @@ function estTextWidth(s: string): number {
   return w
 }
 
-export default function CategoryBars({ data }: { data: Datum[] }) {
+// カテゴリ別だけでなくお店別の集計でも使うため、読み上げ用のラベルは差し替えられるようにした
+export default function CategoryBars({
+  data,
+  ariaLabel = 'カテゴリ別支出',
+}: {
+  data: Datum[]
+  ariaLabel?: string
+}) {
   const sorted = [...data].filter((d) => d.value > 0).sort((a, b) => b.value - a.value)
 
   if (sorted.length === 0) {
@@ -38,7 +45,7 @@ export default function CategoryBars({ data }: { data: Datum[] }) {
       width="100%"
       viewBox={`0 0 ${VB_W} ${VB_H}`}
       role="img"
-      aria-label="カテゴリ別支出"
+      aria-label={ariaLabel}
       style={{ display: 'block' }}
     >
       {sorted.map((d, i) => {
