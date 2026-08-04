@@ -248,7 +248,7 @@ export function sameFilter(a: HistoryFilter, b: HistoryFilter): boolean {
     a.sort === b.sort &&
     a.period === b.period &&
     a.categories.length === b.categories.length &&
-    [...a.categories].sort().join(' ') === [...b.categories].sort().join(' ') &&
+    [...a.categories].sort().join('\u0000') === [...b.categories].sort().join('\u0000') &&
     at.length === bt.length &&
     [...at].sort().join('\u0000') === [...bt].sort().join('\u0000')
   )
