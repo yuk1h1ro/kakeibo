@@ -136,7 +136,8 @@ export function bucketRanges(
     for (let i = n - 1; i >= 0; i--) {
       const d = addDays(anchor, -i)
       const [, m, day] = d.split('-').map(Number)
-      out.push({ key: d, label: `${m}/${day}`, start: d, end: d })
+      // 日は本数が多く軸ラベルが潰れるので日にちだけ。月が変わる1日にだけ月を付ける
+      out.push({ key: d, label: day === 1 ? `${m}/1` : String(day), start: d, end: d })
     }
     return out
   }

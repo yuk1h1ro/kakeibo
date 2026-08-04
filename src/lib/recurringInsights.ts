@@ -25,13 +25,14 @@ const WEEKS_PER_YEAR = 365 / 7
 export interface FixedCostItem {
   id: string
   title: string
+  /** 表示に周期をそのまま使えるよう、ルールの設定を持ち回る */
+  recurrence: Recurrence
   /** 支払い総額ベースの月額換算 */
   monthly: number
   /** 自分の実質負担ベースの月額換算(レポートの他の数字と揃える) */
   monthlyOwn: number
   annual: number
   annualOwn: number
-  kind: RecurrenceKind
 }
 
 export interface FixedCostSummary {
@@ -64,11 +65,11 @@ export function fixedCostSummary(rules: readonly RecurringRule[]): FixedCostSumm
     return {
       id: r.id,
       title: r.title,
+      recurrence: r.recurrence,
       monthly: Math.round(annual / 12),
       monthlyOwn: Math.round(annualOwn / 12),
       annual: Math.round(annual),
       annualOwn: Math.round(annualOwn),
-      kind: r.recurrence.kind,
     }
   })
   // 金額の大きい順(同額は名前順)。何が効いているかを上から読めるようにする
