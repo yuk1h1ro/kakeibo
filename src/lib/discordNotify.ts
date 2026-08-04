@@ -59,13 +59,70 @@ export function isValidWebhookUrl(url: string): boolean {
 }
 
 /**
- * 設定済みの Webhook URL へメッセージを送る。
- * 未設定なら何もせず false。失敗しても throw せず false(コンソール警告のみ)。
+ * テスト送信の結果。
+ *
+ * 成否だけを返していた頃は「送信に失敗しました。URLと通信状態を確認してください」と
+ * 両方を並べるしかなく、いちばん多い原因(チャンネルを作り直して Webhook URL が
+ * 無効になった)にたどり着けなかった。理由まで持ち帰って文言を出し分ける。
+ */
+export type DiscordFailure =
+  /** fetch そのものが失敗した = 届いていない(オフライン・遮断など) */
+  | { kind: 'network' }
+  /** Discord が URL を受け付けなかった (401/403/404) = Webhook が無効 */
+  | { kind: 'webhook'; status: number }
+  /** それ以外の HTTP エラー(混雑・一時的な不調など) */
+  | { kind: 'http'; status: number }
+
+export type DiscordSendResult = { ok: true } | { ok: false; failure: DiscordFailure }
+
+/**
+ * HTTP のステータスから失敗の種類を決める。(純粋関数)
+ *
+ * Discord は、消えた Webhook に 404、トークンが違えば 401、
+ * 権限が無ければ 403 を返す。いずれも待っても直らない = URL を入れ直す話。
+ * 429(混雑)や 5xx は待てば直るので、混ぜない。
+ */
+export function classifyDiscordStatus(status: number): DiscordFailure {
+  if (status === 401 || status === 403 || status === 404) return { kind: 'webhook', status }
+  return { kind: 'http', status }
+}
+
+/**
+ * テスト送信が失敗したときに画面へ出す文言。(純粋関数)
+ * どの場合も「次に何をするか」を必ず1つ書く。分からないことは断定しない。
+ */
+export function discordFailureMessage(failure: DiscordFailure): string {
+  if (failure.kind === 'webhook') {
+    return (
+      'Discord に送れませんでした。Webhook URL が古い可能性があります' +
+      '(チャンネルを削除・作り直すと、それまでの URL は無効になります)。' +
+      'Discord のチャンネル設定 → 連携サービス → ウェブフックで URL をコピーし直し、' +
+      'いったん「解除」してから貼り直して保存してください。'
+    )
+  }
+  if (failure.kind === 'network') {
+    return (
+      'Discord に届きませんでした。この端末が通信できていないか、通信が不安定な可能性があります。' +
+      '電波か Wi-Fi を確かめて、もう一度テスト送信してください。'
+    )
+  }
+  return (
+    `Discord に断られました(HTTP ${failure.status})。しばらく待ってから、もう一度テスト送信してください。` +
+    'それでも直らないときは、Discord のチャンネル設定 → 連携サービス → ウェブフックで ' +
+    'URL をコピーし直し、いったん「解除」してから貼り直して保存してください。'
+  )
+}
+
+/**
+ * 設定済みの Webhook URL へメッセージを送り、失敗の理由まで返す。
+ * 失敗しても throw しない(通知は補助機能で、記録・同期を止めてはいけない)。
  * Discord の Webhook エンドポイントはブラウザからの fetch に CORS 対応済み。
  */
-export async function sendDiscordMessage(content: string): Promise<boolean> {
+export async function sendDiscordMessageWithResult(content: string): Promise<DiscordSendResult> {
   const url = getWebhookUrl()
-  if (!url) return false
+  // URL 未設定は「失敗」ではない(通知を使っていないだけ)。
+  // それでも呼ばれたときのために、届いていないことは network として返す
+  if (!url) return { ok: false, failure: { kind: 'network' } }
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -74,17 +131,22 @@ export async function sendDiscordMessage(content: string): Promise<boolean> {
     })
     if (!res.ok) {
       console.warn(`Discord通知の送信に失敗しました (HTTP ${res.status})`)
-      return false
+      return { ok: false, failure: classifyDiscordStatus(res.status) }
     }
-    return true
+    return { ok: true }
   } catch (e) {
     console.warn('Discord通知の送信に失敗しました', e)
-    return false
+    return { ok: false, failure: { kind: 'network' } }
   }
 }
 
-export function sendTestMessage(): Promise<boolean> {
-  return sendDiscordMessage('✅ 家計簿アプリと接続できました')
+/** 成否だけでよい呼び出し側(残高通知など)向けの薄い包み */
+export async function sendDiscordMessage(content: string): Promise<boolean> {
+  return (await sendDiscordMessageWithResult(content)).ok
+}
+
+export function sendTestMessage(): Promise<DiscordSendResult> {
+  return sendDiscordMessageWithResult('✅ 家計簿アプリと接続できました')
 }
 
 // ---------- メッセージ整形 ----------

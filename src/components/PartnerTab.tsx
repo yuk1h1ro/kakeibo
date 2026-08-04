@@ -12,6 +12,8 @@ import {
   isValidWebhookUrl,
   saveWebhookUrl,
   sendTestMessage,
+  discordFailureMessage,
+  type DiscordFailure,
 } from '../lib/discordNotify'
 import {
   addOwnerComment,
@@ -38,6 +40,7 @@ import { useTxFeature } from '../lib/txExtensions'
 import { partnerPaid } from '../lib/types'
 import '../share.css'
 import '../ledger.css'
+import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
 
 type Store = ReturnType<typeof useTransactions>
 
@@ -88,7 +91,8 @@ export default function PartnerTab({ store, supabase, onEdit }: Props) {
       setComments((prev) => [...(prev ?? []), created])
       return null
     } catch (e) {
-      return e instanceof Error ? e.message : 'コメントを保存できませんでした'
+      // partnerComments 側ですでに案内文になっているものはそのまま通る (機能161)
+      return e instanceof Error ? describeUnknownError(e, isOnlineNow()) : 'コメントを保存できませんでした'
     }
   }
 
@@ -255,6 +259,10 @@ function DiscordNotifyCard() {
   const [input, setInput] = useState('')
   const [inputError, setInputError] = useState<string | null>(null)
   const [testState, setTestState] = useState<'idle' | 'sending' | 'ok' | 'fail'>('idle')
+  // 失敗の理由 (Webhook が無効 / 届いていない / Discord 側の不調) で文言を変える。
+  // 「URLと通信状態を確認してください」と両方を並べていた頃は、いちばん多い
+  // 「チャンネルを作り直して URL が無効になった」にたどり着けなかった
+  const [testFailure, setTestFailure] = useState<DiscordFailure | null>(null)
 
   const handleSave = () => {
     const url = input.trim()
@@ -269,18 +277,21 @@ function DiscordNotifyCard() {
     setInput('')
     setInputError(null)
     setTestState('idle')
+    setTestFailure(null)
   }
 
   const handleTest = async () => {
     setTestState('sending')
-    const ok = await sendTestMessage()
-    setTestState(ok ? 'ok' : 'fail')
+    const result = await sendTestMessage()
+    setTestFailure(result.ok ? null : result.failure)
+    setTestState(result.ok ? 'ok' : 'fail')
   }
 
   const handleClear = () => {
     clearWebhookUrl()
     setSavedUrl(null)
     setTestState('idle')
+    setTestFailure(null)
   }
 
   return (
@@ -307,8 +318,8 @@ function DiscordNotifyCard() {
           {testState === 'ok' && (
             <p className="muted discord-result">✅ テスト通知を送信しました。Discordのチャンネルを確認してください</p>
           )}
-          {testState === 'fail' && (
-            <p className="error-text discord-result">送信に失敗しました。URLと通信状態を確認してください</p>
+          {testState === 'fail' && testFailure && (
+            <p className="error-text discord-result">{discordFailureMessage(testFailure)}</p>
           )}
         </>
       ) : (
