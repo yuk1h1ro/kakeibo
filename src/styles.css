@@ -252,6 +252,7 @@ textarea:focus {
 .category-chip,
 .partner-toggle,
 .amount-clear,
+.calc-key,
 .date-chip,
 .recent-chip,
 .tab-bar button {
@@ -263,6 +264,7 @@ textarea:focus {
 .category-chip:active,
 .partner-toggle:active,
 .amount-clear:active,
+.calc-key:active,
 .date-chip:active,
 .recent-chip:active {
   transform: scale(0.97);
@@ -275,6 +277,7 @@ textarea:focus {
   .category-chip:active,
   .partner-toggle:active,
   .amount-clear:active,
+  .calc-key:active,
   .date-chip:active,
   .recent-chip:active {
     filter: brightness(1.25);
@@ -367,6 +370,65 @@ textarea:focus {
   color: var(--text-secondary);
   font-size: 16px;
   font-weight: 700;
+}
+
+/* 引き算でマイナスになったとき(保存はブロックされる) */
+.amount-input.negative {
+  color: var(--expense);
+}
+
+/* ---------- 計算バー(＋ − × ＝) ---------- */
+
+.calc-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* 保留中の式(例: 350 ＋)と注意書き。高さを確保して押すたびに揺れないようにする */
+.calc-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 16px;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.calc-pending {
+  color: var(--text-secondary);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.calc-warn {
+  color: var(--expense);
+  font-weight: 600;
+  margin-left: auto;
+}
+
+.calc-keys {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.calc-key {
+  min-width: 0;
+  min-height: 44px;
+  border-radius: var(--radius-btn);
+  background: var(--fill);
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.calc-key-equals {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* ---------- 日付クイック選択 ---------- */
