@@ -12,7 +12,12 @@
 // 使う人は1人なので、端末間で共有できないことの実害はほぼない。
 // ============================================================
 
-import { DEFAULT_FILTER, sameFilter, type HistoryFilter } from './historyFilter'
+import {
+  DEFAULT_FILTER,
+  parseHistoryFilter,
+  sameFilter,
+  type HistoryFilter,
+} from './historyFilter'
 
 export interface SavedFilter {
   id: string
@@ -57,7 +62,13 @@ export function canSaveFilter(filter: HistoryFilter): boolean {
   return !sameFilter(filter, DEFAULT_FILTER)
 }
 
-/** 壊れた/古い形の保存内容を弾いて読む。(純粋関数) */
+/**
+ * 壊れた/古い形の保存内容を弾いて読む。(純粋関数)
+ *
+ * 条件そのものの読み取りは historyFilter.ts の parseHistoryFilter に任せる
+ * (HistoryFilter に項目が増えたとき、写し忘れの穴が2箇所に開かないように)。
+ * ここが見るのは「1件として成立しているか」(id・名前・条件の入れ物があるか)だけ。
+ */
 export function parseSavedFilters(raw: unknown): SavedFilter[] {
   if (!Array.isArray(raw)) return []
   const out: SavedFilter[] = []
@@ -65,18 +76,12 @@ export function parseSavedFilters(raw: unknown): SavedFilter[] {
     if (typeof item !== 'object' || item === null) continue
     const s = item as Partial<SavedFilter>
     if (typeof s.id !== 'string' || typeof s.name !== 'string') continue
-    const f = s.filter as Partial<HistoryFilter> | undefined
-    if (!f || typeof f.query !== 'string') continue
+    if (typeof s.filter !== 'object' || s.filter === null) continue
     out.push({
       id: s.id,
       name: s.name,
       createdAt: typeof s.createdAt === 'string' ? s.createdAt : '',
-      filter: {
-        query: f.query,
-        sort: f.sort ?? DEFAULT_FILTER.sort,
-        period: f.period ?? DEFAULT_FILTER.period,
-        categories: Array.isArray(f.categories) ? f.categories.filter((c) => typeof c === 'string') : [],
-      },
+      filter: parseHistoryFilter(s.filter),
     })
   }
   return out.slice(-MAX_SAVED_FILTERS)

@@ -82,15 +82,38 @@ describe('parseSavedFilters', () => {
     ]
     const got = parseSavedFilters(raw)
     expect(got).toHaveLength(1)
-    expect(got[0].filter).toEqual({
-      query: 'スタバ',
-      sort: DEFAULT_FILTER.sort,
-      period: DEFAULT_FILTER.period,
-      categories: [],
-    })
+    expect(got[0].filter).toEqual({ ...DEFAULT_FILTER, query: 'スタバ' })
   })
 
   it('配列でなければ空', () => {
     expect(parseSavedFilters({ a: 1 })).toEqual([])
+  })
+
+  // 機能088: 保存したときに入っていたタグが、読み直しで消えていた不具合
+  it('タグを保存した条件は、読み直してもタグが残る', () => {
+    const raw = [{ id: '1', name: 'デート', filter: { query: '', tags: ['デート'] } }]
+    expect(parseSavedFilters(raw)[0].filter.tags).toEqual(['デート'])
+  })
+
+  it('タグだけで絞った条件は、読み直しても既定状態と同じにならない', () => {
+    const raw = [{ id: '1', name: 'デート', filter: { ...DEFAULT_FILTER, tags: ['デート'] } }]
+    const restored = parseSavedFilters(raw)[0]
+    // ここが既定と同じになると、呼び出しても何も絞られないのに
+    // 「何も絞っていない画面」でこの条件が選択中に見えてしまう
+    expect(findMatchingFilter([restored], DEFAULT_FILTER)).toBeNull()
+    expect(findMatchingFilter([restored], restored.filter)?.name).toBe('デート')
+  })
+
+  it('保存した条件をそのまま読み直すと、同じ条件として復元できる', () => {
+    const original = saved('全部入り', {
+      query: 'スタバ',
+      sort: 'amount_desc',
+      period: 'month',
+      categories: ['eating_out'],
+      tags: ['デート', '仕事'],
+    })
+    // localStorage を1往復させる(JSON にできない値が混ざっていないかも見る)
+    const restored = parseSavedFilters(JSON.parse(JSON.stringify([original])))
+    expect(restored[0].filter).toEqual(original.filter)
   })
 })

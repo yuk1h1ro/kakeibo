@@ -6,6 +6,7 @@ import {
   filterTransactions,
   isFilterActive,
   normalizeSearchText,
+  parseHistoryFilter,
   periodRange,
   sameFilter,
   searchTokens,
@@ -284,5 +285,42 @@ describe('タグでの絞り込み (機能088)', () => {
       sameFilter({ ...DEFAULT_FILTER, tags: ['a', 'b'] }, { ...DEFAULT_FILTER, tags: ['b', 'a'] })
     ).toBe(true)
     expect(sameFilter({ ...DEFAULT_FILTER, tags: ['a'] }, DEFAULT_FILTER)).toBe(false)
+  })
+})
+
+describe('parseHistoryFilter', () => {
+  it('既定値をベースに、読めたキーだけ上書きする', () => {
+    expect(parseHistoryFilter({ query: 'スタバ' })).toEqual({ ...DEFAULT_FILTER, query: 'スタバ' })
+    expect(parseHistoryFilter({ tags: ['デート'] })).toEqual({ ...DEFAULT_FILTER, tags: ['デート'] })
+  })
+
+  it('オブジェクトでない値は既定の条件として読む', () => {
+    expect(parseHistoryFilter(null)).toEqual(DEFAULT_FILTER)
+    expect(parseHistoryFilter('ごみ')).toEqual(DEFAULT_FILTER)
+  })
+
+  it('型の合わない値・知らない並び順や期間は既定のままにする', () => {
+    const got = parseHistoryFilter({
+      query: 42,
+      sort: 'いつかの並び',
+      period: 'decade',
+      categories: 'food',
+      tags: ['ok', 3, null],
+      unknownKey: 'なにか',
+    })
+    expect(got).toEqual({ ...DEFAULT_FILTER, tags: ['ok'] })
+  })
+
+  it('保存できるすべての項目が往復する(項目を足したらここに1行足す)', () => {
+    const full: HistoryFilter = {
+      query: 'スタバ',
+      sort: 'amount_asc',
+      period: 'last3',
+      categories: ['food', NO_CATEGORY_KEY],
+      tags: ['デート'],
+    }
+    expect(parseHistoryFilter(JSON.parse(JSON.stringify(full)))).toEqual(full)
+    // 読み直したものが元と「同じ条件」として突き合わせられること
+    expect(sameFilter(parseHistoryFilter(full), full)).toBe(true)
   })
 })
