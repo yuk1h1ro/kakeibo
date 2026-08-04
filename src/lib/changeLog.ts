@@ -70,12 +70,18 @@ export function transactionSummary(
   t: Transaction,
   labelOf: (id: string | null) => string
 ): string {
+  // 支出以外は店名もカテゴリも持たないので、種別そのものを見出しにする。
+  // ここを落とすと返金・調整が「未分類」と表示され、履歴を遡る意味が薄れる
   const what =
     t.type === 'partner_deposit'
       ? '彼女から預かり'
-      : t.store.trim() !== ''
-        ? t.store.trim()
-        : labelOf(t.category)
+      : t.type === 'partner_refund'
+        ? '彼女へ返金'
+        : t.type === 'partner_adjust'
+          ? '残高の調整'
+          : t.store.trim() !== ''
+            ? t.store.trim()
+            : labelOf(t.category)
   return `${formatDate(t.date)} ${what} ${yenPlain(t.amount)}`
 }
 
