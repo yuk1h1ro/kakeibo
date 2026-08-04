@@ -7,8 +7,9 @@
 // ============================================================
 
 import type { Transaction } from './types'
-import { ownAmount } from './types'
+import { ownAmount, tagsOf } from './types'
 import { monthKeyOffset } from './format'
+import { matchesAnyTag } from './tags'
 
 // ---------- 検索文字列の正規化 (機能145) ----------
 
@@ -44,7 +45,7 @@ export function searchTokens(query: string): string[] {
     .filter((t) => t !== '')
 }
 
-/** 1件の取引の検索対象文字列。店名・メモ・カテゴリ名を横断する。(純粋関数) */
+/** 1件の取引の検索対象文字列。店名・メモ・カテゴリ名・タグを横断する。(純粋関数) */
 export function transactionHaystack(
   t: Transaction,
   labelOf: (id: string | null) => string
@@ -53,9 +54,16 @@ export function transactionHaystack(
   if (t.type === 'partner_deposit') {
     // 預かりはカテゴリを持たないので、種別の呼び名で引けるようにする
     parts.push('彼女から預かり')
+  } else if (t.type === 'partner_refund') {
+    parts.push('彼女に返金')
+  } else if (t.type === 'partner_adjust') {
+    parts.push('残高の調整')
   } else {
     parts.push(labelOf(t.category))
   }
+  // タグ (機能088)。「#デート」でも「デート」でも引けるように # 付きで積む。
+  // タグを持たない記録では何も足さないので、既存の検索結果は1件も変わらない
+  for (const tag of tagsOf(t)) parts.push(`#${tag}`)
   return normalizeSearchText(parts.join(' '))
 }
 
@@ -146,6 +154,17 @@ export interface HistoryFilter {
   period: HistoryPeriod
   /** 空配列 = すべてのカテゴリ */
   categories: string[]
+  /**
+   * タグの絞り込み (機能088)。空 / 未指定 = すべて。
+   * 任意にしてあるのは、この項目より前に localStorage へ保存された条件
+   * (savedFilters)を読み直したときに壊れないようにするため。
+   */
+  tags?: string[]
+}
+
+/** 絞り込みに指定されたタグ。未指定は空配列。(純粋関数) */
+export function filterTags(filter: HistoryFilter): string[] {
+  return filter.tags ?? []
 }
 
 /**
@@ -161,6 +180,7 @@ export const DEFAULT_FILTER: HistoryFilter = {
   sort: 'date_desc',
   period: 'all',
   categories: [],
+  tags: [],
 }
 
 function lastDayOfMonth(month: string): string {
@@ -207,9 +227,12 @@ export function filterTransactions(
   const range = periodRange(filter.period, ctx.month)
   const tokens = searchTokens(filter.query)
   const cats = filter.categories
+  const tags = filterTags(filter)
   const hit = txs.filter((t) => {
     if (range && (t.date < range.from || t.date > range.to)) return false
     if (cats.length > 0 && !cats.includes(t.category ?? NO_CATEGORY_KEY)) return false
+    // タグ (機能088)。選んだタグのどれかが付いていれば通す(カテゴリと同じ OR)
+    if (!matchesAnyTag(t, tags)) return false
     return matchesTokens(t, tokens, ctx.labelOf)
   })
   return sortTransactions(hit, filter.sort)
@@ -217,12 +240,17 @@ export function filterTransactions(
 
 /** 同じ絞り込みか(保存済み条件と今の状態の突き合わせ用)。(純粋関数) */
 export function sameFilter(a: HistoryFilter, b: HistoryFilter): boolean {
+  // タグ (機能088) は後から足した任意の項目なので、未指定は空配列として比べる
+  const at = filterTags(a)
+  const bt = filterTags(b)
   return (
     a.query.trim() === b.query.trim() &&
     a.sort === b.sort &&
     a.period === b.period &&
     a.categories.length === b.categories.length &&
-    [...a.categories].sort().join(' ') === [...b.categories].sort().join(' ')
+    [...a.categories].sort().join(' ') === [...b.categories].sort().join(' ') &&
+    at.length === bt.length &&
+    [...at].sort().join('\u0000') === [...bt].sort().join('\u0000')
   )
 }
 
@@ -246,6 +274,8 @@ export function describeFilter(filter: HistoryFilter, labelOf: (id: string | nul
         .join('・')
     )
   }
+  const tags = filterTags(filter)
+  if (tags.length > 0) parts.push(tags.map((t) => `#${t}`).join('・'))
   parts.push(PERIOD_OPTIONS.find((p) => p.value === filter.period)?.label ?? '')
   if (filter.sort !== DEFAULT_FILTER.sort) {
     parts.push(SORT_OPTIONS.find((s) => s.value === filter.sort)?.label ?? '')

@@ -18,6 +18,7 @@
 import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isSchemaError, toServerError } from './serverErrors'
+import { formatGuidance, guidanceForServerError, isOnlineNow } from './errorGuidance'
 
 /** 資産か負債か。負債は残債を正の数で持ち、純資産を出すときに引く */
 export type AssetKind = 'asset' | 'liability'
@@ -265,7 +266,9 @@ function throwOn(error: unknown): void {
     publish({ status: 'unavailable' })
     throw new Error('資産のテーブルがありません(supabase/migration-assets.sql を実行してください)')
   }
-  throw new Error(e.message)
+  // 原文のままだと英語の PostgREST メッセージが資産シートに出てしまうので、
+  // 原因と次の行動に置き換える (機能161)
+  throw new Error(formatGuidance(guidanceForServerError(e, isOnlineNow())))
 }
 
 export async function addAsset(supabase: SupabaseClient, input: AssetInput): Promise<AssetDef> {

@@ -224,6 +224,15 @@ textarea:focus {
   display: block;
 }
 
+/* 金額の目隠し (機能169) がオンのときのヘッダーボタン。
+   伏字だけだと「壊れている」と読み違えられるので、
+   ボタン側にも「いま自分で隠している」と分かる面を出す。
+   色だけに頼らないよう、アイコン自体も目/斜線付きの目で切り替えている */
+.icon-btn.masked-on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 /* ---------- カテゴリアイコン(薄いティント丸背景 + 線画) ----------
    色は categoryIcons.tsx 側で inline 指定(ライト/ダーク共通の1組) */
 
@@ -289,6 +298,48 @@ textarea:focus {
   font-size: 13px;
   line-height: 1.5;
   /* APIの生メッセージなど長い一続きの文字列でも折り返す */
+  overflow-wrap: anywhere;
+}
+
+/* エラーの「原因 → 次の行動 → 原文」(機能161)。
+   .error-text の中でも、同期バナーの中でも同じ形で出す。
+   原文(detail)は英語の一続きの文字列が来るので、必ず折り返して
+   横スクロールを出さないこと */
+.err-guide-summary {
+  display: block;
+  font-weight: 600;
+}
+
+.err-guide-actions {
+  margin: 4px 0 0;
+  padding-left: 1.1em;
+  list-style: disc;
+  color: var(--text-secondary);
+}
+
+.err-guide-actions li {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+/* バナーの中では地の色に合わせる(赤字が積み重なると読みにくい) */
+.sync-banner .err-guide-summary {
+  color: var(--text-secondary);
+}
+
+.err-guide-btn {
+  display: block;
+  margin-top: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  color: var(--accent);
+}
+
+.err-guide-detail {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
   overflow-wrap: anywhere;
 }
 

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { yen } from '../lib/format'
+import { maskCompact, yen } from '../lib/format'
 import { compactYen, type MonthlyNetWorth } from '../lib/netWorth'
 
 // 純資産の推移(折れ線)。既存のグラフと同じく SVG を自前で描く(外部ライブラリなし)。
@@ -52,6 +52,7 @@ export default function NetWorthChart({ data }: { data: MonthlyNetWorth[] }) {
   const values = data.map((d) => d.netWorth)
   const { bottom, top, ticks } = niceScale(Math.min(...values), Math.max(...values))
   // 目盛りラベルの文字数から左余白を決める(長い数字でも軸が重ならないように)
+  // 幅は素の表記から決める(伏字にしてもグラフの形が動かないように)
   const labelWidth = Math.max(...ticks.map((t) => compactYen(t).length)) * 6.5 + 10
   const leftPad = Math.min(labelWidth, 70)
   const baseY = TOP_PAD + PLOT_H
@@ -116,7 +117,7 @@ export default function NetWorthChart({ data }: { data: MonthlyNetWorth[] }) {
               fontSize={11}
               fill="var(--text-muted)"
             >
-              {compactYen(t)}
+              {maskCompact(compactYen(t))}
             </text>
           </g>
         ))}
@@ -151,7 +152,7 @@ export default function NetWorthChart({ data }: { data: MonthlyNetWorth[] }) {
                   fontWeight={700}
                   fill="var(--text-secondary)"
                 >
-                  {compactYen(d.netWorth)}
+                  {maskCompact(compactYen(d.netWorth))}
                 </text>
               )}
               {showLabel && (

@@ -28,9 +28,26 @@ export interface ShareCharge {
   store: string
   /** 彼女の負担額。支払い総額は共有ページには一切出さない */
   amount: number
+  /**
+   * 彼女自身が払った額 (機能018)。0 なら利用者が全額払った回。
+   * 彼女がすでに知っている額なので出してよい(支払い総額とは別物)。
+   */
+  paid: number
   category: string | null
   /** サーバー側で解決した表示名。カテゴリ設定が未登録なら null */
   categoryLabel: string | null
+}
+
+/**
+ * 返金・手動調整 (機能012)。
+ * amount は残高への影響額(符号つき)。返金はマイナスで返ってくる。
+ */
+export interface ShareSettlement {
+  id: string
+  date: string
+  kind: 'partner_refund' | 'partner_adjust'
+  amount: number
+  memo: string
 }
 
 export interface ShareComment {
@@ -44,6 +61,8 @@ export interface ShareComment {
 export interface ShareSnapshot {
   balance: number
   deposits: ShareDeposit[]
+  /** 返金・調整 (機能012)。migration 未実行のサーバーからは空で返る */
+  settlements: ShareSettlement[]
   charges: ShareCharge[]
   comments: ShareComment[]
   expiresAt: string | null
@@ -105,11 +124,22 @@ export function parseShareSnapshot(raw: unknown): ShareSnapshot | null {
       date: asString(d.date),
       amount: asNumber(d.amount),
     })),
+    // 返金・調整 (機能012)。古いサーバー(migration 未実行)には
+    // このキーが無いので、その場合は空配列になる = 画面に節ごと出ない
+    settlements: asArray(o.settlements).map((s) => ({
+      id: asString(s.id),
+      date: asString(s.date),
+      kind: s.kind === 'partner_adjust' ? ('partner_adjust' as const) : ('partner_refund' as const),
+      amount: asNumber(s.amount),
+      memo: asString(s.memo),
+    })),
     charges: asArray(o.charges).map((c) => ({
       id: asString(c.id),
       date: asString(c.date),
       store: asString(c.store),
       amount: asNumber(c.amount),
+      // 古いサーバーには paid が無いので 0(= 利用者が全額払った)になる
+      paid: asNumber(c.paid),
       category: typeof c.category === 'string' ? c.category : null,
       categoryLabel: typeof c.category_label === 'string' ? c.category_label : null,
     })),

@@ -30,6 +30,13 @@ export function transactionToInput(t: Transaction): TransactionInput {
   if (t.source === 'recurring') input.source = 'recurring'
   // 未設定(undefined)のときはキーごと落とす(satisfaction 列が無い環境への配慮)
   if (t.satisfaction !== undefined) input.satisfaction = t.satisfaction
+  // 誰が払ったか(018)・タグ(088)・分割の束ね(096)も「その記録が持っている事実」。
+  // 写さずに書き戻すと、編集や取り消しをしただけで預かり残高が動いてしまう
+  // (partner_paid が消えると立て替えの向きが変わる)。
+  // 列が無い環境に配慮して、undefined のときはキーごと落とす。
+  if (t.partner_paid !== undefined && t.partner_paid !== null) input.partner_paid = t.partner_paid
+  if (t.tags !== undefined && t.tags !== null) input.tags = t.tags
+  if (t.split_group !== undefined) input.split_group = t.split_group
   return input
 }
 
@@ -45,6 +52,10 @@ export function duplicateInput(t: Transaction, todayIso: string): TransactionInp
   const input = transactionToInput(t)
   delete input.source
   delete input.satisfaction
+  // 分割の束ね(096)は引き継がない — 複製は別の会計なので、
+  // 元の会計の内訳に紛れ込ませてはいけない。タグ(088)は引き継ぐ
+  // (「また同じ旅行の支出」であることのほうが多いため)
+  delete input.split_group
   return { ...input, date: todayIso }
 }
 

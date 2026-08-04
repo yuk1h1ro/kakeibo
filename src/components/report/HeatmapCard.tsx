@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { Transaction } from '../../lib/types'
-import { formatDate, formatMonth, yen } from '../../lib/format'
+import { formatDate, formatMonth, maskCompact, yen } from '../../lib/format'
 import { WEEKDAY_LABELS } from '../../lib/calendar'
 import { HEAT_LEVELS, monthHeatmap } from '../../lib/reportHeatmap'
 
@@ -66,7 +66,9 @@ export default function HeatmapCard({ transactions, month }: Props) {
                   金額が読めなくなるため、面と文字を分けている */}
               <span className="rp-heat-fill" aria-hidden="true" />
               <span className="rp-heat-day">{cell.day}</span>
-              <span className="rp-heat-amount">{shortAmount(cell.total)}</span>
+              {/* 目隠し中は伏字。支出のない日は元から空欄なので、そのまま空欄にする
+                  (何も無い所に伏字を置くと「隠された額がある」という嘘になる) */}
+              <span className="rp-heat-amount">{maskCompact(shortAmount(cell.total))}</span>
             </button>
           )
         )}

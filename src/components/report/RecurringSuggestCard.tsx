@@ -12,6 +12,7 @@ import {
   type RecurringCandidate,
 } from '../../lib/recurringInsights'
 import { getSupabase } from '../../lib/supabaseClient'
+import { describeUnknownError, isOnlineNow } from '../../lib/errorGuidance'
 
 interface Props {
   transactions: Transaction[]
@@ -65,7 +66,7 @@ export default function RecurringSuggestCard({ transactions, today }: Props) {
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         setError('繰り返し入力の登録はオンライン時のみ可能です')
       } else {
-        setError(e instanceof Error ? e.message : String(e))
+        setError(describeUnknownError(e, isOnlineNow()))
       }
     } finally {
       setBusyKey(null)

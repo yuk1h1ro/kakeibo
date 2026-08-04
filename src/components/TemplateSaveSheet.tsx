@@ -10,6 +10,7 @@ import {
 } from '../lib/transactionTemplates'
 import type { Transaction } from '../lib/types'
 import '../settings.css'
+import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
 
 interface Props {
   supabase: SupabaseClient
@@ -36,7 +37,7 @@ export default function TemplateSaveSheet({ supabase, transaction, onSaved, onCl
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           setError('テンプレートの保存はオンライン時のみ可能です')
         } else {
-          setError(e instanceof Error ? e.message : String(e))
+          setError(describeUnknownError(e, isOnlineNow()))
         }
       })
       .finally(() => setBusy(false))

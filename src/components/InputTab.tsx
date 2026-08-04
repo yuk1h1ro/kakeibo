@@ -18,8 +18,12 @@ import {
   templateLabel,
   useTransactionTemplates,
 } from '../lib/transactionTemplates'
+import { balanceWording, isLowBalance, partnerBalance } from '../lib/partnerBalance'
+import { useLowBalanceThreshold } from '../lib/lowBalanceSettings'
 import type { Transaction } from '../lib/types'
 import type { TransactionInput, useTransactions } from '../hooks/useTransactions'
+import '../ledger.css'
+import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
 
 type Store = ReturnType<typeof useTransactions>
 
@@ -42,6 +46,8 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
   const formCardRef = useRef<HTMLDivElement>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [prefill, setPrefill] = useState<FormPrefill | undefined>(undefined)
+  // 入力中の1件が預かり残高に与える影響額(符号つき)。
+  // 彼女の負担分だけならマイナス、彼女が払いすぎた回はプラスになる (機能018)
   const [pendingPartner, setPendingPartner] = useState(0)
   // カテゴリ変更(名前・絵文字)時に「最近の記録から入力」チップを再描画するための購読
   useCategories()
@@ -57,12 +63,14 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
   const [showGeminiSheet, setShowGeminiSheet] = useState(false)
   const [showBatchSheet, setShowBatchSheet] = useState(false)
 
-  // 彼女の預かり残高 = 預かり合計 − 支出の彼女負担分合計
-  const partnerBalance = store.transactions.reduce(
-    (sum, t) => (t.type === 'partner_deposit' ? sum + t.amount : sum - t.partner_amount),
-    0
-  )
-  const balanceAfter = partnerBalance - pendingPartner
+  // 残高の計算は partnerBalance.ts の純関数に一本化してある(画面ごとに書かない)
+  const balance = partnerBalance(store.transactions)
+  const wording = balanceWording(balance)
+  // いま入力中の彼女の負担分を引いた見込み。支払った人の指定はフォーム側から
+  // 影響額として渡ってくるので、ここではそれをそのまま足す (機能018)
+  const balanceAfter = balance + pendingPartner
+  const afterWording = balanceWording(balanceAfter)
+  const threshold = useLowBalanceThreshold()
 
   // 直近の支出から (カテゴリ, 金額, お店, メモ) の組で重複除去して最大5件
   const recentEntries = useMemo(() => {
@@ -79,7 +87,7 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
     return out
   }, [store.transactions])
 
-  const handlePartnerAmountChange = useCallback((n: number) => setPendingPartner(n), [])
+  const handlePartnerImpactChange = useCallback((n: number) => setPendingPartner(n), [])
 
   // カレンダーから来たときは、入力フォームまで運んであげる
   // (残高カードやレシートの導線が先にあるので、そのままだと入力欄が画面外にある)
@@ -179,7 +187,9 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
       if (noteTimerRef.current) clearTimeout(noteTimerRef.current)
       noteTimerRef.current = setTimeout(() => setScanNote(false), 6000)
     } catch (err) {
-      setScanError(err instanceof Error ? err.message : String(err))
+      // レシート読み取りの自前の文言 (上限・読み取り失敗など) はそのまま通り、
+      // 生のサーバーエラーだけが原因と次の行動に置き換わる (機能161)
+      setScanError(describeUnknownError(err, isOnlineNow()))
     } finally {
       setScanning(false)
     }
@@ -187,16 +197,31 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
 
   return (
     <>
+      {/* 機能011: 金額は絶対値で出し、預かり中か立て替え中かは言葉で伝える */}
       <div className="card balance-card">
-        <span className="label">彼女の預かり残高</span>
+        <span className="label">彼女とのお金 ・ {wording.title}</span>
         <div className="balance-values">
-          <span className={`value ${partnerBalance < 0 ? 'negative' : ''}`}>{yen(partnerBalance)}</span>
-          {pendingPartner > 0 && (
+          <span className={`value ${balance < 0 ? 'negative' : ''}`}>{yen(wording.magnitude)}</span>
+          {pendingPartner !== 0 && (
             <span className="balance-after">
-              差引後 <span className={balanceAfter < 0 ? 'negative' : ''}>{yen(balanceAfter)}</span>
+              この記録のあと{' '}
+              <span className={balanceAfter < 0 ? 'negative' : ''}>
+                {yen(afterWording.magnitude)}
+              </span>
+              ({afterWording.title})
             </span>
           )}
         </div>
+        {isLowBalance(balance, threshold) && (
+          <p className="low-balance-alert" role="status">
+            <span>
+              {balance < 0
+                ? '預かりを使い切っています。'
+                : `残りが ${yen(threshold)} を下回りました。`}
+            </span>
+            <strong>次の預かりをお願いするタイミングです</strong>
+          </p>
+        )}
       </div>
 
       <div className="scan-block">
@@ -283,11 +308,20 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
           submitLabel="記録する"
           prefill={prefill}
           datePrefill={datePrefill}
-          onPartnerAmountChange={handlePartnerAmountChange}
+          onPartnerImpactChange={handlePartnerImpactChange}
+          // タグの候補は過去の記録から出す (機能088)
+          knownTransactions={store.transactions}
           onSubmit={async (input) => {
             await store.add(input)
             noteSaved()
             await learnFromInput(input)
+          }}
+          // 機能096: 分割はカテゴリごとの独立した記録としてまとめて積む。
+          // 店名からのカテゴリ学習はここでは行わない — 1つの店に複数の
+          // カテゴリが対応する会計なので、どれを覚えても次回の推測を誤らせる
+          onSubmitSplit={async (inputs) => {
+            await store.addMany(inputs)
+            noteSaved()
           }}
         />
       </div>

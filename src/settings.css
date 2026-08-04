@@ -629,3 +629,14 @@
   margin-bottom: 10px;
   line-height: 1.5;
 }
+
+/* ---------- Supabase の接続設定(機能161) ---------- */
+
+/* 接続先の URL。長いホスト名でも横に溢れさせない */
+.settings-url {
+  overflow-wrap: anywhere;
+}
+
+.settings-reset-config {
+  margin-top: 8px;
+}

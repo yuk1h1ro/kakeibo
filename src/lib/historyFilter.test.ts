@@ -231,3 +231,58 @@ describe('sameFilter / isFilterActive', () => {
     ).toBe(true)
   })
 })
+
+describe('タグでの絞り込み (機能088)', () => {
+  const dateTx = tx({ id: 'date', store: '映画館', tags: ['デート'] })
+  const tripTx = tx({ id: 'trip', store: '旅館', tags: ['旅行2026', 'デート'] })
+  const plainTx = tx({ id: 'plain', store: 'スーパー' })
+  const rows = [dateTx, tripTx, plainTx]
+  const ctx = { month: '2026-08', labelOf }
+
+  it('タグ未指定なら全件を通す(既存の絞り込みの挙動は変わらない)', () => {
+    expect(filterTransactions(rows, DEFAULT_FILTER, ctx)).toHaveLength(3)
+    // tags キー自体が無い保存済み条件でも落ちない
+    const legacy = { query: '', sort: 'date_desc', period: 'all', categories: [] } as HistoryFilter
+    expect(filterTransactions(rows, legacy, ctx)).toHaveLength(3)
+  })
+
+  it('選んだタグのどれかが付いている記録だけに絞る', () => {
+    const only = filterTransactions(rows, { ...DEFAULT_FILTER, tags: ['旅行2026'] }, ctx)
+    expect(only.map((t) => t.id)).toEqual(['trip'])
+    const either = filterTransactions(rows, { ...DEFAULT_FILTER, tags: ['旅行2026', 'デート'] }, ctx)
+    expect(either.map((t) => t.id).sort()).toEqual(['date', 'trip'])
+  })
+
+  it('カテゴリの絞り込みと重ねると AND になる', () => {
+    const hit = filterTransactions(
+      rows,
+      { ...DEFAULT_FILTER, tags: ['デート'], categories: ['food'] },
+      ctx
+    )
+    expect(hit).toHaveLength(2)
+    const miss = filterTransactions(
+      rows,
+      { ...DEFAULT_FILTER, tags: ['デート'], categories: ['transport'] },
+      ctx
+    )
+    expect(miss).toHaveLength(0)
+  })
+
+  it('検索欄からも「#タグ」「タグ」で引ける', () => {
+    expect(transactionHaystack(tripTx, labelOf)).toContain('#旅行2026')
+    expect(filterTransactions(rows, { ...DEFAULT_FILTER, query: '#旅行2026' }, ctx)).toHaveLength(1)
+    expect(filterTransactions(rows, { ...DEFAULT_FILTER, query: '旅行2026' }, ctx)).toHaveLength(1)
+  })
+
+  it('タグを持たない記録の検索対象は今までどおり(店名・メモ・カテゴリ名だけ)', () => {
+    expect(transactionHaystack(plainTx, labelOf)).toBe('スーパー食費')
+  })
+
+  it('タグの違いは「別の条件」として扱う(保存した条件の突き合わせ)', () => {
+    expect(isFilterActive({ ...DEFAULT_FILTER, tags: ['デート'] })).toBe(true)
+    expect(
+      sameFilter({ ...DEFAULT_FILTER, tags: ['a', 'b'] }, { ...DEFAULT_FILTER, tags: ['b', 'a'] })
+    ).toBe(true)
+    expect(sameFilter({ ...DEFAULT_FILTER, tags: ['a'] }, DEFAULT_FILTER)).toBe(false)
+  })
+})

@@ -12,6 +12,8 @@ import {
   isValidWebhookUrl,
   saveWebhookUrl,
   sendTestMessage,
+  discordFailureMessage,
+  type DiscordFailure,
 } from '../lib/discordNotify'
 import {
   addOwnerComment,
@@ -23,7 +25,22 @@ import {
 } from '../lib/partnerComments'
 import CommentThread from './CommentThread'
 import ShareLinkCard from './ShareLinkCard'
+import PartnerSettlementSheet from './PartnerSettlementSheet'
+import {
+  DEFAULT_LOW_BALANCE_THRESHOLD,
+  balanceWording,
+  isLowBalance,
+  ledgerRowTitle,
+  partnerBalance,
+  partnerImpact,
+  partnerMovements,
+} from '../lib/partnerBalance'
+import { setLowBalanceThreshold, useLowBalanceThreshold } from '../lib/lowBalanceSettings'
+import { useTxFeature } from '../lib/txExtensions'
+import { partnerPaid } from '../lib/types'
 import '../share.css'
+import '../ledger.css'
+import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
 
 type Store = ReturnType<typeof useTransactions>
 
@@ -34,17 +51,21 @@ interface Props {
 }
 
 export default function PartnerTab({ store, supabase, onEdit }: Props) {
-  const balance = store.transactions.reduce((sum, t) => {
-    if (t.type === 'partner_deposit') return sum + t.amount
-    return sum - t.partner_amount
-  }, 0)
+  // 残高の計算は partnerBalance.ts の純関数に一本化してある(画面ごとに書かない)
+  const balance = partnerBalance(store.transactions)
+  const wording = balanceWording(balance)
 
-  const balanceText = balance < 0 ? `-${yen(Math.abs(balance))}` : yen(balance)
+  // 機能010: しきい値を下回っているか。既定 1,000円で、下のカードから変えられる
+  const threshold = useLowBalanceThreshold()
+  const low = isLowBalance(balance, threshold)
 
-  // 預かり(+)と、支出のうち彼女負担分の差引(-)。新しい順(storeが日付降順)
-  const movements = store.transactions.filter(
-    (t) => t.type === 'partner_deposit' || (t.type === 'expense' && t.partner_amount > 0)
-  )
+  // 機能012: 返金・受け取り・調整の入口。列が無い環境では出さない
+  const settlementAvailable = useTxFeature('settlement')
+  const [settleOpen, setSettleOpen] = useState(false)
+
+  // 残高が動いた行だけを新しい順に(storeが日付降順)。
+  // 預かり・返金・調整に加えて、彼女が払った回(機能018)もここに出る
+  const movements = partnerMovements(store.transactions)
 
   // コメント (機能185)。テーブルが無ければ null のままで、導線ごと出さない
   const [comments, setComments] = useState<PartnerComment[] | null>(null)
@@ -70,7 +91,8 @@ export default function PartnerTab({ store, supabase, onEdit }: Props) {
       setComments((prev) => [...(prev ?? []), created])
       return null
     } catch (e) {
-      return e instanceof Error ? e.message : 'コメントを保存できませんでした'
+      // partnerComments 側ですでに案内文になっているものはそのまま通る (機能161)
+      return e instanceof Error ? describeUnknownError(e, isOnlineNow()) : 'コメントを保存できませんでした'
     }
   }
 
@@ -86,11 +108,46 @@ export default function PartnerTab({ store, supabase, onEdit }: Props) {
 
   return (
     <>
+      {/* 機能011: 符号だけでは「預かりが減った」のか「貸しが増えた」のか読めない。
+          金額は必ず絶対値で出し、意味は見出しの言葉で伝える */}
       <div className="card hero-card">
-        <div className="label">彼女の預かり残高</div>
-        <div className={`hero-value ${balance < 0 ? 'negative' : ''}`}>{balanceText}</div>
-        {balance < 0 && <p className="muted">立て替え超過です</p>}
+        <div className="balance-headline">
+          <span className="label">彼女とのお金</span>
+          <span
+            className={`balance-direction ${balance < 0 ? 'is-lent' : balance > 0 ? 'is-holding' : ''}`}
+          >
+            {wording.title}
+          </span>
+        </div>
+        <div className={`hero-value ${balance < 0 ? 'negative' : ''}`}>{yen(wording.magnitude)}</div>
+        <p className="muted">{wording.note}</p>
+        {low && (
+          <p className="low-balance-alert" role="status">
+            <span>
+              {balance < 0
+                ? '預かりを使い切っています。'
+                : `残りが ${yen(threshold)} を下回りました。`}
+            </span>
+            <strong>次の預かりをお願いするタイミングです</strong>
+          </p>
+        )}
       </div>
+
+      {settlementAvailable && (
+        <div className="card">
+          <h2>返金・受け取り・調整</h2>
+          <p className="muted">
+            余った分を返した・現金で受け取った・ズレを直した、を記録します(どれも履歴に残ります)
+          </p>
+          <button
+            type="button"
+            className="btn-ghost settle-open-btn"
+            onClick={() => setSettleOpen(true)}
+          >
+            精算を記録する
+          </button>
+        </div>
+      )}
 
       {unread > 0 && (
         <div className="comment-unread-banner">💬 彼女から新しいコメントが{unread}件あります</div>
@@ -108,6 +165,8 @@ export default function PartnerTab({ store, supabase, onEdit }: Props) {
       </div>
 
       <ShareLinkCard supabase={supabase} />
+
+      <LowBalanceCard threshold={threshold} />
 
       <DiscordNotifyCard />
 
@@ -128,7 +187,65 @@ export default function PartnerTab({ store, supabase, onEdit }: Props) {
           ))
         )}
       </div>
+
+      {settleOpen && (
+        <PartnerSettlementSheet
+          balance={balance}
+          onClose={() => setSettleOpen(false)}
+          onSubmit={async (input) => {
+            // 追加もオフラインキュー経由。通信が無くても記録は失われない
+            await store.add(input)
+          }}
+        />
+      )}
     </>
+  )
+}
+
+/**
+ * 低下アラートのしきい値 (機能010)。
+ * 設定シートではなくこのタブに置いたのは、判断の材料(いまの残高)が
+ * すぐ上にあるからで、「いくらを切ったら困るか」はここでしか決められないため。
+ * 値はこの端末に保存される(Discord の Webhook 設定と同じ粒度)。
+ */
+function LowBalanceCard({ threshold }: { threshold: number }) {
+  const [draft, setDraft] = useState(String(threshold))
+  const [saved, setSaved] = useState(false)
+
+  const apply = () => {
+    const n = Number(draft)
+    if (!Number.isFinite(n)) return
+    setLowBalanceThreshold(n)
+    setDraft(String(Math.max(0, Math.round(n))))
+    setSaved(true)
+    window.setTimeout(() => setSaved(false), 2000)
+  }
+
+  return (
+    <div className="card">
+      <h2>残高が少なくなったら知らせる</h2>
+      <p className="muted">
+        預かり残高がこの金額を下回ったら、このタブと入力タブに注意を出します。Discord
+        を設定していれば、下回った時点で1回だけ通知します(下回ったままの日は鳴りません)
+      </p>
+      <div className="low-balance-setting">
+        <input
+          type="text"
+          inputMode="numeric"
+          aria-label="お知らせの基準額"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value.replace(/[^\d]/g, ''))}
+        />
+        <button type="button" className="btn-ghost" onClick={apply}>
+          保存
+        </button>
+      </div>
+      <p className="muted">
+        いまの基準: {yen(threshold)}
+        {threshold !== DEFAULT_LOW_BALANCE_THRESHOLD && `(既定は ${yen(DEFAULT_LOW_BALANCE_THRESHOLD)})`}
+        {saved && ' ・保存しました'}
+      </p>
+    </div>
   )
 }
 
@@ -142,6 +259,10 @@ function DiscordNotifyCard() {
   const [input, setInput] = useState('')
   const [inputError, setInputError] = useState<string | null>(null)
   const [testState, setTestState] = useState<'idle' | 'sending' | 'ok' | 'fail'>('idle')
+  // 失敗の理由 (Webhook が無効 / 届いていない / Discord 側の不調) で文言を変える。
+  // 「URLと通信状態を確認してください」と両方を並べていた頃は、いちばん多い
+  // 「チャンネルを作り直して URL が無効になった」にたどり着けなかった
+  const [testFailure, setTestFailure] = useState<DiscordFailure | null>(null)
 
   const handleSave = () => {
     const url = input.trim()
@@ -156,18 +277,21 @@ function DiscordNotifyCard() {
     setInput('')
     setInputError(null)
     setTestState('idle')
+    setTestFailure(null)
   }
 
   const handleTest = async () => {
     setTestState('sending')
-    const ok = await sendTestMessage()
-    setTestState(ok ? 'ok' : 'fail')
+    const result = await sendTestMessage()
+    setTestFailure(result.ok ? null : result.failure)
+    setTestState(result.ok ? 'ok' : 'fail')
   }
 
   const handleClear = () => {
     clearWebhookUrl()
     setSavedUrl(null)
     setTestState('idle')
+    setTestFailure(null)
   }
 
   return (
@@ -194,8 +318,8 @@ function DiscordNotifyCard() {
           {testState === 'ok' && (
             <p className="muted discord-result">✅ テスト通知を送信しました。Discordのチャンネルを確認してください</p>
           )}
-          {testState === 'fail' && (
-            <p className="error-text discord-result">送信に失敗しました。URLと通信状態を確認してください</p>
+          {testState === 'fail' && testFailure && (
+            <p className="error-text discord-result">{discordFailureMessage(testFailure)}</p>
           )}
         </>
       ) : (
@@ -233,20 +357,26 @@ interface MovementRowProps {
 
 function MovementRow({ tx, onEdit, comments, onOpenThread, onSubmitComment }: MovementRowProps) {
   const [open, setOpen] = useState(false)
-  const isDeposit = tx.type === 'partner_deposit'
-  const visual = isDeposit
-    ? ({ kind: 'icon', icon: 'wallet' } as const)
-    : resolveCategoryVisual(tx.category)
+  const isExpense = tx.type === 'expense'
+  // 残高への影響額。プラスなら残高が増えた行(預かり・調整・彼女が払いすぎた回)
+  const impact = partnerImpact(tx)
+  const visual = isExpense
+    ? resolveCategoryVisual(tx.category)
+    : ({ kind: 'icon', icon: 'wallet' } as const)
   // タイトルの優先順位: お店 → メモ → カテゴリ名
-  const title = isDeposit ? '彼女から預かり' : tx.store || tx.memo || categoryLabel(tx.category)
+  const title = isExpense ? tx.store || tx.memo || categoryLabel(tx.category) : ledgerRowTitle(tx)
 
   const subParts: string[] = [formatDate(tx.date)]
-  if (isDeposit) {
+  if (!isExpense) {
     if (tx.memo) subParts.push(tx.memo)
   } else {
     // タイトルがお店のときはメモをサブ行に併記
     if (tx.store && tx.memo) subParts.push(tx.memo)
     if (tx.store || tx.memo) subParts.push(categoryLabel(tx.category))
+    // 機能018: 彼女が払った回は、内訳を出さないと符号の意味が分からない
+    if (partnerPaid(tx) > 0) {
+      subParts.push(`彼女が ${yen(partnerPaid(tx))} 払い、負担は ${yen(tx.partner_amount)}`)
+    }
   }
 
   const unread = comments ? comments.some((c) => c.author === 'partner' && !c.readByOwner) : false
@@ -263,8 +393,9 @@ function MovementRow({ tx, onEdit, comments, onOpenThread, onSubmitComment }: Mo
             {subParts.join(' ・ ')}
           </span>
         </span>
-        <span className={`tx-amount ${isDeposit ? 'positive' : ''}`}>
-          {isDeposit ? `+${yen(tx.amount)}` : `-${yen(tx.partner_amount)}`}
+        {/* 残高への影響額をそのまま出す。1件ごとの符号と残高の増減が必ず一致する */}
+        <span className={`tx-amount ${impact > 0 ? 'positive' : ''}`}>
+          {impact > 0 ? `+${yen(impact)}` : `-${yen(-impact)}`}
         </span>
       </button>
       {comments !== null && (

@@ -18,7 +18,7 @@ import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { TransactionInput } from '../hooks/useTransactions'
 import type { Transaction } from './types'
-import { formatDate, yen } from './format'
+import { formatDate, yenPlain } from './format'
 import { isSchemaError } from './serverErrors'
 
 export type ChangeAction = 'update' | 'delete' | 'restore'
@@ -70,13 +70,19 @@ export function transactionSummary(
   t: Transaction,
   labelOf: (id: string | null) => string
 ): string {
+  // 支出以外は店名もカテゴリも持たないので、種別そのものを見出しにする。
+  // ここを落とすと返金・調整が「未分類」と表示され、履歴を遡る意味が薄れる
   const what =
     t.type === 'partner_deposit'
       ? '彼女から預かり'
-      : t.store.trim() !== ''
-        ? t.store.trim()
-        : labelOf(t.category)
-  return `${formatDate(t.date)} ${what} ${yen(t.amount)}`
+      : t.type === 'partner_refund'
+        ? '彼女へ返金'
+        : t.type === 'partner_adjust'
+          ? '残高の調整'
+          : t.store.trim() !== ''
+            ? t.store.trim()
+            : labelOf(t.category)
+  return `${formatDate(t.date)} ${what} ${yenPlain(t.amount)}`
 }
 
 /**
@@ -96,14 +102,14 @@ export function diffTransaction(
     if (from !== to) out.push({ label, from, to })
   }
   if (after.date !== undefined) push('日付', formatDate(before.date), formatDate(after.date))
-  if (after.amount !== undefined) push('金額', yen(before.amount), yen(after.amount))
+  if (after.amount !== undefined) push('金額', yenPlain(before.amount), yenPlain(after.amount))
   if (after.category !== undefined) {
     push('カテゴリ', labelOf(before.category), labelOf(after.category))
   }
   if (after.store !== undefined) push('お店', textOrDash(before.store ?? ''), textOrDash(after.store))
   if (after.memo !== undefined) push('メモ', textOrDash(before.memo ?? ''), textOrDash(after.memo))
   if (after.partner_amount !== undefined) {
-    push('彼女の負担分', yen(before.partner_amount), yen(after.partner_amount))
+    push('彼女の負担分', yenPlain(before.partner_amount), yenPlain(after.partner_amount))
   }
   if (after.satisfaction !== undefined) {
     const name = (v: unknown) =>

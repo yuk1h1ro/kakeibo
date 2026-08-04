@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { formatGuidance, guidanceForServerError, isOnlineNow } from './errorGuidance'
+import type { ServerErrorLike } from './serverErrors'
 
 export interface Category {
   // id は transactions.category に保存される値 (= cat_key)。既存コードとの互換用に残す
@@ -85,14 +87,26 @@ function computeActive(): Category[] {
     .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, 'ja'))
 }
 
+/**
+ * 隠したカテゴリ (機能086)。並びは元の sort_order のまま。
+ * 「隠した順」ではなく「元の並び」で出したほうが、戻すときに探しやすい。
+ */
+function computeArchived(): Category[] {
+  return allCategories
+    .filter((c) => c.archived)
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, 'ja'))
+}
+
 // useSyncExternalStore 用に参照が安定したスナップショットを保持する
 let activeSnapshot: Category[] = computeActive()
+let archivedSnapshot: Category[] = computeArchived()
 
 const listeners = new Set<() => void>()
 
 function setCategories(rows: Category[]): void {
   allCategories = rows
   activeSnapshot = computeActive()
+  archivedSnapshot = computeArchived()
   saveCache(rows)
   for (const l of listeners) l()
 }
@@ -106,9 +120,22 @@ function getSnapshot(): Category[] {
   return activeSnapshot
 }
 
+function getArchivedSnapshot(): Category[] {
+  return archivedSnapshot
+}
+
 /** アクティブなカテゴリ一覧 (sort_order 順)。ストア更新時に再描画される */
 export function useCategories(): Category[] {
   return useSyncExternalStore(subscribe, getSnapshot)
+}
+
+/**
+ * 隠しているカテゴリ一覧 (機能086)。
+ * 入力の選択肢には出さないが、設定画面で「戻す」ために一覧できる必要がある。
+ * 過去の記録の表示は archived に関係なく resolve() が解決するので影響しない。
+ */
+export function useArchivedCategories(): Category[] {
+  return useSyncExternalStore(subscribe, getArchivedSnapshot)
 }
 
 // ---------- 互換API(同期関数のまま維持) ----------
@@ -231,8 +258,11 @@ export async function initCategories(supabase: SupabaseClient): Promise<void> {
 
 // ---------- CRUD(カテゴリ編集はオンライン前提。失敗時は throw) ----------
 
-function throwOn(error: { message: string } | null): void {
-  if (error) throw new Error(error.message)
+// 原文をそのまま投げると、カテゴリ設定シートには英語の PostgREST メッセージが出る。
+// 他の lib (recurringRules / transactionTemplates / shareLinks / partnerComments) と
+// 同じく、原因と次の行動に置き換えてから投げる (機能161)
+function throwOn(error: ServerErrorLike | null): void {
+  if (error) throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
 }
 
 /** カテゴリを追加する。cat_key は uuid を採番 */
@@ -265,13 +295,35 @@ export async function updateCategory(
 }
 
 /**
- * カテゴリを削除(アーカイブ)する。
+ * カテゴリを隠す(アーカイブ)。削除ではない (機能086)。
  * 行は残るため、過去の記録のカテゴリ名・絵文字は引き続き表示できる。
+ * 入力の選択肢からは消える(useCategories が archived を除いているため)。
  */
 export async function archiveCategory(supabase: SupabaseClient, catKey: string): Promise<void> {
   const { error } = await supabase.from('categories').update({ archived: true }).eq('cat_key', catKey)
   throwOn(error)
   setCategories(allCategories.map((c) => (c.catKey === catKey ? { ...c, archived: true } : c)))
+}
+
+/**
+ * 隠したカテゴリを再表示する (機能086)。
+ * sort_order はそのままなので、元の位置に戻る。
+ */
+export async function unarchiveCategory(supabase: SupabaseClient, catKey: string): Promise<void> {
+  const { error } = await supabase
+    .from('categories')
+    .update({ archived: false })
+    .eq('cat_key', catKey)
+  throwOn(error)
+  setCategories(allCategories.map((c) => (c.catKey === catKey ? { ...c, archived: false } : c)))
+}
+
+/** そのカテゴリを使っている記録の件数。隠す前の確認に使う。(純粋関数) */
+export function countTransactionsWithCategory(
+  txs: readonly { category: string | null }[],
+  catKey: string
+): number {
+  return txs.filter((t) => t.category === catKey).length
 }
 
 /** アクティブ一覧内で1つ上/下と sort_order を入れ替える */

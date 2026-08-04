@@ -10,6 +10,8 @@ import { initTransactionTemplates, isTemplatesUnavailable } from '../lib/transac
 import { initSatisfaction } from '../lib/satisfaction'
 import { initAssets, isAssetsTabVisible, useAssetsStore } from '../lib/assets'
 import { todayISO } from '../lib/format'
+import { amountMaskToggleLabel, toggleAmountMask, useAmountMasked } from '../lib/amountMask'
+import { type Guidance } from '../lib/errorGuidance'
 import InputTab from './InputTab'
 import HistoryTab from './HistoryTab'
 import ReportTab from './ReportTab'
@@ -20,11 +22,39 @@ import SettingsSheet from './SettingsSheet'
 import TemplateSaveSheet from './TemplateSaveSheet'
 import { IconCalendar, IconChart, IconGear, IconHeart, IconLogout, IconPen } from './icons'
 import { IconAssets } from './assetIcons'
+import { IconEye, IconEyeOff } from './maskIcons'
 import useBodyScrollLock from '../hooks/useBodyScrollLock'
 import '../offline.css'
 import '../settings.css'
 
 type Tab = 'input' | 'history' | 'report' | 'partner' | 'assets'
+
+/**
+ * エラーの「原因」と「次の行動」を出す (機能161)。
+ *
+ * 原文だけを出していた頃は、読んでも次に何をすればいいのか分からなかった。
+ * 原因を1行、やることを箇条書き、原文は最後に小さく — の順に固定している
+ * (原文が先頭にあると、読む気を失ってやることまで届かない)。
+ */
+function ErrorGuide({ guide, onOpenSettings }: { guide: Guidance; onOpenSettings: () => void }) {
+  return (
+    <>
+      <span className="err-guide-summary">{guide.summary}</span>
+      <ul className="err-guide-actions">
+        {guide.actions.map((a) => (
+          <li key={a}>{a}</li>
+        ))}
+      </ul>
+      {/* 接続設定が疑わしいときだけ、その場からやり直せる場所へ連れて行く */}
+      {guide.kind === 'connection' && (
+        <button type="button" className="btn-ghost err-guide-btn" onClick={onOpenSettings}>
+          接続設定を確認する
+        </button>
+      )}
+      {guide.detail && <span className="err-guide-detail">詳細: {guide.detail}</span>}
+    </>
+  )
+}
 
 const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
   { id: 'input', label: '入力', icon: <IconPen /> },
@@ -112,7 +142,19 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
   // オンラインなのに同期が詰まっている(= 記録は保持されているが送れていない)状態。
   // 放置すると「履歴に反映されない」ように見えるので、対処法とあわせて明示する
   const stalled =
-    store.isOnline && store.pendingCount > 0 && !store.syncing && store.error !== null
+    store.isOnline && store.pendingCount > 0 && !store.syncing && store.errorGuide !== null
+
+  // エラーの原因と次の行動 (機能161)。
+  // フックが構造のまま (Guidance) 渡してくるので、ここでは分類し直さない。
+  // 以前は畳んだ文字列から引き直していたが、フック側も errorGuidance を通すように
+  // なったため、そのままだと「畳んだ案内」をもう一度案内で包むことになる
+  const guide = store.errorGuide
+
+  // 金額の目隠し (機能169)。
+  // 整形関数 (format.ts の yen など) は React の外にある状態を読むので、
+  // 切り替えても自動では描き直されない。アプリの全画面がこの下にぶら下がっているため、
+  // ここで購読しておけば1回の再描画で画面じゅうの金額が伏字に切り替わる。
+  const masked = useAmountMasked()
 
   // 資産タブの有無 (機能101)。テーブルが無いと分かった時点で選択中でも入力タブへ戻す
   const assetsStore = useAssetsStore()
@@ -125,6 +167,19 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
       <header className="app-header">
         <h1>家計簿</h1>
         <div className="header-actions">
+          {/* 金額の目隠し (機能169)。
+              人が近づいてから設定を開いていては間に合わないので、常に見えている
+              ヘッダーに置く。誤操作したくないログアウトの隣にはしたくないため、
+              歯車より左(タブから最も遠い側)に並べている */}
+          <button
+            className={`icon-btn${masked ? ' masked-on' : ''}`}
+            aria-label={amountMaskToggleLabel(masked)}
+            title={amountMaskToggleLabel(masked)}
+            aria-pressed={masked}
+            onClick={() => toggleAmountMask()}
+          >
+            {masked ? <IconEyeOff /> : <IconEye />}
+          </button>
           <button
             className="icon-btn"
             aria-label="設定"
@@ -148,15 +203,21 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
         </div>
       ) : store.pendingCount > 0 && store.syncing ? (
         <div className="sync-banner syncing">同期中… ({store.pendingCount}件)</div>
-      ) : stalled ? (
+      ) : stalled && guide ? (
         <div className="sync-banner warning">
           ⚠ 未同期の記録が {store.pendingCount}件あります
-          <span className="banner-detail">{store.error}</span>
+          <span className="banner-detail">
+            <ErrorGuide guide={guide} onOpenSettings={() => setShowSettings(true)} />
+          </span>
         </div>
       ) : null}
       <main className="app-main">
         {/* 未同期バナーに同じ内容を出しているときは重複表示しない */}
-        {store.error && !stalled && <p className="error-text">データ取得エラー: {store.error}</p>}
+        {guide && !stalled && (
+          <div className="error-text err-guide">
+            <ErrorGuide guide={guide} onOpenSettings={() => setShowSettings(true)} />
+          </div>
+        )}
         {activeTab === 'input' && (
           <InputTab store={store} supabase={supabase} datePrefill={datePrefill} />
         )}

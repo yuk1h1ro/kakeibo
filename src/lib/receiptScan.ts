@@ -138,7 +138,7 @@ async function loadBitmap(file: File): Promise<ImageBitmap | HTMLImageElement> {
       }
       img.onerror = () => {
         URL.revokeObjectURL(url)
-        reject(new Error('画像を読み込めませんでした'))
+        reject(new Error('写真を読み込めませんでした。もう一度撮影してください'))
       }
       img.src = url
     })
@@ -153,7 +153,9 @@ export async function resizeImage(file: File): Promise<{ base64: string; mimeTyp
   const source = await loadBitmap(file)
   const width = 'naturalWidth' in source ? source.naturalWidth : source.width
   const height = 'naturalHeight' in source ? source.naturalHeight : source.height
-  if (!width || !height) throw new Error('画像を読み込めませんでした')
+  if (!width || !height) {
+    throw new Error('写真を読み込めませんでした。もう一度撮影してください')
+  }
 
   const scale = Math.min(1, MAX_LONG_SIDE / Math.max(width, height))
   const w = Math.max(1, Math.round(width * scale))
@@ -163,13 +165,13 @@ export async function resizeImage(file: File): Promise<{ base64: string; mimeTyp
   canvas.width = w
   canvas.height = h
   const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('画像の変換に失敗しました')
+  if (!ctx) throw new Error('写真を処理できませんでした。別の写真でもう一度お試しください')
   ctx.drawImage(source, 0, 0, w, h)
   if ('close' in source) source.close()
 
   const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY)
   const comma = dataUrl.indexOf(',')
-  if (comma < 0) throw new Error('画像の変換に失敗しました')
+  if (comma < 0) throw new Error('写真を処理できませんでした。別の写真でもう一度お試しください')
   return { base64: dataUrl.slice(comma + 1), mimeType: 'image/jpeg' }
 }
 
@@ -233,6 +235,22 @@ export function extractReceiptFields(apiResponse: unknown): ReceiptScanResult {
   return { store, total, date }
 }
 
+/**
+ * どのエラーでも共通して使える「次の行動」(機能161)。
+ * 設定シートの接続テストは、キー・API有効化・キーの制限・モデルの4つを
+ * 一度に切り分けてくれるので、原因が絞りきれないときの行き先はここに統一する。
+ */
+const TEST_HINT =
+  '入力タブの「📷 レシートを読み取る」から設定を開き、「接続テスト」を押してください(原因を切り分けられます)'
+
+/** キーがまだ無いときの行き先 */
+const KEY_SETUP_HINT =
+  '入力タブの「📷 レシートを読み取る」を押すと、キーを貼り付ける設定画面が開きます'
+
+/** キーを取り直す場所。発行元を書かないと「どこで直すのか」が分からない */
+const REISSUE_HINT =
+  'Google AI Studio (aistudio.google.com/apikey) でキーを作り直して貼り付け直してください'
+
 /** 429 の原因別メッセージ(対処法が全く違うので混ぜない) */
 const QUOTA_MESSAGE = {
   /** 課金が有効なプロジェクト = 無料枠が外れており、前払いクレジットが尽きている */
@@ -276,19 +294,26 @@ function quotaExceededMessage(apiMessage?: string | null): string {
 export function httpErrorMessage(status: number, apiMessage?: string | null): string {
   let base: string
   if (status === 401 || status === 403) {
-    base = 'APIキーが無効か、権限がありません。設定を確認してください'
+    base =
+      `APIキーが無効か、そのキーでは使えない状態です(キーの打ち間違い・` +
+      `Generative Language API が未有効・キーの制限のいずれかの可能性があります)。${TEST_HINT}。` +
+      `キー自体が古い場合は、${REISSUE_HINT}`
   } else if (status === 400) {
     // 400 はリクエスト不正・モデル名不正・スキーマ不正でも返る。キー決め打ちにしない
-    base = 'リクエストが拒否されました'
+    base = `リクエストが拒否されました。キーの形式かモデルの指定に原因がある可能性があります。${TEST_HINT}`
   } else if (status === 404) {
-    base = '指定のモデルが見つかりません'
+    base =
+      '指定のモデルが提供終了になった可能性があります。' +
+      `アプリは自動で選び直しますが、それでも失敗が続くときは ${TEST_HINT}`
   } else if (status === 429) {
     // 429 は原因(クレジット枯渇 / 分あたり / 日次)で対処法が違うので分ける
     base = quotaExceededMessage(apiMessage)
   } else if (status >= 500) {
     base = 'Googleのサーバーが混み合っています。しばらく待ってから再度お試しください'
   } else {
-    base = `読み取りに失敗しました(HTTP ${status})`
+    base =
+      `読み取りに失敗しました(HTTP ${status})。原因は特定できませんでした。` +
+      `少し待ってからもう一度撮影し、それでも続くときは ${TEST_HINT}`
   }
   const detail = typeof apiMessage === 'string' ? apiMessage.trim() : ''
   return detail ? `${base}(詳細: ${detail})` : base
@@ -485,7 +510,9 @@ export function buildTestSuccessResult(models: GeminiModelInfo[]): GeminiTestRes
     return {
       ok: false,
       message:
-        'キーは有効ですが、レシート読み取りに使えるモデルが見つかりませんでした。' +
+        'キーは有効ですが、レシート読み取りに使えるモデル(Flash 系)が見つかりませんでした。' +
+        'そのキーのプロジェクトで使えるモデルが限られている可能性があります。' +
+        `しばらく待ってからもう一度「接続テスト」を押すか、${REISSUE_HINT}。` +
         `利用可能: ${head === '' ? '(取得できませんでした)' : head}`,
       availableModels: modelIds,
     }
@@ -523,7 +550,12 @@ export type ScanFetchLike = (url: string, init?: RequestInitLike) => Promise<Sca
  */
 export async function testGeminiKey(fetchImpl?: FetchLike): Promise<GeminiTestResult> {
   const key = getGeminiKey()
-  if (!key) return { ok: false, message: 'APIキーが設定されていません' }
+  if (!key) {
+    return {
+      ok: false,
+      message: `APIキーがまだ設定されていません。上の欄に貼り付けて「保存」を押してください(キーは ${REISSUE_HINT})`,
+    }
+  }
 
   const doFetch: FetchLike = fetchImpl ?? ((url, init) => fetch(url, init))
 
@@ -571,7 +603,7 @@ export async function testGeminiKey(fetchImpl?: FetchLike): Promise<GeminiTestRe
  */
 export async function resolveModel(fetchImpl?: FetchLike): Promise<string> {
   const key = getGeminiKey()
-  if (!key) throw new Error('先にGeminiのAPIキーを設定してください')
+  if (!key) throw new Error(`先に Gemini のAPIキーを設定してください。${KEY_SETUP_HINT}`)
 
   const doFetch: FetchLike = fetchImpl ?? ((url, init) => fetch(url, init as RequestInit))
 
@@ -609,7 +641,7 @@ export async function scanReceipt(
   fetchImpl?: ScanFetchLike,
 ): Promise<ReceiptScanResult> {
   const key = getGeminiKey()
-  if (!key) throw new Error('先にGeminiのAPIキーを設定してください')
+  if (!key) throw new Error(`先に Gemini のAPIキーを設定してください。${KEY_SETUP_HINT}`)
 
   const doFetch: ScanFetchLike = fetchImpl ?? ((url, init) => fetch(url, init as RequestInit))
 
