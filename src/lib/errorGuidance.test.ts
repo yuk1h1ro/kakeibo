@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   SYNC_REJECTED_PREFIX,
+  constraintMigrationTargetFor,
   describeUnknownError,
   formatGuidance,
   guidanceForMessage,
   guidanceForServerError,
+  ledgerRejectionGuidance,
   migrationTargetFor,
+  syncRejectedGuidance,
 } from './errorGuidance'
 
 describe('migrationTargetFor', () => {
@@ -37,6 +40,79 @@ describe('migrationTargetFor', () => {
 
   it('知らない名前には推測でファイル名を出さない', () => {
     expect(migrationTargetFor('column transactions.mystery does not exist')).toBeNull()
+  })
+
+  // 後から足した列。どの SQL が足しているかは supabase/ の中身と突き合わせて確認済み
+  it('立替者・タグ・分割の列は、store ではなくそれぞれの SQL を名指しする', () => {
+    expect(
+      migrationTargetFor("Could not find the 'partner_paid' column of 'transactions'")?.file
+    ).toBe('migration-partner-ledger.sql')
+    expect(migrationTargetFor('column transactions.tags does not exist')?.file).toBe(
+      'migration-tags-splits.sql'
+    )
+    expect(migrationTargetFor("Could not find the 'split_group' column of 'transactions'")?.file).toBe(
+      'migration-tags-splits.sql'
+    )
+    // 気分は前から対応済み。取り違えていないことも一緒に固定する
+    expect(migrationTargetFor('column transactions.satisfaction does not exist')?.file).toBe(
+      'migration-satisfaction.sql'
+    )
+  })
+
+  it('資産・変更履歴・共有まわりのテーブルも名指しできる', () => {
+    expect(migrationTargetFor('relation "public.asset_balances" does not exist')?.file).toBe(
+      'migration-assets.sql'
+    )
+    expect(migrationTargetFor('relation "public.partner_share_comments" does not exist')?.file).toBe(
+      'migration-partner-share.sql'
+    )
+    expect(migrationTargetFor('relation "public.partner_summary_sends" does not exist')?.file).toBe(
+      'migration-partner-share.sql'
+    )
+  })
+
+  it('共有ページの関数が無いときも、共有のSQLを名指しする', () => {
+    expect(
+      migrationTargetFor(
+        "Could not find the function public.partner_share_view(p_token) in the schema cache"
+      )?.file
+    ).toBe('migration-partner-share.sql')
+    expect(
+      migrationTargetFor('function public.partner_share_add_comment(text,uuid,text) does not exist')
+        ?.file
+    ).toBe('migration-partner-share.sql')
+  })
+})
+
+describe('constraintMigrationTargetFor', () => {
+  it('マイグレーションが条件をゆるめている制約だけ、SQLを名指しする', () => {
+    const text =
+      'new row for relation "transactions" violates check constraint "transactions_type_check"'
+    expect(constraintMigrationTargetFor(text)?.file).toBe('migration-partner-ledger.sql')
+    expect(
+      constraintMigrationTargetFor(
+        'new row for relation "transactions" violates check constraint "transactions_amount_check"'
+      )?.file
+    ).toBe('migration-partner-ledger.sql')
+  })
+
+  it('列を足したSQLが同時に作る制約には、SQLを案内しない(実行済みのはずなので)', () => {
+    // tags 列と一緒に入る制約 = 違反した時点で migration-tags-splits.sql は実行済み。
+    // ここでファイル名を出すと「実行済みのSQLを実行してください」と嘘をつくことになる
+    expect(
+      constraintMigrationTargetFor(
+        'new row for relation "transactions" violates check constraint "transactions_tags_check"'
+      )
+    ).toBeNull()
+    expect(
+      constraintMigrationTargetFor(
+        'new row for relation "transactions" violates check constraint "transactions_partner_paid_check"'
+      )
+    ).toBeNull()
+  })
+
+  it('制約名が読み取れないときは推測しない', () => {
+    expect(constraintMigrationTargetFor('violates check constraint')).toBeNull()
   })
 })
 
@@ -143,6 +219,56 @@ describe('guidanceForServerError — その他', () => {
   })
 })
 
+describe('guidanceForServerError — チェック制約', () => {
+  it('返金・調整が弾かれたら、預かり台帳のSQLを案内する(断定はしない)', () => {
+    const g = guidanceForServerError({
+      message:
+        'new row for relation "transactions" violates check constraint "transactions_type_check"',
+      code: '23514',
+    })
+    expect(g.kind).toBe('migration')
+    expect(g.actions.join(' ')).toContain('supabase/migration-partner-ledger.sql')
+    expect(g.summary).toContain('可能性')
+  })
+
+  it('対応表に無い制約では、SQLを案内せず入力の見直しを促す', () => {
+    const g = guidanceForServerError({
+      message:
+        'new row for relation "transactions" violates check constraint "transactions_partner_paid_check"',
+      code: '23514',
+    })
+    expect(g.kind).toBe('rejected')
+    expect(formatGuidance(g)).not.toMatch(/migration-[a-z-]+\.sql/)
+    expect(g.actions.length).toBeGreaterThan(0)
+  })
+})
+
+describe('ledgerRejectionGuidance', () => {
+  it('返金・調整を保存できないときは、実行すべきSQLと記録が残ることを伝える', () => {
+    const g = ledgerRejectionGuidance({ message: 'violates check constraint', code: '23514' })
+    expect(g.kind).toBe('migration')
+    expect(g.actions.join(' ')).toContain('supabase/migration-partner-ledger.sql')
+    expect(g.actions.join(' ')).toContain('記録は端末に残っています')
+  })
+})
+
+describe('syncRejectedGuidance', () => {
+  it('送れなかったことを頭に置き、理由は通常どおり分類する', () => {
+    const g = syncRejectedGuidance({ message: 'duplicate key value violates unique constraint', code: '23505' })
+    expect(g.kind).toBe('rejected')
+    expect(g.summary).toContain('送れなかった記録があります')
+    expect(g.summary).toContain('すでにあるため')
+  })
+
+  it('畳んだ文言を、もう一度案内で包み直さない(二重表示の防止)', () => {
+    const err = { message: "Could not find the 'tags' column of 'transactions'", code: 'PGRST204' }
+    const folded = formatGuidance(guidanceForServerError(err))
+    // フックはこの文字列ではなく Guidance をそのまま画面へ渡す。
+    // 万一もう一度通しても、案内が入れ子にならないことを確かめる
+    expect(describeUnknownError(folded)).toBe(folded)
+  })
+})
+
 describe('guidanceForMessage', () => {
   it('同期に失敗した記録の前置きを剥がして中身で分類する', () => {
     const g = guidanceForMessage(`${SYNC_REJECTED_PREFIX}duplicate key value violates unique constraint`)
@@ -182,5 +308,23 @@ describe('formatGuidance / describeUnknownError', () => {
     const b = describeUnknownError('Invalid API key')
     expect(a).toBe(b)
     expect(a).toContain('anon public')
+  })
+
+  it('すでに日本語で書かれた自前の文言は言い換えない', () => {
+    // レシート読み取り・Gemini の上限・「オンライン時のみ可能です」など、
+    // ここに来る前にもっと具体的なことが書けている文言を上書きしないこと
+    const parse = 'レシートを読み取れませんでした。明るい場所でもう一度撮影してください'
+    expect(describeUnknownError(new Error(parse))).toBe(parse)
+    const quota =
+      'Gemini の1分あたりの上限に達しました。1分ほど待ってからもう一度お試しください'
+    expect(describeUnknownError(new Error(quota))).toBe(quota)
+    expect(describeUnknownError(new Error('カテゴリの編集はオンライン時のみ可能です'))).toBe(
+      'カテゴリの編集はオンライン時のみ可能です'
+    )
+  })
+
+  it('サーバーの原文(英語)はきちんと言い換える', () => {
+    const line = describeUnknownError(new Error("Could not find the 'tags' column of 'transactions'"))
+    expect(line).toContain('migration-tags-splits.sql')
   })
 })

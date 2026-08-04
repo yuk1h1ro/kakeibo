@@ -66,6 +66,51 @@ const MIGRATION_BY_COLUMN: [name: string, file: string, what: string][] = [
   ['store', 'migration-store.sql', '取引の「お店」列'],
   ['source', 'migration-recurring-rules.sql', '取引の「自動生成」列'],
   ['satisfaction', 'migration-satisfaction.sql', '取引の「気分」列'],
+  // 以下の3列は、どの SQL が足しているかを supabase/ の中身で確かめて書いている:
+  //   partner_paid            … migration-partner-ledger.sql の「4. 彼女が実際に払った額の列」
+  //   tags / split_group      … migration-tags-splits.sql の「1. タグ」「2. 分割の束ねID」
+  // (どちらも schema.sql には無い = 新規に作った人にも後から足す必要がある列)
+  ['partner_paid', 'migration-partner-ledger.sql', '取引の「彼女が払った額」列'],
+  ['tags', 'migration-tags-splits.sql', '取引の「タグ」列'],
+  ['split_group', 'migration-tags-splits.sql', '取引の「分割の束ね」列'],
+]
+
+/**
+ * PostgREST 経由で呼ぶ関数 (RPC)。共有ページは anon から関数だけを叩くので、
+ * 関数が無いときは列・テーブルではなく関数名でエラーが返る。
+ * いずれも supabase/migration-partner-share.sql が作っている
+ * (schema.sql にも同じ定義があるので、新規に作った人は実行済み)。
+ */
+const MIGRATION_BY_FUNCTION: [name: string, file: string, what: string][] = [
+  ['partner_share_view', 'migration-partner-share.sql', '共有ページを読み出す関数'],
+  ['partner_share_add_comment', 'migration-partner-share.sql', '共有ページにコメントする関数'],
+  ['partner_share_new_token', 'migration-partner-share.sql', '共有リンクのトークンを作る関数'],
+]
+
+/**
+ * 「マイグレーションが条件をゆるめている」チェック制約の対応表。
+ *
+ * ここに載せてよいのは、**古いスキーマのままだと必ず弾かれ、SQL を実行すれば通る**
+ * ものだけ。supabase/schema.sql と各 migration の制約定義を突き合わせて確かめた:
+ *   transactions_type_check
+ *     schema.sql は type in ('expense','partner_deposit') のみ。
+ *     migration-partner-ledger.sql が partner_refund / partner_adjust を足す。
+ *   transactions_amount_check
+ *     schema.sql は amount > 0。ledger が partner_adjust だけ amount <> 0 に広げる
+ *     (調整はマイナスもあり得るため)。
+ *   transactions_partner_amount_check
+ *     schema.sql は partner_amount <= amount を全種別に課す。ledger が支出のときだけに限る
+ *     (調整行は amount がマイナスになり得るため)。
+ *
+ * 逆に transactions_partner_paid_check / transactions_tags_check /
+ * transactions_satisfaction_check は「列を足した migration が同時に作る制約」なので、
+ * 違反した時点でその migration は実行済み = 原因は値のほう。ここには載せない
+ * (載せると「実行済みの SQL をもう一度実行してください」と嘘を案内することになる)。
+ */
+const MIGRATION_BY_CONSTRAINT: [name: string, file: string, what: string][] = [
+  ['transactions_type_check', 'migration-partner-ledger.sql', '返金・調整の種別'],
+  ['transactions_amount_check', 'migration-partner-ledger.sql', '調整のマイナス金額'],
+  ['transactions_partner_amount_check', 'migration-partner-ledger.sql', '返金・調整の行'],
 ]
 
 export interface MigrationTarget {
@@ -88,7 +133,16 @@ function mentions(text: string, name: string): boolean {
  * 案内すべきは schema.sql ではなく migration-store.sql。
  * PostgREST / PostgreSQL が返す4つの形から、対象そのものを取り出す。
  */
-function extractMissing(text: string): { kind: 'column' | 'table'; name: string } | null {
+function extractMissing(
+  text: string
+): { kind: 'column' | 'table' | 'function'; name: string } | null {
+  // 関数を先に見る。「function public.partner_share_view(text) does not exist」は
+  // 下の table の形にも一部似ているため、取り違えないように順番で守る
+  const fn =
+    /could not find the function\s+(?:public\.)?([a-z_]+)/i.exec(text) ??
+    /function\s+(?:public\.)?([a-z_]+)\([^)]*\)\s+does not exist/i.exec(text)
+  if (fn) return { kind: 'function', name: fn[1] }
+
   const column =
     /column\s+"?(?:[a-z_]+\.)?([a-z_]+)"?\s+does not exist/i.exec(text) ??
     /could not find the '([a-z_]+)' column/i.exec(text)
@@ -118,19 +172,35 @@ export function migrationTargetFor(text: string): MigrationTarget | null {
   const missing = extractMissing(text)
   if (missing) {
     // 対象が読み取れたなら、対応表に無い = 知らないものなので推測しない
-    return missing.kind === 'column'
-      ? lookup(MIGRATION_BY_COLUMN, missing.name)
-      : lookup(MIGRATION_BY_TABLE, missing.name)
+    if (missing.kind === 'column') return lookup(MIGRATION_BY_COLUMN, missing.name)
+    if (missing.kind === 'function') return lookup(MIGRATION_BY_FUNCTION, missing.name)
+    return lookup(MIGRATION_BY_TABLE, missing.name)
   }
 
   // 形が読み取れなかったときだけ、名前の出現で当てにいく。
-  // テーブル名を先に見る(列名は他の名前の一部になりやすい)
+  // 関数名・テーブル名を先に見る(列名は他の名前の一部になりやすい)
+  for (const [name, file, what] of MIGRATION_BY_FUNCTION) {
+    if (mentions(text, name)) return { what, file }
+  }
   for (const [name, file, what] of MIGRATION_BY_TABLE) {
     if (name !== 'transactions' && mentions(text, name)) return { what, file }
   }
   for (const [name, file, what] of MIGRATION_BY_COLUMN) {
     if (mentions(text, name)) return { what, file }
   }
+  return null
+}
+
+/**
+ * チェック制約違反の本文から「その制約をゆるめる SQL」を引く。(純粋関数)
+ * 対応表に無い制約は null — 値そのものが不正なだけの可能性が高く、
+ * SQL を案内すると的外れになるため。
+ */
+export function constraintMigrationTargetFor(text: string): MigrationTarget | null {
+  const m = /violates check constraint\s+"([a-z_]+)"/i.exec(text)
+  const name = m ? m[1] : null
+  if (name) return lookup(MIGRATION_BY_CONSTRAINT, name)
+  // 制約名が読み取れないときは推測しない
   return null
 }
 
@@ -166,6 +236,45 @@ function isDuplicateError(err: ServerErrorLike, text: string): boolean {
   return err.code === '23505' || /duplicate key|already exists/i.test(text)
 }
 
+/** チェック制約に弾かれた (23514) */
+function isCheckConstraintError(err: ServerErrorLike, text: string): boolean {
+  return err.code === '23514' || /violates check constraint/i.test(text)
+}
+
+/** 「実行すればこの記録は通る」ことまで言い切れるマイグレーション案内 */
+function migrationGuidance(target: MigrationTarget, detail: string | null): Guidance {
+  return {
+    kind: 'migration',
+    summary: `${target.what}が Supabase にまだありません(マイグレーション未実行)。`,
+    actions: [
+      `Supabase の SQL Editor で supabase/${target.file} の中身を貼り付けて実行してください(何回実行しても安全です)。`,
+      '実行が済めば、入力した記録はそのまま自動で同期されます(記録は端末に残っています)。',
+    ],
+    detail,
+  }
+}
+
+/**
+ * 「返金・調整をこのサーバーがまだ知らない」ときの案内。(純粋関数)
+ *
+ * 列不足ではなくチェック制約違反 (23514) で返ってくるため、上の migrationGuidance とは
+ * 別に持っている。呼び出し側 (useTransactions) は保存しようとした種別まで見て
+ * この形だと判断しているので、ここでは原因を言い切ってよい。
+ */
+export function ledgerRejectionGuidance(err: ServerErrorLike): Guidance {
+  const detail = err.message.trim() === '' ? null : err.message.trim()
+  return {
+    kind: 'migration',
+    summary:
+      '預かりの「返金」「調整」を、いまの Supabase がまだ受け付けられません(マイグレーション未実行)。',
+    actions: [
+      'Supabase の SQL Editor で supabase/migration-partner-ledger.sql の中身を貼り付けて実行してください(何回実行しても安全です)。',
+      '実行が済めば、入力した記録はそのまま自動で同期されます(記録は端末に残っています)。',
+    ],
+    detail,
+  }
+}
+
 /**
  * サーバーのエラーから、原因と次の行動を引く。(純粋関数)
  *
@@ -179,17 +288,7 @@ export function guidanceForServerError(err: ServerErrorLike, online = true): Gui
   // 1. マイグレーション未実行。実行すれば必ず直るので最優先で見分ける
   if (isSchemaError(err)) {
     const target = migrationTargetFor(text)
-    if (target) {
-      return {
-        kind: 'migration',
-        summary: `${target.what}が Supabase にまだありません(マイグレーション未実行)。`,
-        actions: [
-          `Supabase の SQL Editor で supabase/${target.file} の中身を貼り付けて実行してください(何回実行しても安全です)。`,
-          '実行が済めば、入力した記録はそのまま自動で同期されます(記録は端末に残っています)。',
-        ],
-        detail,
-      }
-    }
+    if (target) return migrationGuidance(target, detail)
     return {
       kind: 'migration',
       summary:
@@ -285,7 +384,33 @@ export function guidanceForServerError(err: ServerErrorLike, online = true): Gui
     }
   }
 
-  // 8. 分からないもの。ここで原因を作り話にしないことが、この機能でいちばん大事
+  // 8. チェック制約違反。原因は2通り(古いスキーマ / 値そのものが不正)あるので、
+  //    「その制約をゆるめる SQL が存在する」と確かめた制約のときだけファイル名を出す
+  if (isCheckConstraintError(err, text)) {
+    const target = constraintMigrationTargetFor(text)
+    if (target) {
+      return {
+        kind: 'migration',
+        summary: `${target.what}を、いまの Supabase がまだ受け付けられません(マイグレーション未実行の可能性があります)。`,
+        actions: [
+          `Supabase の SQL Editor で supabase/${target.file} の中身を貼り付けて実行してください(何回実行しても安全です)。`,
+          '実行しても直らないときは、下の「詳細」の制約名をそのまま控えてください(入力した値のほうが条件に合っていない可能性があります)。',
+        ],
+        detail,
+      }
+    }
+    return {
+      kind: 'rejected',
+      summary: '入力した内容がデータベースの条件に合わず、拒否されました。',
+      actions: [
+        '金額・日付・カテゴリを見直して、もう一度保存してください。',
+        '下の「詳細」に出ている制約名が、どの項目のことかの手がかりになります。',
+      ],
+      detail,
+    }
+  }
+
+  // 9. 分からないもの。ここで原因を作り話にしないことが、この機能でいちばん大事
   return {
     kind: 'unknown',
     summary: '原因を特定できませんでした。',
@@ -297,8 +422,22 @@ export function guidanceForServerError(err: ServerErrorLike, online = true): Gui
   }
 }
 
-/** 同期に失敗して破棄された記録の知らせ(useTransactions が付ける前置き) */
+/** 同期に失敗して破棄された記録の知らせ(古い形式の文字列に付いていた前置き) */
 export const SYNC_REJECTED_PREFIX = '同期できなかった記録があります: '
+
+/**
+ * サーバーに送れず破棄した記録の案内。(純粋関数)
+ *
+ * 「送れなかった」ことと「なぜ送れなかったか」は別の話なので、
+ * 前者を頭に足したうえで、後者は通常の分類をそのまま使う。
+ * 文言を1か所に集めるため、useTransactions からも下の guidanceForMessage からも
+ * この関数を通す(以前は前置き付きの文字列を組み立てていて、
+ * 受け取った側がもう一度ほどく必要があった)。
+ */
+export function syncRejectedGuidance(err: ServerErrorLike, online = true): Guidance {
+  const g = guidanceForServerError(err, online)
+  return { ...g, kind: 'rejected', summary: `サーバーに送れなかった記録があります。${g.summary}` }
+}
 
 /**
  * すでに文字列になってしまったエラーから、原因と次の行動を引く。(純粋関数)
@@ -310,9 +449,7 @@ export function guidanceForMessage(message: string, online = true): Guidance {
   const text = message.trim()
 
   if (text.startsWith(SYNC_REJECTED_PREFIX)) {
-    const inner = text.slice(SYNC_REJECTED_PREFIX.length)
-    const g = guidanceForServerError({ message: inner }, online)
-    return { ...g, kind: 'rejected', summary: `サーバーに送れなかった記録があります。${g.summary}` }
+    return syncRejectedGuidance({ message: text.slice(SYNC_REJECTED_PREFIX.length) }, online)
   }
 
   // すでに実行すべき SQL を名指ししている自前のメッセージは、書き換えずにそのまま活かす。
@@ -340,10 +477,29 @@ export function formatGuidance(g: Guidance): string {
   return g.detail ? `${head}(詳細: ${g.detail})` : head
 }
 
-/** 例外(unknown)を、そのまま画面に出せる文言にする */
+/**
+ * すでに人に向けて書かれた文言か。(純粋関数)
+ *
+ * 日本語が含まれていれば、それはサーバーの原文ではなく、このアプリの誰かが
+ * 人のために書いた文言(レシートが読めない・Gemini の上限・オンライン限定・
+ * 他の lib が formatGuidance で畳んだ案内…)。
+ * そこに「原因を特定できませんでした」を被せると、せっかくの具体的な案内が
+ * 一般論に上書きされてしまうので、そのまま通す。
+ * PostgREST / Supabase / fetch の原文は英語なので、これで取り違えない。
+ */
+function looksAlreadyWrittenForHumans(message: string): boolean {
+  return /[ぁ-んァ-ヴ一-龠]/.test(message)
+}
+
+/**
+ * 例外(unknown)を、そのまま画面に出せる文言にする。
+ * すでに日本語で書かれた文言は言い換えない(上の looksAlreadyWrittenForHumans)。
+ */
 export function describeUnknownError(e: unknown, online = true): string {
   const message = e instanceof Error ? e.message : String(e)
-  return formatGuidance(guidanceForMessage(message, online))
+  const trimmed = message.trim()
+  if (trimmed !== '' && looksAlreadyWrittenForHumans(trimmed)) return trimmed
+  return formatGuidance(guidanceForMessage(trimmed === '' ? message : trimmed, online))
 }
 
 /** navigator.onLine を安全に読む(非ブラウザ環境では「オンライン」とみなす) */
