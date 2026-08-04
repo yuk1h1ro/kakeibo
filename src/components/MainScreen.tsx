@@ -19,6 +19,7 @@ import PartnerTab from './PartnerTab'
 import AssetsTab from './AssetsTab'
 import TransactionForm, { type DatePrefill } from './TransactionForm'
 import SettingsSheet from './SettingsSheet'
+import QuarantineSheet from './QuarantineSheet'
 import TemplateSaveSheet from './TemplateSaveSheet'
 import { IconCalendar, IconChart, IconGear, IconHeart, IconLogout, IconPen } from './icons'
 import { IconAssets } from './assetIcons'
@@ -72,6 +73,8 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
   const [tab, setTab] = useState<Tab>('input')
   const [editing, setEditing] = useState<Transaction | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  // 同期できずに隔離された記録の一覧 (設定からも、下のバナーからも開ける)
+  const [showQuarantine, setShowQuarantine] = useState(false)
   const [templateFrom, setTemplateFrom] = useState<Transaction | null>(null)
   // 履歴カレンダーの「この日で入力する」で入力タブへ渡す日付(機能053)
   const [datePrefill, setDatePrefill] = useState<DatePrefill | undefined>(undefined)
@@ -211,6 +214,21 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
           </span>
         </div>
       ) : null}
+      {/* サーバーに断られて端末に取り置いた記録 (A/B)。
+          再読み込みしても消えないよう、状態(localStorage)から直接出す。
+          以前はエラー文言だけが頼りで、更新のたびに消えて痕跡がゼロになっていた */}
+      {store.quarantined.length > 0 && (
+        <div className="sync-banner warning">
+          ⚠ 同期できなかった記録が {store.quarantined.length}件あります(この端末に残しています)
+          <button
+            type="button"
+            className="btn-ghost banner-link"
+            onClick={() => setShowQuarantine(true)}
+          >
+            中身を確認する
+          </button>
+        </div>
+      )}
       <main className="app-main">
         {/* 未同期バナーに同じ内容を出しているときは重複表示しない */}
         {guide && !stalled && (
@@ -244,7 +262,25 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
           </button>
         ))}
       </nav>
-      {showSettings && <SettingsSheet supabase={supabase} onClose={() => setShowSettings(false)} />}
+      {showSettings && (
+        <SettingsSheet
+          supabase={supabase}
+          onClose={() => setShowSettings(false)}
+          quarantinedCount={store.quarantined.length}
+          onOpenQuarantine={() => {
+            setShowSettings(false)
+            setShowQuarantine(true)
+          }}
+        />
+      )}
+      {showQuarantine && (
+        <QuarantineSheet
+          entries={store.quarantined}
+          onRetry={(id) => void store.retryQuarantined(id)}
+          onDiscard={(id) => store.discardQuarantined(id)}
+          onClose={() => setShowQuarantine(false)}
+        />
+      )}
       {editing && (
         <div className="modal-backdrop" onClick={() => setEditing(null)}>
           <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>

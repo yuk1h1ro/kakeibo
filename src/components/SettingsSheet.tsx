@@ -27,6 +27,12 @@ import '../settings.css'
 interface Props {
   supabase: SupabaseClient
   onClose: () => void
+  /**
+   * 同期できずに隔離された記録の件数と、その一覧を開く導線。
+   * 0件のときは行ごと出さない(押しても何も無い導線を見せない)。
+   */
+  quarantinedCount?: number
+  onOpenQuarantine?: () => void
 }
 
 const KEYPAD_OPTIONS: { id: KeypadPreference; label: string }[] = [
@@ -54,7 +60,12 @@ const AMOUNT_MASK_OPTIONS: { masked: boolean; label: string }[] = [
  * マイグレーション未実行のテーブルに依存する項目は、そもそも出さない
  * (押しても何もできない導線を見せない)。
  */
-export default function SettingsSheet({ supabase, onClose }: Props) {
+export default function SettingsSheet({
+  supabase,
+  onClose,
+  quarantinedCount = 0,
+  onOpenQuarantine,
+}: Props) {
   const [child, setChild] = useState<'category' | 'recurring' | null>(null)
   const keypadPref = useKeypadPreference()
   const privacyBlur = usePrivacyBlurEnabled()
@@ -102,6 +113,20 @@ export default function SettingsSheet({ supabase, onClose }: Props) {
                 <button className="settings-row" onClick={() => setChild('recurring')}>
                   <span className="settings-row-title">繰り返し入力</span>
                   <span className="settings-row-sub">家賃・サブスクを自動で記録する</span>
+                </button>
+              </li>
+            )}
+            {/* サーバーに断られて端末に取り置いた記録。
+                残っている間だけ出す = ふだんは存在しない行 */}
+            {quarantinedCount > 0 && onOpenQuarantine && (
+              <li>
+                <button className="settings-row" onClick={onOpenQuarantine}>
+                  <span className="settings-row-title">
+                    同期できなかった記録({quarantinedCount}件)
+                  </span>
+                  <span className="settings-row-sub">
+                    中身を確認して、もう一度送る・破棄する
+                  </span>
                 </button>
               </li>
             )}
