@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { recordBalances, assetCategoryEmoji, type BalanceEntry } from '../lib/assets'
-import { formatBalanceInput, parseBalanceInput, type AssetRow } from '../lib/netWorth'
+import { parseBalanceInput, type AssetRow } from '../lib/netWorth'
+import AmountTextInput from './AmountTextInput'
 import { todayISO, yen } from '../lib/format'
 import useBodyScrollLock from '../hooks/useBodyScrollLock'
 import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
@@ -25,17 +26,13 @@ export default function BalanceEntrySheet({ supabase, rows, onClose, onSaved }: 
   useBodyScrollLock()
 
   const [asOf, setAsOf] = useState(todayISO())
+  // 金額欄の内部状態は「数字だけの文字列」(AmountTextInput / 機能050 の約束)。
+  // カンマは表示の直前にだけ足されるので、ここで持つ値は素の数字のままでよい
   const [texts, setTexts] = useState<Record<string, string>>(() =>
-    Object.fromEntries(rows.map((r) => [r.asset.id, formatBalanceInput(r.balance)]))
+    Object.fromEntries(rows.map((r) => [r.asset.id, r.balance === null ? '' : String(r.balance)]))
   )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  // 入力途中の文字列はそのまま保持し、確定(blur)のときだけ整形する。
-  // 打っている最中に桁区切りを入れるとキャレットが飛ぶため。
-  const normalize = (id: string) => {
-    setTexts((prev) => ({ ...prev, [id]: formatBalanceInput(parseBalanceInput(prev[id] ?? '')) }))
-  }
 
   const entries: BalanceEntry[] = rows
     .map((r) => ({ assetId: r.asset.id, balance: parseBalanceInput(texts[r.asset.id] ?? '') }))
@@ -100,16 +97,18 @@ export default function BalanceEntrySheet({ supabase, rows, onClose, onSaved }: 
                   </span>
                 </span>
               </span>
-              <input
+              {/* 打つそばから 1,234,567 と桁区切りされる金額欄 (機能050) を、
+                  ほかの金額欄と同じように使う。残高は100万円台を打つ場所なので、
+                  桁区切りがいちばん要る。確定(blur)まで待って整形していたのは
+                  キャレットが飛ぶのを避けるためだったが、AmountTextInput は
+                  「前にある数字の個数」でキャレットを移し替えるのでその心配がない */}
+              <AmountTextInput
                 className="balance-entry-input"
-                type="text"
+                ariaLabel={`${r.asset.name}の残高`}
                 inputMode="numeric"
-                autoComplete="off"
                 placeholder="0"
-                aria-label={`${r.asset.name}の残高`}
                 value={texts[r.asset.id] ?? ''}
-                onChange={(e) => setTexts((prev) => ({ ...prev, [r.asset.id]: e.target.value }))}
-                onBlur={() => normalize(r.asset.id)}
+                onChange={(v) => setTexts((prev) => ({ ...prev, [r.asset.id]: v }))}
               />
             </label>
           ))}
