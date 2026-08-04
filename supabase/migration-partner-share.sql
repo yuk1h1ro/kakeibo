@@ -227,11 +227,29 @@ create index if not exists idx_partner_summary_sends_user_id
 -- 彼女がアクセスするのは下の security definer 関数だけです。
 -- (ログイン後のアプリは authenticated ロールで動くので影響ありません)
 -- ------------------------------------------------------------
-revoke all on table public.transactions from anon;
-revoke all on table public.categories from anon;
-revoke all on table public.partner_share_links from anon;
-revoke all on table public.partner_share_comments from anon;
-revoke all on table public.partner_summary_sends from anon;
+-- 存在しないテーブルを revoke するとスクリプト全体が止まってしまうので、
+-- 実在するものだけを対象にする(古いスキーマのままの環境でも最後まで通す)
+do $$
+declare
+  t text;
+begin
+  foreach t in array array[
+    'transactions',
+    'categories',
+    'store_categories',
+    'recurring_rules',
+    'transaction_templates',
+    'partner_share_links',
+    'partner_share_comments',
+    'partner_summary_sends'
+  ]
+  loop
+    if to_regclass('public.' || t) is not null then
+      execute format('revoke all on table public.%I from anon', t);
+    end if;
+  end loop;
+end
+$$;
 
 -- ------------------------------------------------------------
 -- 5. partner_share_view(token) — 共有ページが読むもの
