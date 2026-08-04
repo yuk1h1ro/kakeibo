@@ -1,23 +1,44 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import TransactionForm, { type FormPrefill } from './TransactionForm'
 import GeminiKeySheet from './GeminiKeySheet'
+import ReceiptBatchSheet from './ReceiptBatchSheet'
+import RecategorizeSheet from './RecategorizeSheet'
 import { yen } from '../lib/format'
 import { categoryLabel, resolveCategoryVisual, useCategories } from '../lib/categories'
 import { CategoryVisualBadge } from './categoryIcons'
 import { IconGear } from './icons'
 import { hasGeminiKey, scanReceipt } from '../lib/receiptScan'
+import {
+  rememberStoreCategory,
+  transactionsToRecategorize,
+} from '../lib/storeCategories'
+import {
+  isTemplatesUnavailable,
+  templateLabel,
+  useTransactionTemplates,
+} from '../lib/transactionTemplates'
 import type { Transaction } from '../lib/types'
-import type { useTransactions } from '../hooks/useTransactions'
+import type { TransactionInput, useTransactions } from '../hooks/useTransactions'
 
 type Store = ReturnType<typeof useTransactions>
 
-export default function InputTab({ store }: { store: Store }) {
+// 保存直後に出す「過去にも適用しますか?」の対象(機能078)
+interface RecategorizeTarget {
+  storeName: string
+  category: string
+  targets: Transaction[]
+}
+
+export default function InputTab({ store, supabase }: { store: Store; supabase: SupabaseClient }) {
   const [saved, setSaved] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [prefill, setPrefill] = useState<FormPrefill | undefined>(undefined)
   const [pendingPartner, setPendingPartner] = useState(0)
   // カテゴリ変更(名前・絵文字)時に「最近の記録から入力」チップを再描画するための購読
   useCategories()
+  const templates = useTransactionTemplates()
+  const [recategorize, setRecategorize] = useState<RecategorizeTarget | null>(null)
 
   // ---------- レシート読み取り ----------
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -26,6 +47,7 @@ export default function InputTab({ store }: { store: Store }) {
   const [scanNote, setScanNote] = useState(false)
   const noteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [showGeminiSheet, setShowGeminiSheet] = useState(false)
+  const [showBatchSheet, setShowBatchSheet] = useState(false)
 
   // 彼女の預かり残高 = 預かり合計 − 支出の彼女負担分合計
   const partnerBalance = store.transactions.reduce(
@@ -62,6 +84,26 @@ export default function InputTab({ store }: { store: Store }) {
     }))
   }
 
+  const noteSaved = () => {
+    setSaved(true)
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => setSaved(false), 2500)
+  }
+
+  /**
+   * 保存のたびに店名とカテゴリの対応を覚える(機能067+075)。
+   * 覚えていたカテゴリから変わったときだけ、過去の記録も直すか尋ねる(機能078)。
+   * 学習が失敗しても記録は済んでいるので、ここでは何も表に出さない。
+   */
+  const learnFromInput = async (input: TransactionInput) => {
+    if (input.type !== 'expense' || input.store === '' || input.category === null) return
+    const previous = await rememberStoreCategory(supabase, input.store, input.category)
+    if (previous === null || previous === input.category) return
+    const targets = transactionsToRecategorize(store.transactions, input.store, input.category)
+    if (targets.length === 0) return // 該当が無いときは聞かない
+    setRecategorize({ storeName: input.store, category: input.category, targets })
+  }
+
   // キー未設定なら設定シートへ誘導、設定済みならそのままカメラを起動する。
   // 設定済みのときの設定シートへの導線は、隣の歯車ボタン(常設)が担う
   const handleScanTap = () => {
@@ -70,6 +112,14 @@ export default function InputTab({ store }: { store: Store }) {
       return
     }
     fileInputRef.current?.click()
+  }
+
+  const handleBatchTap = () => {
+    if (!hasGeminiKey()) {
+      setShowGeminiSheet(true)
+      return
+    }
+    setShowBatchSheet(true)
   }
 
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -89,7 +139,7 @@ export default function InputTab({ store }: { store: Store }) {
         return
       }
 
-      // 読めた項目だけフォームに反映(カテゴリは自動判定しない=ユーザーがタップ)
+      // 読めた項目だけフォームに反映(カテゴリは店名から学習済みならフォーム側で入る)
       setPrefill((prev) => ({
         nonce: (prev?.nonce ?? 0) + 1,
         amount: result.total ?? 0,
@@ -156,6 +206,9 @@ export default function InputTab({ store }: { store: Store }) {
             <IconGear />
           </button>
         </div>
+        <button type="button" className="btn-ghost scan-batch-btn" onClick={handleBatchTap} disabled={scanning}>
+          レシートを続けて撮影する(最大5枚)
+        </button>
         <input
           ref={fileInputRef}
           type="file"
@@ -172,6 +225,35 @@ export default function InputTab({ store }: { store: Store }) {
         )}
       </div>
 
+      {!isTemplatesUnavailable() && templates.length > 0 && (
+        <div className="card">
+          <h2>テンプレート</h2>
+          <div className="recent-chips">
+            {templates.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className="recent-chip"
+                onClick={() =>
+                  setPrefill((prev) => ({
+                    nonce: (prev?.nonce ?? 0) + 1,
+                    amount: t.amount,
+                    category: t.category,
+                    memo: t.memo,
+                    store: t.store,
+                    partner_amount: t.partnerAmount,
+                  }))
+                }
+              >
+                <CategoryVisualBadge visual={resolveCategoryVisual(t.category)} size={28} />
+                <span className="recent-label">{templateLabel(t)}</span>
+                <span className="recent-amount">{yen(t.amount)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <h2>支出を記録</h2>
         {saved && (
@@ -186,9 +268,8 @@ export default function InputTab({ store }: { store: Store }) {
           onPartnerAmountChange={handlePartnerAmountChange}
           onSubmit={async (input) => {
             await store.add(input)
-            setSaved(true)
-            if (timerRef.current) clearTimeout(timerRef.current)
-            timerRef.current = setTimeout(() => setSaved(false), 2500)
+            noteSaved()
+            await learnFromInput(input)
           }}
         />
       </div>
@@ -212,6 +293,46 @@ export default function InputTab({ store }: { store: Store }) {
         <GeminiKeySheet
           onClose={() => setShowGeminiSheet(false)}
           onSaved={() => setShowGeminiSheet(false)}
+        />
+      )}
+
+      {showBatchSheet && (
+        <ReceiptBatchSheet
+          onClose={() => setShowBatchSheet(false)}
+          onSaveAll={async (inputs) => {
+            for (const input of inputs) {
+              await store.add(input)
+              await learnFromInput(input)
+            }
+            noteSaved()
+          }}
+        />
+      )}
+
+      {recategorize && (
+        <RecategorizeSheet
+          storeName={recategorize.storeName}
+          category={recategorize.category}
+          targets={recategorize.targets}
+          onClose={() => setRecategorize(null)}
+          onApply={async () => {
+            // 一括更新もオフラインキュー経由。未同期のまま失われない
+            await store.updateMany(
+              recategorize.targets.map((t) => ({
+                id: t.id,
+                input: {
+                  date: t.date,
+                  type: t.type,
+                  amount: t.amount,
+                  category: recategorize.category,
+                  memo: t.memo,
+                  store: t.store,
+                  partner_amount: t.partner_amount,
+                },
+              }))
+            )
+            setRecategorize(null)
+          }}
         />
       )}
     </>

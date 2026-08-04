@@ -325,3 +325,293 @@
   flex-direction: column;
   gap: 4px;
 }
+
+/* ============================================================
+   設定ハブ / 繰り返し入力 / 連続撮影 / 過去への適用
+   ここもデザイントークンのみを使用します
+   ============================================================ */
+
+/* ---------- 設定ハブ ---------- */
+
+.settings-menu {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 2px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-menu li:last-child .settings-row {
+  border-bottom: none;
+}
+
+.settings-row:active {
+  background: var(--fill);
+}
+
+.settings-row-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.settings-row-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.settings-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--baseline);
+}
+
+.settings-section h3 {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  margin: 0 0 8px;
+}
+
+.settings-section .muted {
+  line-height: 1.5;
+}
+
+.keypad-pref {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ---------- 繰り返し入力(機能070) ---------- */
+
+.rule-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rule-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+
+.rule-row:last-child {
+  border-bottom: none;
+}
+
+/* 停止中は薄くして、動いている登録と一目で見分けられるようにする */
+.rule-paused .rule-main {
+  opacity: 0.55;
+}
+
+.rule-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rule-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rule-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.rule-actions {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rule-actions .cat-action {
+  flex: 1;
+}
+
+.rule-form {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--baseline);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rule-form h3 {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.rule-kind {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.rule-when {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rule-when .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.rule-cancel {
+  width: 100%;
+}
+
+/* ---------- レシートの連続撮影(機能064) ---------- */
+
+.batch-actions {
+  margin: 10px 0;
+}
+
+.batch-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.batch-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+.batch-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.batch-index {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.batch-discard {
+  margin-left: auto;
+}
+
+.batch-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.batch-failed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ---------- 学習内容を過去にも適用するか(機能078) ---------- */
+
+.recat-lead {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+
+.recat-list {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.recat-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  min-width: 0;
+}
+
+.recat-date {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.recat-from {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recat-amount {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.recat-skip {
+  width: 100%;
+  margin-top: 8px;
+}
+
+/* ---------- テンプレート(機能072) ---------- */
+
+.template-from-tx {
+  width: 100%;
+  margin-top: 10px;
+}
+
+/* 自動生成された記録であることの断り書き */
+.auto-generated-note {
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
