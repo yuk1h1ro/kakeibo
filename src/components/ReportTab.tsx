@@ -39,6 +39,13 @@ import CategoryBars from './charts/CategoryBars'
 import MonthlyTrend from './charts/MonthlyTrend'
 import SatisfactionSortSheet from './SatisfactionSortSheet'
 import VerticalBars from './charts/VerticalBars'
+import FixedCostCard from './report/FixedCostCard'
+import GranularityCard from './report/GranularityCard'
+import HeatmapCard from './report/HeatmapCard'
+import PaceCard from './report/PaceCard'
+import RecurringSuggestCard from './report/RecurringSuggestCard'
+import YearSummaryCard from './report/YearSummaryCard'
+import '../report.css'
 
 // 月表示と任意期間表示。任意期間では「前月比」「月次推移」のような
 // 月を前提にした指標は意味をなさないので出さない
@@ -178,6 +185,10 @@ export default function ReportTab({ transactions, onSetSatisfaction }: ReportTab
     return data.map((d) => ({ ...d, emphasis: max > 0 && d.value === max }))
   }
 
+  // 129 の粒度切替は「選択期間の終わり(ただし今日まで)」を終端にする。
+  // 未来の日付を終端にすると、まだ来ていない日の空の棒が並んでしまう
+  const bucketAnchor = range.end < today ? range.end : today
+
   // 121: カテゴリ別・店別の上位項目には年換算を副次的に添える。
   // 1件ごとの明細は繰り返し出ていく支出とは限らないので、年換算は出さない
   const rankSub = (item: RankItem, index: number) => {
@@ -302,6 +313,12 @@ export default function ReportTab({ transactions, onSetSatisfaction }: ReportTab
                 </div>
               </div>
 
+              {/* 026 + 027: 使いすぎを止めるための中核なので、内訳より先に置く。
+                  「月末」を前提にした指標なので任意期間では出さない */}
+              {mode === 'month' && (
+                <PaceCard transactions={transactions} month={month} today={today} />
+              )}
+
               <div className="card">
                 <h2>カテゴリ別支出</h2>
                 <CategoryBars
@@ -413,8 +430,24 @@ export default function ReportTab({ transactions, onSetSatisfaction }: ReportTab
                   <MonthlyTrend data={trendData} />
                 </div>
               )}
+
+              {/* 129: 粒度切替。期間の選び方に関わらず同じ見方ができるよう両モードで出す */}
+              <GranularityCard transactions={transactions} anchor={bucketAnchor} />
+
+              {/* 113: ヒートマップ。月のカレンダーの形なので月表示のときだけ */}
+              {mode === 'month' && <HeatmapCard transactions={transactions} month={month} />}
+
+              {/* 123: 年のまとめ(既定は畳んである) */}
+              {mode === 'month' && (
+                <YearSummaryCard transactions={transactions} month={month} today={today} />
+              )}
             </>
           )}
+
+          {/* 122 + 081: どちらも選択中の期間に依存しない(登録内容と履歴全体を見る)ので、
+              期間に記録が無いときも出す */}
+          <FixedCostCard />
+          <RecurringSuggestCard transactions={transactions} today={today} />
 
           {/* 219 + 143: 感情スタンプの振り返り。既存のカードには手を触れず末尾に足す。
               曜日は date から正確に出せるが、時間帯は出さない

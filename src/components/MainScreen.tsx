@@ -8,20 +8,23 @@ import { initStoreCategories } from '../lib/storeCategories'
 import { generateDueTransactions, initRecurringRules } from '../lib/recurringRules'
 import { initTransactionTemplates, isTemplatesUnavailable } from '../lib/transactionTemplates'
 import { initSatisfaction } from '../lib/satisfaction'
+import { initAssets, isAssetsTabVisible, useAssetsStore } from '../lib/assets'
 import { todayISO } from '../lib/format'
 import InputTab from './InputTab'
 import HistoryTab from './HistoryTab'
 import ReportTab from './ReportTab'
 import PartnerTab from './PartnerTab'
+import AssetsTab from './AssetsTab'
 import TransactionForm, { type DatePrefill } from './TransactionForm'
 import SettingsSheet from './SettingsSheet'
 import TemplateSaveSheet from './TemplateSaveSheet'
 import { IconCalendar, IconChart, IconGear, IconHeart, IconLogout, IconPen } from './icons'
+import { IconAssets } from './assetIcons'
 import useBodyScrollLock from '../hooks/useBodyScrollLock'
 import '../offline.css'
 import '../settings.css'
 
-type Tab = 'input' | 'history' | 'report' | 'partner'
+type Tab = 'input' | 'history' | 'report' | 'partner' | 'assets'
 
 const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
   { id: 'input', label: '入力', icon: <IconPen /> },
@@ -29,6 +32,10 @@ const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
   { id: 'report', label: 'レポート', icon: <IconChart /> },
   { id: 'partner', label: '彼女', icon: <IconHeart /> },
 ]
+
+// 資産タブ (機能101) は既存4タブの位置を動かさないよう末尾に足す。
+// migration-assets.sql 未実行のときは配列ごと出さない
+const ASSETS_TAB = { id: 'assets' as const, label: '資産', icon: <IconAssets /> }
 
 export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
   const store = useTransactions(supabase)
@@ -55,6 +62,8 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
     void initTransactionTemplates(supabase)
     // 感情スタンプの列があるか(migration-satisfaction.sql の実行有無)も同じ扱い
     void initSatisfaction(supabase)
+    // 資産・純資産 (機能101)。テーブルが無ければ資産タブを出さないだけ
+    void initAssets(supabase)
   }, [supabase])
 
   // 感情スタンプの付け直し(機能143)。編集と同じ update 経路なので
@@ -105,6 +114,12 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
   const stalled =
     store.isOnline && store.pendingCount > 0 && !store.syncing && store.error !== null
 
+  // 資産タブの有無 (機能101)。テーブルが無いと分かった時点で選択中でも入力タブへ戻す
+  const assetsStore = useAssetsStore()
+  const assetsVisible = isAssetsTabVisible(assetsStore)
+  const tabs = assetsVisible ? [...TABS, ASSETS_TAB] : TABS
+  const activeTab: Tab = tab === 'assets' && !assetsVisible ? 'input' : tab
+
   return (
     <>
       <header className="app-header">
@@ -142,24 +157,25 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
       <main className="app-main">
         {/* 未同期バナーに同じ内容を出しているときは重複表示しない */}
         {store.error && !stalled && <p className="error-text">データ取得エラー: {store.error}</p>}
-        {tab === 'input' && (
+        {activeTab === 'input' && (
           <InputTab store={store} supabase={supabase} datePrefill={datePrefill} />
         )}
-        {tab === 'history' && (
+        {activeTab === 'history' && (
           <HistoryTab store={store} onEdit={setEditing} onStartInput={startInputOn} />
         )}
-        {tab === 'report' && (
+        {activeTab === 'report' && (
           <ReportTab transactions={store.transactions} onSetSatisfaction={setSatisfaction} />
         )}
-        {tab === 'partner' && (
+        {activeTab === 'partner' && (
           <PartnerTab store={store} supabase={supabase} onEdit={setEditing} />
         )}
+        {activeTab === 'assets' && <AssetsTab supabase={supabase} />}
       </main>
       <nav className="tab-bar">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.id}
-            className={tab === t.id ? 'active' : ''}
+            className={activeTab === t.id ? 'active' : ''}
             onClick={() => setTab(t.id)}
           >
             <span className="tab-icon">{t.icon}</span>
@@ -189,11 +205,11 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
                 await store.update(editing.id, input)
                 setEditing(null)
               }}
+              // 削除前の確認は出さない。消したあとに出る「元に戻す」バーが
+              // 同じ役割を果たすので、摩擦は操作の前ではなく後ろに置く
               onDelete={async () => {
-                if (confirm('この記録を削除しますか?')) {
-                  await store.remove(editing.id)
-                  setEditing(null)
-                }
+                await store.remove(editing.id)
+                setEditing(null)
               }}
             />
             {editing.type === 'expense' && !isTemplatesUnavailable() && (

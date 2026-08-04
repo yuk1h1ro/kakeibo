@@ -269,7 +269,9 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
         </div>
       )}
 
-      <div className="card" ref={formCardRef}>
+      {/* form-card は広い画面 (desktop.css) で置き場所を決めるための目印。
+          入力が主役の画面なので、段組みのバランス任せにせず必ず左の列に置く */}
+      <div className="card form-card" ref={formCardRef}>
         <h2>支出を記録</h2>
         {saved && (
           <p className="positive" style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>

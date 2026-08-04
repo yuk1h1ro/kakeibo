@@ -1,0 +1,429 @@
+/* ============================================================
+   レポート画面の追加分 (026 / 027 / 081 / 113 / 122 / 123 / 129)
+
+   styles.css は他の作業と衝突するため一切触らず、追加分はこのファイルだけに書く。
+   色は styles.css のデザイントークン(--accent / --expense / --text-* など)を
+   そのまま使うので、ライト・ダークの切り替えは自動で付いてくる。
+   数字が並ぶところは tabular-nums。操作要素は 44px 以上・16px 以上。
+   ============================================================ */
+
+/* 数字の桁を揃える。金額が縦に並ぶところは必ずこれを付ける */
+.rp-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 026 / 027: 支出ペースと着地予測 ---------- */
+
+/* 折れ線は 360 の viewBox で幅に収まるが、将来広げても本文が横に伸びないようにする */
+.rp-chart-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.rp-legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 8px;
+}
+
+.rp-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.rp-pace-lead {
+  margin-top: 10px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.rp-pace-diff {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: var(--radius-btn);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.rp-pace-diff.over {
+  color: var(--expense);
+  background: var(--warning-bg);
+}
+
+.rp-pace-diff.under {
+  color: var(--income);
+  background: var(--fill);
+}
+
+.rp-pace-empty {
+  line-height: 1.7;
+}
+
+.rp-budget {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rp-budget-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* iOS で入力時に画面が拡大しないよう 16px 以上。高さも 44px 以上を確保する */
+.rp-budget-input {
+  font-size: 16px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  background: var(--page);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  width: 100%;
+}
+
+.rp-budget-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.rp-budget-actions button {
+  flex: 1;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.rp-budget-open {
+  margin-top: 12px;
+  width: 100%;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.rp-forecast-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 「予測」だと一目で分かる印。数字だけを見て確定値と誤解されないように */
+.rp-forecast-tag {
+  padding: 2px 8px;
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-btn);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rp-forecast-point {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.rp-forecast-range {
+  margin-top: 4px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 113: 日別ヒートマップ ---------- */
+
+.rp-heat-caption {
+  line-height: 1.6;
+  margin-bottom: 10px;
+}
+
+.rp-heat-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+
+.rp-heat-head {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding-bottom: 2px;
+}
+
+/* --heat は 0〜1。0 のときは面を塗らず、枠だけで「記録なし」と分かるようにする。
+   色は --accent 一色の濃さだけで作る(トークンの外の色を増やさない) */
+.rp-heat-cell {
+  --heat: 0;
+  position: relative;
+  min-height: 44px; /* タップ領域 44px 以上 */
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 2px;
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+/* 濃さの面。最大でも 0.55 までに抑えて、上に載る文字の可読性を確保する */
+.rp-heat-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  opacity: calc(var(--heat) * 0.55);
+}
+
+.rp-heat-cell.selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.rp-heat-empty {
+  border: none;
+  background: none;
+  min-height: 0;
+}
+
+.rp-heat-day,
+.rp-heat-amount {
+  position: relative; /* 濃さの面より前に出す */
+}
+
+.rp-heat-day {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.rp-heat-amount {
+  font-size: 10px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.rp-heat-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.rp-heat-legend-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.rp-heat-swatch {
+  --heat: 0;
+  width: 18px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--accent);
+  opacity: calc(var(--heat) * 0.55);
+}
+
+.rp-heat-detail {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+}
+
+/* ---------- 122: 固定費 ---------- */
+
+.rp-fixed-total {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rp-fixed-amount {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.rp-fixed-annual {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rp-fixed-list {
+  list-style: none;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rp-fixed-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rp-fixed-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rp-fixed-title {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp-fixed-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rp-fixed-value {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ---------- 081: 繰り返しの登録候補 ---------- */
+
+.rp-suggest-list {
+  list-style: none;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rp-suggest-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rp-suggest-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.rp-suggest-title {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rp-suggest-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.rp-suggest-evidence {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.rp-suggest-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.rp-suggest-actions button {
+  flex: 1;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+/* ---------- 123: 年のまとめ ---------- */
+
+.rp-year-open {
+  width: 100%;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.rp-year-total {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rp-year-amount {
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.rp-year-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.rp-year-stats {
+  list-style: none;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rp-year-stats li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.rp-year-stat-label {
+  color: var(--text-muted);
+}
+
+.rp-year-h3 {
+  margin-top: 18px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+/* 折りたたみの開閉で内容が飛び込んでこないよう、動きは控えめに。
+   さらに「動きを減らす」設定では一切動かさない */
+@media (prefers-reduced-motion: no-preference) {
+  .rp-suggest-row,
+  .rp-heat-cell {
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+}

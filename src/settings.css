@@ -397,6 +397,20 @@
   margin-top: 8px;
 }
 
+/* アプリ切替時の目隠し (機能208) の2択。
+   テンキーの3択と同じ見た目にして「同じ種類の設定」だと分かるようにし、列数だけ変える */
+.privacy-pref {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* 2択の下に置く注意書き。ボタンに接していると選択肢の説明に見えるので離す */
+.privacy-pref + .muted {
+  margin-top: 8px;
+}
+
 /* ---------- 繰り返し入力(機能070) ---------- */
 
 .rule-list {

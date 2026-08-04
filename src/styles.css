@@ -1724,3 +1724,120 @@ body.keypad-open .modal-sheet {
   font-size: 16px;
   font-weight: 700;
 }
+
+/* ============================================================
+   アプリ切替時の目隠し (機能208)
+   起動時から DOM に置きっぱなしにして、離れた瞬間は opacity だけを変える。
+   iOS はアプリを背面へ送った直後にスクリーンショットを撮るので、
+   その1フレームに間に合わせるには「合成だけで済む変化」でなければならない。
+   filter: blur() を後から掛ける方式はページ全体の再ラスタライズが要るため使わない。
+   ============================================================ */
+
+.privacy-shield {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 面で覆い切る。filter: blur() や backdrop-filter でのぼかしにしないのは、
+     どちらも表示のたびにページ全体の再ラスタライズが要り、
+     「離れた瞬間の1フレーム」に間に合わない可能性があるため。
+     不透明な面なら合成だけで済み、かつ確実に読めなくなる。 */
+  background: var(--page);
+  opacity: 0;
+  pointer-events: none;
+  /* 合成専用のレイヤーとして先に用意させる(表示の遅れを作らないため) */
+  will-change: opacity;
+  /* 出るときも戻るときもトランジションを入れない。
+     出るとき: フェードインを待つと隠し損ねる。
+     戻るとき: 毎回のことなので、少しでも待たされると不快になる。 */
+  transition: none;
+}
+
+.privacy-shield-shown .privacy-shield {
+  opacity: 1;
+  /* 戻ったときに一瞬でも操作を奪わないよう、表示中だけ入力を止める */
+  pointer-events: auto;
+}
+
+.privacy-shield-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  padding: 24px;
+}
+
+.privacy-shield-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+.privacy-shield-note {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* 目隠しが出ている間は、下のページの動き(スピナー等)も止めて負荷を作らない */
+.privacy-shield-shown .scan-spinner {
+  animation-play-state: paused;
+}
+
+/* ---------- 「もう隠さない」への導線 (設定シートに行を足せないため) ---------- */
+
+.privacy-hint {
+  position: fixed;
+  /* left だけで中央に置くと、置ける幅が画面の半分になってしまう。
+     左右を留めて margin auto で中央に寄せる */
+  left: 12px;
+  right: 12px;
+  margin-inline: auto;
+  width: fit-content;
+  max-width: 100%;
+  /* タブバー(50px+セーフエリア)の上に重ねる */
+  bottom: calc(62px + env(safe-area-inset-bottom));
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  font-size: 13px;
+  color: var(--text-secondary);
+  animation: privacy-hint-in 0.16s ease-out;
+}
+
+.privacy-hint-text {
+  min-width: 0;
+}
+
+.privacy-hint-btn {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--fill);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+@keyframes privacy-hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .privacy-hint {
+    animation: none;
+  }
+}

@@ -1,27 +1,12 @@
 import { useRef, useState } from 'react'
 import { yen } from '../../lib/format'
+import { computeTicks } from './ticks'
 
 export interface VerticalDatum {
   label: string
   value: number
   /** 強調表示(棒の上に金額を出す)。選択中の月や最大値の目印に使う */
   emphasis?: boolean
-}
-
-// きりのいい目盛り(2〜4本)を計算する
-function computeTicks(maxValue: number): { top: number; ticks: number[] } {
-  const max = Math.max(maxValue, 1000)
-  const pow = Math.pow(10, Math.floor(Math.log10(max)))
-  for (const m of [0.25, 0.5, 1, 2, 2.5, 5]) {
-    const step = m * pow
-    const count = Math.ceil(max / step)
-    if (count >= 2 && count <= 4) {
-      const ticks: number[] = []
-      for (let i = 1; i <= count; i++) ticks.push(step * i)
-      return { top: step * count, ticks }
-    }
-  }
-  return { top: max, ticks: [max / 2, max] }
 }
 
 /**
