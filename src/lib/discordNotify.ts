@@ -1,6 +1,18 @@
-import type { TransactionType } from './types'
 import { yen } from './format'
 import { categoryLabel } from './categories'
+import {
+  balanceWording,
+  lowBalanceAction,
+  partnerBalance,
+  partnerImpact,
+  type PartnerTxLike,
+} from './partnerBalance'
+import { loadLowBalanceThreshold } from './lowBalanceSettings'
+
+// 残高計算の本体は partnerBalance.ts(純粋関数)に置いてある。
+// 従来ここから import していた箇所のために再エクスポートする。
+export { partnerBalance, partnerImpact }
+export type { PartnerTxLike }
 
 // ============================================================
 // Discord Webhook 通知
@@ -80,14 +92,21 @@ function signedDelta(n: number): string {
   return n >= 0 ? `+${yen(n)}` : `−${yen(Math.abs(n))}`
 }
 
-function balanceLine(balance: number): string {
-  const text = balance < 0 ? `−${yen(Math.abs(balance))}` : yen(balance)
-  return `残高: ${text}`
+/**
+ * 残高の1行。符号だけでは「預かり」なのか「貸し」なのか読めないので、
+ * 機能011 の言い回し(partnerBalance.ts)をそのまま載せる。
+ */
+export function balanceLine(balance: number): string {
+  const w = balanceWording(balance)
+  return balance === 0 ? `残高: ${yen(0)}(${w.title})` : `残高: ${yen(w.magnitude)}(${w.title})`
 }
 
 export type PartnerNotification =
-  | { kind: 'deposit'; amount: number; balance: number } // 預かり追加
+  | { kind: 'deposit'; amount: number; balance: number } // 預かり追加(現金で受け取った場合も同じ)
   | { kind: 'expense'; label: string; amount: number; balance: number } // 支出の差引
+  | { kind: 'partnerPaid'; label: string; amount: number; balance: number } // 彼女が払った回 (機能018)
+  | { kind: 'refund'; amount: number; balance: number } // 彼女に返した (機能012)
+  | { kind: 'adjust'; delta: number; reason: string; balance: number } // 手動調整 (機能012)
   | { kind: 'update'; delta: number; balance: number } // 修正で残高が変わった
   | { kind: 'delete'; delta: number; balance: number } // 削除で残高が変わった
   | { kind: 'generic'; balance: number } // 旧行不明などで差分を出せないとき
@@ -98,6 +117,12 @@ export function formatPartnerNotification(n: PartnerNotification): string {
       return `💰 預かりを受け取りました +${yen(n.amount)}\n${balanceLine(n.balance)}`
     case 'expense':
       return `🍽️ ${n.label} −${yen(n.amount)}\n${balanceLine(n.balance)}`
+    case 'partnerPaid':
+      return `🙏 ${n.label} は彼女が払いました +${yen(n.amount)}\n${balanceLine(n.balance)}`
+    case 'refund':
+      return `↩️ 預かりを返しました −${yen(n.amount)}\n${balanceLine(n.balance)}`
+    case 'adjust':
+      return `🛠 残高を調整しました(${signedDelta(n.delta)}${n.reason ? ` / ${n.reason}` : ''})\n${balanceLine(n.balance)}`
     case 'update':
       return `✏️ 記録が修正されました(差分 ${signedDelta(n.delta)})\n${balanceLine(n.balance)}`
     case 'delete':
@@ -107,24 +132,65 @@ export function formatPartnerNotification(n: PartnerNotification): string {
   }
 }
 
+// ---------- 残高の低下アラート (機能010) ----------
+//
+// Discord にも載せる判断をした理由:
+//   このアラートの目的は「次の預かりをお願いする」ことで、相手は彼女。
+//   アプリ内表示だけだと、彼女が知るのは次に共有ページを開いたときになり、
+//   気付くのが遅れる。Discord は既に2人で見ている場所なので、ここが最短。
+// 過剰にならないための歯止め:
+//   しきい値を **またいだ瞬間だけ** 送る(lowBalanceAction)。下回ったままの日は
+//   何日続いても送らない。しきい値以上に戻ると、また鳴らせる状態に戻る。
+//   「鳴らした印」は端末の localStorage に持つ(Webhook 設定と同じ粒度)。
+
+const LOW_ALERT_KEY = 'kakeibo.lowBalanceNotified'
+
+export function isLowBalanceNotified(): boolean {
+  try {
+    return localStorage.getItem(LOW_ALERT_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function setLowBalanceNotified(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(LOW_ALERT_KEY, '1')
+    else localStorage.removeItem(LOW_ALERT_KEY)
+  } catch {
+    // 保存できないときは、最悪もう一度鳴るだけ(記録には影響しない)
+  }
+}
+
+export function formatLowBalanceAlert(balance: number, threshold: number): string {
+  const w = balanceWording(balance)
+  const head =
+    balance < 0
+      ? `⚠️ 預かりを使い切り、いま ${yen(w.magnitude)} を立て替えています`
+      : `⚠️ 預かり残高が少なくなりました(残り ${yen(w.magnitude)})`
+  return `${head}\nお知らせの基準: ${yen(threshold)}を下回ったとき`
+}
+
+/**
+ * 残高が確定したあとに呼ぶ。しきい値をまたいだときだけ Discord に送る。
+ * 送ったら true。例外は投げない(通知は記録を止めない)。
+ */
+export function notifyLowBalanceIfNeeded(balance: number): boolean {
+  const threshold = loadLowBalanceThreshold()
+  const action = lowBalanceAction(balance, threshold, isLowBalanceNotified())
+  if (action === 'rearm') {
+    setLowBalanceNotified(false)
+    return false
+  }
+  if (action !== 'notify') return false
+  setLowBalanceNotified(true)
+  // Webhook 未設定なら sendDiscordMessage が何もしない。
+  // 印は立てたままにする(設定した瞬間に過去のアラートが飛ぶのを防ぐ)
+  void sendDiscordMessage(formatLowBalanceAlert(balance, threshold))
+  return true
+}
+
 // ---------- 残高への影響額の判定 ----------
-
-// Transaction / TransactionInput の両方を構造的に受けられる最小の形
-interface PartnerTxLike {
-  type: TransactionType
-  amount: number
-  partner_amount: number
-}
-
-/** 取引1件が彼女残高に与える影響額(+なら残高が増える) */
-export function partnerImpact(t: PartnerTxLike): number {
-  return t.type === 'partner_deposit' ? t.amount : -t.partner_amount
-}
-
-/** 取引一覧から彼女の預かり残高を計算する */
-export function partnerBalance(rows: PartnerTxLike[]): number {
-  return rows.reduce((sum, t) => sum + partnerImpact(t), 0)
-}
 
 // PendingOp(offlineQueue.ts)を構造的に受けられる最小の形。
 // store は旧バージョンで積まれたキュー(store 追加以前)に無いことがあるため optional
@@ -153,14 +219,27 @@ export function buildPartnerOpMessage(
     if (p.type === 'partner_deposit') {
       return formatPartnerNotification({ kind: 'deposit', amount: p.amount, balance })
     }
-    if (p.partner_amount > 0) {
-      // 表題の優先順位: お店 → メモ → カテゴリ名
+    // 機能012: 返金・手動調整。残高が動いた理由をそのまま伝える
+    if (p.type === 'partner_refund') {
+      return formatPartnerNotification({ kind: 'refund', amount: p.amount, balance })
+    }
+    if (p.type === 'partner_adjust') {
       return formatPartnerNotification({
-        kind: 'expense',
-        label: p.store || p.memo || categoryLabel(p.category),
-        amount: p.partner_amount,
+        kind: 'adjust',
+        delta: p.amount,
+        reason: p.memo,
         balance,
       })
+    }
+    // 表題の優先順位: お店 → メモ → カテゴリ名
+    const label = p.store || p.memo || categoryLabel(p.category)
+    const impact = partnerImpact(p)
+    // 機能018: 彼女が払いすぎた回は残高が増えるので、差引とは別の文言にする
+    if (impact > 0) {
+      return formatPartnerNotification({ kind: 'partnerPaid', label, amount: impact, balance })
+    }
+    if (impact < 0) {
+      return formatPartnerNotification({ kind: 'expense', label, amount: -impact, balance })
     }
     return null
   }

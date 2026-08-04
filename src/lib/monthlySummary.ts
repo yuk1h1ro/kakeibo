@@ -14,8 +14,9 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { formatMonth, monthKey, monthKeyOffset, yen } from './format'
+import { formatMonth, monthKey, monthKeyOffset, yenPlain } from './format'
 import { getWebhookUrl, sendDiscordMessage } from './discordNotify'
+import { balanceWording, partnerImpact, type PartnerTxLike } from './partnerBalance'
 import { isSchemaError } from './serverErrors'
 
 /** さかのぼって送る月数の上限。長期間アプリを開いていなくても通知が溢れないようにする */
@@ -53,12 +54,9 @@ export function dueSummaryMonths(
 }
 
 /** 集計に必要な最小の形(Transaction を構造的に受ける) */
-export interface SummaryTxLike {
+export interface SummaryTxLike extends PartnerTxLike {
   date: string
-  type: 'expense' | 'partner_deposit'
-  amount: number
   category: string | null
-  partner_amount: number
 }
 
 export interface MonthlySummary {
@@ -86,12 +84,13 @@ export function buildMonthlySummary(
   const byCategory = new Map<string | null, number>()
 
   for (const t of rows) {
-    // 残高は全期間の積み上げ(月で区切らない)
-    balance += t.type === 'partner_deposit' ? t.amount : -t.partner_amount
+    // 残高は全期間の積み上げ(月で区切らない)。
+    // 返金・調整・彼女が払った回も含めるため、計算は partnerBalance.ts に一本化する
+    balance += partnerImpact(t)
     if (monthKey(t.date) !== month) continue
     if (t.type === 'partner_deposit') {
       depositTotal += t.amount
-    } else if (t.partner_amount > 0) {
+    } else if (t.type === 'expense' && t.partner_amount > 0) {
       withdrawTotal += t.partner_amount
       byCategory.set(t.category, (byCategory.get(t.category) ?? 0) + t.partner_amount)
     }
@@ -120,14 +119,15 @@ export function formatMonthlySummary(
   labelOf: (category: string | null) => string
 ): string {
   const lines: string[] = [`📅 ${formatMonth(s.month)}のまとめ`]
-  lines.push(`使った分の合計: ${yen(s.withdrawTotal)}`)
-  if (s.depositTotal > 0) lines.push(`預かった合計: ${yen(s.depositTotal)}`)
-  const balanceText = s.balance < 0 ? `−${yen(Math.abs(s.balance))}` : yen(s.balance)
-  lines.push(`いまの残高: ${balanceText}`)
+  lines.push(`使った分の合計: ${yenPlain(s.withdrawTotal)}`)
+  if (s.depositTotal > 0) lines.push(`預かった合計: ${yenPlain(s.depositTotal)}`)
+  // 符号だけでは「預かり」か「貸し」か読めないので、機能011 の言い回しを添える
+  const w = balanceWording(s.balance)
+  lines.push(`いまの残高: ${yenPlain(w.magnitude)}(${w.title})`)
   if (s.categories.length > 0) {
     lines.push('内訳')
     for (const c of s.categories) {
-      lines.push(`・${labelOf(c.category)} ${yen(c.amount)}`)
+      lines.push(`・${labelOf(c.category)} ${yenPlain(c.amount)}`)
     }
   }
   return lines.join('\n')

@@ -189,7 +189,7 @@ describe('formatMonthlySummary', () => {
     expect(text).not.toContain('内訳')
   })
 
-  it('残高がマイナスでも読める形にする', () => {
+  it('残高がマイナスのときは符号ではなく言葉で意味を伝える (機能011)', () => {
     const text = formatMonthlySummary(
       {
         month: '2026-02',
@@ -201,6 +201,9 @@ describe('formatMonthlySummary', () => {
       },
       labelOf
     )
-    expect(text).toContain('いまの残高: −¥500')
+    // マイナスは「立て替え中(彼女への貸し)」。符号だけだと預かりが減ったのか
+    // 貸しが増えたのか読めないので、絶対値 + 言葉で出す
+    expect(text).toContain('いまの残高: ¥500(立て替え中(彼女への貸し))')
+    expect(text).not.toContain('−¥500')
   })
 })

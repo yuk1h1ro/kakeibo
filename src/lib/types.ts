@@ -1,4 +1,27 @@
-export type TransactionType = 'expense' | 'partner_deposit'
+/**
+ * 取引の種別。
+ *
+ * expense / partner_deposit は最初からあるもの。
+ * partner_refund / partner_adjust は預かり金の「返金」「手動調整」(機能012)で足した。
+ * どちらも彼女の預かり残高だけを動かし、自分の支出の集計(report.ts)には一切入らない
+ * (ownAmount が expense 以外を 0 として扱うため)。
+ *
+ * 「現金で受け取った」に専用の型を作っていないのは、残高への効果も意味も
+ * 既存の partner_deposit(彼女→私へお金が動いた)とまったく同じだからで、
+ * 型を増やすほど履歴・通知・共有ページの分岐が増えて壊れる面が広がるため。
+ */
+export type TransactionType = 'expense' | 'partner_deposit' | 'partner_refund' | 'partner_adjust'
+
+/** 彼女の預かり残高だけを動かす種別(支出ではないもの) */
+export const PARTNER_LEDGER_TYPES: readonly TransactionType[] = [
+  'partner_deposit',
+  'partner_refund',
+  'partner_adjust',
+]
+
+export function isPartnerLedgerType(type: TransactionType): boolean {
+  return (PARTNER_LEDGER_TYPES as readonly string[]).includes(type)
+}
 
 /**
  * 支出に対する感情スタンプ (機能219 + 143)。
@@ -25,6 +48,25 @@ export interface Transaction {
   // 感情スタンプ。未設定(null)を許す。migration-satisfaction.sql 未実行の環境では
   // 列自体が存在しないので任意にしてある(その間はアプリ側で機能を静かに止める)。
   satisfaction?: Satisfaction | null
+  // 支払い総額のうち「彼女が実際に財布から出した額」(機能018)。
+  // 既定は 0 = 自分が全額払った(これまでの前提)。列が無い環境では undefined。
+  // 残高への影響は partner_paid − partner_amount(partnerBalance.ts)。
+  partner_paid?: number | null
+  // タグ (機能088)。カテゴリと直交する軸。列が無い環境では undefined。
+  tags?: string[] | null
+  // 1件を複数カテゴリに分割したときの束ねID (機能096)。
+  // 分割は「1行 = 1カテゴリ」の独立した行として保存し、この列だけで束ねる。
+  split_group?: string | null
+}
+
+/** 彼女が実際に払った額。列が無い/未設定は 0(= 自分が全額払った) */
+export function partnerPaid(t: { partner_paid?: number | null }): number {
+  return typeof t.partner_paid === 'number' && Number.isFinite(t.partner_paid) ? t.partner_paid : 0
+}
+
+/** タグ。列が無い/未設定は空配列 */
+export function tagsOf(t: { tags?: string[] | null }): string[] {
+  return Array.isArray(t.tags) ? t.tags.filter((s): s is string => typeof s === 'string') : []
 }
 
 /** 繰り返し入力によって自動生成された行か */
@@ -42,7 +84,14 @@ export function satisfactionOf(t: Transaction): Satisfaction | null {
   return isSatisfaction(t.satisfaction) ? t.satisfaction : null
 }
 
-// 自分の実質支出(彼女の負担分を除く)
+/**
+ * 自分の実質支出(彼女の負担分を除く)。
+ *
+ * 「誰が払ったか」(機能018 の partner_paid)では変わらない。ここが表しているのは
+ * *誰がいくら消費したか* であって、財布から出た現金の動きではないため。
+ * 立て替えの向きは預かり残高(partnerBalance.ts)だけが引き受ける。
+ * 預かり・返金・調整は支出ではないので 0。
+ */
 export function ownAmount(t: Transaction): number {
   return t.type === 'expense' ? t.amount - t.partner_amount : 0
 }

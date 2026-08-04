@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { Satisfaction, Transaction } from '../lib/types'
+import type { Satisfaction, Transaction, TransactionType } from '../lib/types'
 import {
   appendOp,
   loadQueue,
@@ -12,7 +12,19 @@ import {
   markSatisfactionUnavailable,
   withoutSatisfaction,
 } from '../lib/satisfaction'
-import { buildPartnerOpMessage, sendDiscordMessage } from '../lib/discordNotify'
+import {
+  buildPartnerOpMessage,
+  notifyLowBalanceIfNeeded,
+  sendDiscordMessage,
+} from '../lib/discordNotify'
+import { partnerBalance } from '../lib/partnerBalance'
+import {
+  initTxExtensions,
+  isLedgerTypeRejection,
+  isTxFeatureAvailable,
+  markTxFeatureUnavailable,
+  stripUnavailableColumns,
+} from '../lib/txExtensions'
 import {
   isNetworkError,
   isRetryableServerError,
@@ -31,7 +43,8 @@ import { restoreInput } from '../lib/txActions'
 
 export interface TransactionInput {
   date: string
-  type: 'expense' | 'partner_deposit'
+  // 機能012 で partner_refund / partner_adjust が加わった
+  type: TransactionType
   amount: number
   category: string | null
   memo: string
@@ -43,16 +56,23 @@ export interface TransactionInput {
   // 感情スタンプ (機能219 + 143)。migration-satisfaction.sql 未実行の環境では
   // 送信直前にキーごと落とす(下の sendablePayload)
   satisfaction?: Satisfaction | null
+  // 支出のうち彼女が実際に払った額 (機能018)
+  partner_paid?: number
+  // タグ (機能088)
+  tags?: string[]
+  // 分割した会計の束ねID (機能096)
+  split_group?: string | null
 }
 
 /**
  * 送信直前に、この環境に無い列を落とした内容を作る。
- * 列が無いと分かっている間 satisfaction を送らないことで、
+ * 列が無いと分かっている間はそのキーを送らないことで、
  * マイグレーション未実行でも記録そのものは必ず通る。
  */
 function sendablePayload(payload: TransactionInput | undefined): Partial<TransactionInput> {
   if (!payload) return {}
-  return isSatisfactionUnavailable() ? withoutSatisfaction(payload) : payload
+  const base = isSatisfactionUnavailable() ? withoutSatisfaction(payload) : payload
+  return stripUnavailableColumns(base)
 }
 
 // ---------- スナップショットキャッシュ(オフライン起動・高速起動用) ----------
@@ -120,6 +140,15 @@ const UNDO_WINDOW_MS = 7000
 export const SCHEMA_ERROR_MESSAGE =
   'データベースの更新が必要です。SupabaseのSQL Editorで migration-store.sql を実行してください' +
   '(記録は保存されており、実行後に自動で同期されます)'
+
+/**
+ * 返金・調整 (機能012) を、migration-partner-ledger.sql 未実行のまま
+ * 書き込もうとしたときの案内。列不足ではなくチェック制約違反で返ってくるので、
+ * 「捨ててよい拒否」と間違えないように専用のメッセージを出す。
+ */
+export const LEDGER_SCHEMA_ERROR_MESSAGE =
+  '預かりの返金・調整を保存するには、SupabaseのSQL Editorで migration-partner-ledger.sql を' +
+  '実行してください(記録は保存されており、実行後に自動で同期されます)'
 
 function sortRows(rows: Transaction[]): Transaction[] {
   return [...rows].sort(
@@ -246,9 +275,31 @@ export function useTransactions(supabase: SupabaseClient) {
               markSatisfactionUnavailable()
               continue
             }
+            // 機能018(彼女が払った額)・088(タグ)・096(分割)の列も、
+            // 「無くても記録の本体は成り立つ」ので、その列だけ諦めてやり直す。
+            // partner_paid が落ちれば自分が全額払った扱い、split_group が落ちれば
+            // 束ねだけが消え、tags が落ちればタグだけが付かない — 金額は必ず残る。
+            if (isTxFeatureAvailable('settlement') && op.payload?.partner_paid !== undefined) {
+              markTxFeatureUnavailable('settlement')
+              continue
+            }
+            if (
+              isTxFeatureAvailable('tagging') &&
+              (op.payload?.tags !== undefined || op.payload?.split_group !== undefined)
+            ) {
+              markTxFeatureUnavailable('tagging')
+              continue
+            }
             // それ以外の migration 未実行 — 実行すれば通るので op は必ず残す。
             // 対処法が分かるメッセージを出したうえで中断する
             setError(SCHEMA_ERROR_MESSAGE)
+            break
+          }
+          if (isLedgerTypeRejection(err, op.payload?.type)) {
+            // 返金・調整の種別が DB のチェック制約に無い = migration 未実行。
+            // 実行すれば通るので、絶対に op を捨てない(捨てると記録が消える)
+            markTxFeatureUnavailable('settlement')
+            setError(LEDGER_SCHEMA_ERROR_MESSAGE)
             break
           }
           if (isNetworkError(err.message)) {
@@ -265,6 +316,9 @@ export function useTransactions(supabase: SupabaseClient) {
           const nextRows = applyPendingOps(localRows, [op])
           const message = buildPartnerOpMessage(op, localRows, nextRows)
           if (message) void sendDiscordMessage(message) // 投げっぱなし。失敗しても記録は止めない
+          // 機能010: 残高がしきい値をまたいだときだけ低下アラートを送る。
+          // 個々の op の通知とは別に、確定した残高そのものを見て判断する
+          if (message) notifyLowBalanceIfNeeded(partnerBalance(nextRows))
           localRows = nextRows
           setPendingOps(removeOp(op.opId))
           flushedSomething = true
@@ -289,6 +343,13 @@ export function useTransactions(supabase: SupabaseClient) {
   // 記録・入力・同期には一切影響しない。貯まっていた履歴もここで送る
   useEffect(() => {
     void initChangeLog(supabase)
+  }, [supabase])
+
+  // 後から足した列 (partner_paid / tags / split_group) がこの環境にあるか。
+  // 取引を読み書きするのはこのフックなので、確認もここで一度だけ行う。
+  // 無ければ該当機能の導線が消えるだけで、記録・入力・同期は今までどおり動く
+  useEffect(() => {
+    void initTxExtensions(supabase)
   }, [supabase])
 
   // オンライン/オフラインの追跡。復帰時は自動で再同期
@@ -374,6 +435,32 @@ export function useTransactions(supabase: SupabaseClient) {
         queuedAt: new Date().toISOString(),
       }
       setPendingOps(appendOp(op))
+      void flush()
+    },
+    [flush]
+  )
+
+  /**
+   * 複数件をまとめて追加する (機能096 の分割保存で使う)。
+   * 1件ずつ insert op を積むだけなので、オフラインでも失われない。
+   * 途中で切れても「一部だけ保存された」状態になるが、キューは順に必ず送られるので
+   * 最終的には全件そろう(1件も入らないより、分割の一部が残るほうが復旧しやすい)。
+   */
+  const addMany = useCallback(
+    async (inputs: readonly TransactionInput[]) => {
+      if (inputs.length === 0) return
+      const queuedAt = new Date().toISOString()
+      let ops: PendingOp[] = loadQueue()
+      for (const input of inputs) {
+        ops = appendOp({
+          opId: crypto.randomUUID(),
+          kind: 'insert',
+          id: crypto.randomUUID(),
+          payload: input,
+          queuedAt,
+        })
+      }
+      setPendingOps(ops)
       void flush()
     },
     [flush]
@@ -525,6 +612,7 @@ export function useTransactions(supabase: SupabaseClient) {
     refresh,
     syncNow,
     add,
+    addMany,
     update,
     updateMany,
     remove,
