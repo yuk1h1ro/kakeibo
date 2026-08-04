@@ -25,6 +25,7 @@
 // 残高がずれるため。分割は「自分が全額払った会計」を分けるものにしている。
 // ============================================================
 
+import { yenPlain } from './format'
 import type { TransactionInput } from '../hooks/useTransactions'
 import type { Transaction } from './types'
 
@@ -88,9 +89,12 @@ export function validateSplit(parts: readonly SplitPart[], total: number): Split
     return {
       ok: false,
       message:
+        // 金額は ¥ 付きで書く。目隠し (機能169) がオンのとき、
+        // 画面側が maskAmountsIn でこの数字も伏せられるようにするため
+        // (この関数は純粋なままにしたいので、伏せるのは表示の直前でやる)
         remaining > 0
-          ? `あと ${remaining.toLocaleString('ja-JP')}円 振り分けてください`
-          : `${Math.abs(remaining).toLocaleString('ja-JP')}円 振り分けすぎです`,
+          ? `あと ${yenPlain(remaining)} 振り分けてください`
+          : `${yenPlain(Math.abs(remaining))} 振り分けすぎです`,
       remaining,
     }
   }

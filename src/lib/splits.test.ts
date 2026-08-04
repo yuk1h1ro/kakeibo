@@ -44,6 +44,17 @@ describe('validateSplit', () => {
     expect(over.remaining).toBe(-1000)
   })
 
+  it('残りの金額は ¥ 付きで書く(目隠しのときに表示側で伏せられるように)', () => {
+    // maskAmountsIn は ¥ 付きの数字だけを伏せる。素の「1,000円」だと、
+    // すぐ上の合計が伏字なのにここだけ金額が読めてしまう (機能169)
+    expect(validateSplit([part(3000, 0), part(1000, 0)], 5000).message).toBe(
+      'あと ¥1,000 振り分けてください'
+    )
+    expect(validateSplit([part(3000, 0), part(3000, 0)], 5000).message).toBe(
+      '¥1,000 振り分けすぎです'
+    )
+  })
+
   it('内訳が1件だけでは分割にならない', () => {
     expect(validateSplit([part(5000, 0)], 5000).ok).toBe(false)
   })

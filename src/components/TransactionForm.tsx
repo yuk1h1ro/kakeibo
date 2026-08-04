@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { categoryLabel, useCategories, visualFromEmojiValue } from '../lib/categories'
 import { CategoryVisualBadge } from './categoryIcons'
-import { daysAgoISO, formatDate, todayISO, yen } from '../lib/format'
+import { daysAgoISO, formatDate, maskAmountsIn, todayISO, yen } from '../lib/format'
 import {
   EMPTY_CALC,
   OP_LABEL,
@@ -1003,7 +1003,11 @@ export default function TransactionForm({
                       aria-live="polite"
                     >
                       内訳の合計 {yen(splitTotal(splitParts))} / 支払い {yen(amountNum || 0)}
-                      {splitValidation?.message ? ` — ${splitValidation.message}` : ' — そろっています'}
+                      {/* 目隠し (機能169) 中は、残りの金額も伏せる。
+                          すぐ上の合計だけ伏せて残額が見えていては意味がない */}
+                      {splitValidation?.message
+                        ? ` — ${maskAmountsIn(splitValidation.message)}`
+                        : ' — そろっています'}
                     </p>
                     <div className="split-actions">
                       <button
