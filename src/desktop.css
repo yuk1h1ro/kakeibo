@@ -170,19 +170,37 @@
      grid ではなく段組み(columns)を使う理由は、カードの高さがまちまちで、
      grid だと行の高さが一番高いカードに揃って隙間だらけになるため。 */
 
-  .app-main {
+  /* 段組みにするのは「カードが縦に積まれている入れ物」。
+     入力・彼女・資産タブは .app-main の直下に積まれているが、
+     レポートは .report-body、履歴は .hist-pullable に包まれているので、
+     そこも同じ入れ物として扱う。
+     (タブの中身を新しくラッパーで包んだときは、ここに足す必要がある) */
+  .app-main,
+  .report-body,
+  .hist-pullable {
     display: block;
     columns: 2;
     column-gap: 20px;
+  }
+
+  .app-main > *,
+  .report-body > *,
+  .hist-pullable > * {
+    /* カードが段の途中で切れないように */
+    break-inside: avoid;
+    margin-bottom: 20px;
+  }
+
+  .app-main {
     padding-top: 6px;
     /* 下固定のタブバーが無くなるので、その分の余白(76px)は返す */
     padding-bottom: 48px;
   }
 
-  .app-main > * {
-    /* カードが段の途中で切れないように */
-    break-inside: avoid;
-    margin-bottom: 20px;
+  /* 履歴タブは中身が1枚のラッパーに入っているので、そのラッパー自体は全幅に置く */
+  .app-main > .hist-root {
+    display: block;
+    column-span: all;
   }
 
   /* 月送りや期間の切り替えなど「その画面全体に効く操作」は横幅いっぱいに置く。
@@ -192,26 +210,24 @@
   .app-main > .seg,
   .app-main > .error-text,
   .app-main > .report-swipe,
-  .app-main > .comment-unread-banner {
+  .app-main > .comment-unread-banner,
+  .hist-pullable > .month-nav,
+  .hist-pullable > .hist-sync-line,
+  .hist-pullable > .hist-pull-indicator {
     column-span: all;
   }
 
-  /* レポートタブのカードは .report-swipe の内側にあるので、そこで段組みにする */
-  .report-body {
-    display: block;
-    columns: 2;
-    column-gap: 20px;
-  }
-
-  .report-body > * {
-    break-inside: avoid;
-    margin-bottom: 20px;
-  }
-
   /* 月ナビは幅いっぱいだと矢印が両端に離れすぎるので、中央にまとめる */
-  .app-main > .month-nav {
+  .app-main > .month-nav,
+  .hist-pullable > .month-nav {
     justify-content: center;
     gap: 24px;
+  }
+
+  /* 一括選択中に出る下部バーも、レールを避けて本文の中央へ */
+  .hist-bottom-bar {
+    bottom: 24px;
+    left: calc(50% + var(--rail-w) / 2);
   }
 
   /* 2択のセグメントは、幅いっぱいに伸ばすとボタンが1000px級になって
@@ -285,7 +301,8 @@
 
 @media (min-width: 1400px) {
   .app-main,
-  .report-body {
+  .report-body,
+  .hist-pullable {
     columns: 3;
   }
 }
