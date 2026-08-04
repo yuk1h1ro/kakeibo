@@ -7,14 +7,24 @@
 
 const STORAGE_KEY = 'kakeibo.geminiApiKey'
 
-/** このアプリが使う Gemini のモデル。接続テストでの存在確認にも使う */
-export const MODEL_ID = 'gemini-2.5-flash'
+/** 自動選択したモデル名の保存先(端末ごとのキャッシュ) */
+const MODEL_STORAGE_KEY = 'kakeibo.geminiModel'
+
+/**
+ * モデル一覧が取れなかったときの最終フォールバック。
+ * 通常は使わない — モデルは一覧APIから自動選択する(pickModel / resolveModel)。
+ * Google はモデルを随時廃止するため、決め打ちに依存しないこと。
+ */
+export const MODEL_ID = 'gemini-3-flash'
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 
-const ENDPOINT = `${API_BASE}/models/${MODEL_ID}:generateContent`
+/** 指定モデルの generateContent エンドポイント */
+function generateContentEndpoint(model: string): string {
+  return `${API_BASE}/models/${model}:generateContent`
+}
 
-/** モデル一覧(軽量・課金なし)。接続テストで使う */
+/** モデル一覧(軽量・課金なし)。接続テストとモデル自動選択で使う */
 const MODELS_ENDPOINT = `${API_BASE}/models`
 
 export function getGeminiKey(): string | null {
@@ -49,6 +59,37 @@ export function clearGeminiKey(): void {
 export function hasGeminiKey(): boolean {
   const key = getGeminiKey()
   return key !== null && key.trim() !== ''
+}
+
+// ---------- 使用モデルのキャッシュ ----------
+
+/** 自動選択済みのモデル名。未解決なら null */
+export function getCachedModel(): string | null {
+  try {
+    const raw = localStorage.getItem(MODEL_STORAGE_KEY)
+    if (raw === null) return null
+    const model = raw.trim()
+    return model === '' ? null : model
+  } catch {
+    return null
+  }
+}
+
+export function saveCachedModel(model: string): void {
+  try {
+    localStorage.setItem(MODEL_STORAGE_KEY, model.trim())
+  } catch {
+    // 保存できなくてもアプリは落とさない(毎回解決し直すだけ)
+  }
+}
+
+/** 廃止されたモデルを掴んだときに捨てる */
+export function clearCachedModel(): void {
+  try {
+    localStorage.removeItem(MODEL_STORAGE_KEY)
+  } catch {
+    // no-op
+  }
 }
 
 /**
@@ -225,6 +266,8 @@ export interface GeminiTestResult {
   message: string
   /** 利用可能なモデル名(models/ を除いた形) */
   availableModels?: string[]
+  /** 自動選択されたモデル名(成功時のみ) */
+  model?: string
 }
 
 /**
@@ -284,40 +327,135 @@ export function buildTestFailureMessage(status: number, detail: string | null): 
   return detail ? `${base}(詳細: ${detail})` : base
 }
 
-/** models 一覧レスポンスからモデルID(models/ を除いた形)を取り出す。(純粋関数) */
-export function extractModelIds(payload: unknown): string[] {
+/** モデル一覧の1要素(必要な項目だけ) */
+export interface GeminiModelInfo {
+  name: string
+  supportedGenerationMethods?: string[]
+}
+
+/** models 一覧レスポンスから必要な項目だけ取り出す。(純粋関数) */
+export function extractModelEntries(payload: unknown): GeminiModelInfo[] {
   if (payload === null || typeof payload !== 'object') return []
   const models = (payload as { models?: unknown }).models
   if (!Array.isArray(models)) return []
-  const ids: string[] = []
+  const entries: GeminiModelInfo[] = []
   for (const m of models) {
     const name = (m as { name?: unknown } | null)?.name
-    if (typeof name === 'string' && name.trim() !== '') {
-      ids.push(name.trim().replace(/^models\//, ''))
-    }
+    if (typeof name !== 'string' || name.trim() === '') continue
+    const methods = (m as { supportedGenerationMethods?: unknown }).supportedGenerationMethods
+    entries.push({
+      name: name.trim(),
+      supportedGenerationMethods: Array.isArray(methods)
+        ? methods.filter((x): x is string => typeof x === 'string')
+        : undefined,
+    })
   }
-  return ids
+  return entries
+}
+
+/** models 一覧レスポンスからモデルID(models/ を除いた形)を取り出す。(純粋関数) */
+export function extractModelIds(payload: unknown): string[] {
+  return extractModelEntries(payload).map(toModelId)
+}
+
+/** "models/gemini-3-flash" → "gemini-3-flash" */
+function toModelId(m: { name: string }): string {
+  return m.name.trim().replace(/^models\//, '')
 }
 
 /**
- * 取得できたモデル一覧から結果を組み立てる。(純粋関数)
- * このアプリが使うモデルが無ければ「キーは有効だがモデル不一致」として失敗にする。
+ * 優先して使いたいモデル(前方一致で判定するので、
+ * `-preview` や `-001` などのサフィックス付きにも当たる)。
+ * 無料枠の対象は Flash / Flash-Lite 系のみなので Pro 系は入れない。
  */
-export function buildTestSuccessResult(modelIds: string[]): GeminiTestResult {
-  if (!modelIds.includes(MODEL_ID)) {
+const PREFERRED_MODELS = ['gemini-3.5-flash', 'gemini-3-flash', 'gemini-2.5-flash']
+
+/** OCR用途に使えないモデル(画像生成・埋め込み・質問応答専用)を弾く */
+const EXCLUDED_PATTERN = /(image|embedding|aqa)/i
+
+/** モデル名からバージョン番号を取り出す。"gemini-3.5-flash" → 3.5。取れなければ null */
+function modelVersion(id: string): number | null {
+  const m = /(\d+(?:\.\d+)?)/.exec(id)
+  if (!m) return null
+  const v = Number(m[1])
+  return Number.isFinite(v) ? v : null
+}
+
+/**
+ * 利用可能なモデル一覧から、このアプリで使うモデルを1つ選ぶ。(純粋関数)
+ *
+ * - `generateContent` 非対応のものは除外(配列自体が無い場合は候補に残す)
+ * - 画像生成(`image`)・埋め込み(`embedding`)・`aqa` は除外
+ * - 無料枠の対象である Flash 系を優先し、PREFERRED_MODELS の順に前方一致で採用
+ * - どれにも当たらなければ Flash 系のうちバージョン番号が新しいものを採用
+ * - Flash 系が無ければ generateContent 対応の先頭、候補ゼロなら null
+ */
+export function pickModel(models: GeminiModelInfo[]): string | null {
+  if (!Array.isArray(models)) return null
+
+  const candidates = models
+    .filter((m): m is GeminiModelInfo => typeof m?.name === 'string' && m.name.trim() !== '')
+    .filter(
+      (m) =>
+        !Array.isArray(m.supportedGenerationMethods) ||
+        m.supportedGenerationMethods.includes('generateContent'),
+    )
+    .map(toModelId)
+    .filter((id) => !EXCLUDED_PATTERN.test(id))
+
+  if (candidates.length === 0) return null
+
+  const flash = candidates.filter((id) => /flash/i.test(id))
+
+  for (const prefix of PREFERRED_MODELS) {
+    const matched = flash.filter((id) => id.startsWith(prefix))
+    if (matched.length === 0) continue
+    // 完全一致 > 通常版 > lite版 の順。同じ前置きでも安定して同じものを選ぶため
+    return (
+      matched.find((id) => id === prefix) ??
+      matched.find((id) => !/lite/i.test(id)) ??
+      matched[0]
+    )
+  }
+
+  if (flash.length > 0) {
+    // 名前からバージョン番号を拾って新しい順に。取れないものは末尾へ(同点は元の順)
+    const sorted = flash
+      .map((id, index) => ({ id, index, version: modelVersion(id) }))
+      .sort((a, b) => {
+        if (a.version === b.version) return a.index - b.index
+        if (a.version === null) return 1
+        if (b.version === null) return -1
+        return b.version - a.version
+      })
+    return sorted[0].id
+  }
+
+  return candidates[0]
+}
+
+/**
+ * 取得できたモデル一覧から接続テスト結果を組み立てる。(純粋関数)
+ * 使えるモデルが1つも選べなければ「キーは有効だがモデル不一致」として失敗にする。
+ */
+export function buildTestSuccessResult(models: GeminiModelInfo[]): GeminiTestResult {
+  const modelIds = models.map(toModelId)
+  const picked = pickModel(models)
+  if (picked === null) {
     const head = modelIds.slice(0, 5).join(', ')
     return {
       ok: false,
       message:
-        `キーは有効ですが、このアプリが使うモデル(${MODEL_ID})が利用できません。` +
+        'キーは有効ですが、レシート読み取りに使えるモデルが見つかりませんでした。' +
         `利用可能: ${head === '' ? '(取得できませんでした)' : head}`,
       availableModels: modelIds,
     }
   }
   return {
     ok: true,
-    message: '接続できました。レシート読み取りを利用できます',
+    message: `接続できました(使用モデル: ${picked})。レシート読み取りを利用できます`,
     availableModels: modelIds,
+    model: picked,
   }
 }
 
@@ -330,8 +468,14 @@ export interface TestResponseLike {
 export interface RequestInitLike {
   method?: string
   headers?: Record<string, string>
+  body?: string
 }
 export type FetchLike = (url: string, init?: RequestInitLike) => Promise<TestResponseLike>
+/** 読み取り本体は JSON も読むので json() が要る(本物の Response もこの形を満たす) */
+export interface ScanResponseLike extends TestResponseLike {
+  json: () => Promise<unknown>
+}
+export type ScanFetchLike = (url: string, init?: RequestInitLike) => Promise<ScanResponseLike>
 
 /**
  * 保存済みAPIキーで疎通確認する。モデル一覧の取得(GET)だけなので課金されない。
@@ -372,7 +516,40 @@ export async function testGeminiKey(fetchImpl?: FetchLike): Promise<GeminiTestRe
   } catch {
     json = null
   }
-  return buildTestSuccessResult(extractModelIds(json))
+  const result = buildTestSuccessResult(extractModelEntries(json))
+  // テストは実質「モデルの再解決」でもある。ここで結果をキャッシュしておくと、
+  // モデルが廃止されたときにユーザーが接続テストを押すだけで復旧できる。
+  if (result.ok && result.model) saveCachedModel(result.model)
+  return result
+}
+
+// ---------- 使用モデルの解決 ----------
+
+/**
+ * モデル一覧を取得して、このアプリで使うモデルを決める。結果は localStorage にキャッシュする。
+ * 一覧が取れない・選べない場合は MODEL_ID(最終フォールバック)を返し、キャッシュはしない。
+ * fetchImpl は単体テスト用の差し替え口(通常は省略)。
+ */
+export async function resolveModel(fetchImpl?: FetchLike): Promise<string> {
+  const key = getGeminiKey()
+  if (!key) throw new Error('先にGeminiのAPIキーを設定してください')
+
+  const doFetch: FetchLike = fetchImpl ?? ((url, init) => fetch(url, init as RequestInit))
+
+  try {
+    // キーは URL ではなく x-goog-api-key ヘッダーで送る(新形式キー対応)
+    const res = await doFetch(MODELS_ENDPOINT, { method: 'GET', headers: apiKeyHeader(key) })
+    if (res.ok) {
+      const picked = pickModel(extractModelEntries(JSON.parse(await res.text())))
+      if (picked !== null) {
+        saveCachedModel(picked)
+        return picked
+      }
+    }
+  } catch {
+    // 通信エラー・JSON崩れは握りつぶしてフォールバックへ(読み取り自体は試みる)
+  }
+  return MODEL_ID
 }
 
 // ---------- 読み取り本体 ----------
@@ -388,9 +565,14 @@ const PROMPT =
  * レシート画像を Gemini に送り、店名・合計金額・購入日を抽出する。
  * 失敗時は日本語メッセージの Error を throw する。
  */
-export async function scanReceipt(file: File): Promise<ReceiptScanResult> {
+export async function scanReceipt(
+  file: File,
+  fetchImpl?: ScanFetchLike,
+): Promise<ReceiptScanResult> {
   const key = getGeminiKey()
   if (!key) throw new Error('先にGeminiのAPIキーを設定してください')
+
+  const doFetch: ScanFetchLike = fetchImpl ?? ((url, init) => fetch(url, init as RequestInit))
 
   const { base64, mimeType } = await resizeImage(file)
 
@@ -416,16 +598,35 @@ export async function scanReceipt(file: File): Promise<ReceiptScanResult> {
     },
   }
 
-  let res: Response
-  try {
-    // キーは URL ではなく x-goog-api-key ヘッダーで送る(新形式キー対応)
-    res = await fetch(ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...apiKeyHeader(key) },
-      body: JSON.stringify(body),
-    })
-  } catch {
-    throw new Error('通信エラー。電波の良い場所でお試しください')
+  const payload = JSON.stringify(body)
+
+  const post = async (model: string): Promise<ScanResponseLike> => {
+    try {
+      // キーは URL ではなく x-goog-api-key ヘッダーで送る(新形式キー対応)
+      return await doFetch(generateContentEndpoint(model), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...apiKeyHeader(key) },
+        body: payload,
+      })
+    } catch {
+      throw new Error('通信エラー。電波の良い場所でお試しください')
+    }
+  }
+
+  // キャッシュがあればそれを使い、無ければ一覧から解決する
+  let model = getCachedModel() ?? (await resolveModel(fetchImpl))
+  let res = await post(model)
+
+  // 404(モデル廃止)なら、キャッシュを捨てて1度だけ再解決してやり直す。
+  // リトライは1回だけ(無限ループ防止)。
+  if (!res.ok && res.status === 404) {
+    clearCachedModel()
+    const resolved = await resolveModel(fetchImpl)
+    // 同じモデルに解決されたなら投げ直しても同じ404なので、そのままエラーにする
+    if (resolved !== model) {
+      model = resolved
+      res = await post(model)
+    }
   }
 
   if (!res.ok) {

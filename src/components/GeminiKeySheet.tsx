@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import {
+  clearCachedModel,
   clearGeminiKey,
+  getCachedModel,
   getGeminiKey,
   looksLikeGeminiKey,
   saveGeminiKey,
@@ -27,6 +29,8 @@ export default function GeminiKeySheet({ onClose, onSaved }: Props) {
   const [showKey, setShowKey] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<GeminiTestResult | null>(null)
+  // 自動選択された使用モデル(接続テストや読み取り時に決まる)
+  const [model, setModel] = useState<string | null>(() => getCachedModel())
 
   // シートを開いている間は背面ページを固定する
   useBodyScrollLock()
@@ -40,6 +44,7 @@ export default function GeminiKeySheet({ onClose, onSaved }: Props) {
     try {
       const result = await testGeminiKey()
       setTestResult(result)
+      setModel(getCachedModel())
       return result
     } finally {
       setTesting(false)
@@ -59,8 +64,10 @@ export default function GeminiKeySheet({ onClose, onSaved }: Props) {
 
   const handleClear = () => {
     clearGeminiKey()
+    clearCachedModel()
     setSavedKey(null)
     setTestResult(null)
+    setModel(null)
   }
 
   return (
@@ -95,6 +102,7 @@ export default function GeminiKeySheet({ onClose, onSaved }: Props) {
           <>
             <p className="gemini-status">✓ APIキーは設定済みです</p>
             <p className="muted gemini-masked">{maskKey(savedKey)}</p>
+            {model && <p className="muted gemini-masked">使用モデル: {model}</p>}
             <div className="gemini-actions">
               <button
                 type="button"
