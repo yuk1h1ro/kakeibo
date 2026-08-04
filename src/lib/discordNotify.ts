@@ -1,4 +1,6 @@
-import { yen } from './format'
+// 通知文は目隠し(機能169)の対象外。彼女の端末に届く文章なので、
+// こちらの画面が伏字になっているかどうかで中身が変わってはいけない
+import { yenPlain as yen } from './format'
 import { categoryLabel } from './categories'
 import {
   balanceWording,
