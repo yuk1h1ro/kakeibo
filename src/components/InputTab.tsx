@@ -23,6 +23,7 @@ import { useLowBalanceThreshold } from '../lib/lowBalanceSettings'
 import type { Transaction } from '../lib/types'
 import type { TransactionInput, useTransactions } from '../hooks/useTransactions'
 import '../ledger.css'
+import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
 
 type Store = ReturnType<typeof useTransactions>
 
@@ -186,7 +187,9 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
       if (noteTimerRef.current) clearTimeout(noteTimerRef.current)
       noteTimerRef.current = setTimeout(() => setScanNote(false), 6000)
     } catch (err) {
-      setScanError(err instanceof Error ? err.message : String(err))
+      // レシート読み取りの自前の文言 (上限・読み取り失敗など) はそのまま通り、
+      // 生のサーバーエラーだけが原因と次の行動に置き換わる (機能161)
+      setScanError(describeUnknownError(err, isOnlineNow()))
     } finally {
       setScanning(false)
     }

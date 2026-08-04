@@ -13,6 +13,7 @@ import {
 import { buildShareUrl } from '../lib/shareRoute'
 import { hasBuildTimeConfig } from '../lib/supabaseClient'
 import '../share.css'
+import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
 
 // ============================================================
 // 閲覧専用の共有リンクの発行・コピー・無効化・再発行 (機能179 / 利用者側)
@@ -71,7 +72,7 @@ export default function ShareLinkCard({ supabase }: { supabase: SupabaseClient }
     try {
       await fn()
     } catch (e) {
-      setError(e instanceof Error ? e.message : '操作できませんでした')
+      setError(e instanceof Error ? describeUnknownError(e, isOnlineNow()) : '操作できませんでした')
     }
     setBusy(false)
   }

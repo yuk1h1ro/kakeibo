@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { formatGuidance, guidanceForServerError, isOnlineNow } from './errorGuidance'
+import type { ServerErrorLike } from './serverErrors'
 
 export interface Category {
   // id は transactions.category に保存される値 (= cat_key)。既存コードとの互換用に残す
@@ -256,8 +258,11 @@ export async function initCategories(supabase: SupabaseClient): Promise<void> {
 
 // ---------- CRUD(カテゴリ編集はオンライン前提。失敗時は throw) ----------
 
-function throwOn(error: { message: string } | null): void {
-  if (error) throw new Error(error.message)
+// 原文をそのまま投げると、カテゴリ設定シートには英語の PostgREST メッセージが出る。
+// 他の lib (recurringRules / transactionTemplates / shareLinks / partnerComments) と
+// 同じく、原因と次の行動に置き換えてから投げる (機能161)
+function throwOn(error: ServerErrorLike | null): void {
+  if (error) throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
 }
 
 /** カテゴリを追加する。cat_key は uuid を採番 */

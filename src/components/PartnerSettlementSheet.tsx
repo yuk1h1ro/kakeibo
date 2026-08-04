@@ -5,6 +5,7 @@ import { todayISO, yen } from '../lib/format'
 import { balanceWording } from '../lib/partnerBalance'
 import type { TransactionInput } from '../hooks/useTransactions'
 import '../ledger.css'
+import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
 
 // ============================================================
 // 預かり金の「返金」「現金で受け取り」「手動調整」 (機能012)
@@ -104,7 +105,8 @@ export default function PartnerSettlementSheet({ balance, onSubmit, onClose }: P
       })
       onClose()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      // 返金・調整が保存できない理由は、原文より「次に何をするか」が要る (機能161)
+      setError(describeUnknownError(e, isOnlineNow()))
     } finally {
       setBusy(false)
     }

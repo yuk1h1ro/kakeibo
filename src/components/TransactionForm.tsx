@@ -40,6 +40,7 @@ import {
 } from '../lib/splits'
 import type { TransactionInput } from '../hooks/useTransactions'
 import '../ledger.css'
+import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
 
 // 「最近の記録から入力」などの外部プリフィル。nonce が変わるたびに適用される(日付は現在の選択を維持)
 export interface FormPrefill {
@@ -529,7 +530,8 @@ export default function TransactionForm({
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      // 原文をそのまま出さない。原因と次の行動に置き換える (機能161)
+      setError(describeUnknownError(e, isOnlineNow()))
     } finally {
       setBusy(false)
     }

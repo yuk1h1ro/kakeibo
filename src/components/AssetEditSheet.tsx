@@ -9,6 +9,7 @@ import {
   type AssetKind,
 } from '../lib/assets'
 import useBodyScrollLock from '../hooks/useBodyScrollLock'
+import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
 
 interface Props {
   supabase: SupabaseClient
@@ -42,7 +43,7 @@ export default function AssetEditSheet({ supabase, editing, onClose, onSaved }: 
       await fn()
       onSaved()
     } catch (e) {
-      setError(e instanceof Error ? e.message : '保存できませんでした')
+      setError(e instanceof Error ? describeUnknownError(e, isOnlineNow()) : '保存できませんでした')
     } finally {
       setBusy(false)
     }

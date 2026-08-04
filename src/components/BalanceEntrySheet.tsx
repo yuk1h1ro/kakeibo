@@ -4,6 +4,7 @@ import { recordBalances, assetCategoryEmoji, type BalanceEntry } from '../lib/as
 import { formatBalanceInput, parseBalanceInput, type AssetRow } from '../lib/netWorth'
 import { todayISO, yen } from '../lib/format'
 import useBodyScrollLock from '../hooks/useBodyScrollLock'
+import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
 
 interface Props {
   supabase: SupabaseClient
@@ -54,7 +55,7 @@ export default function BalanceEntrySheet({ supabase, rows, onClose, onSaved }: 
       await recordBalances(supabase, asOf, entries)
       onSaved()
     } catch (e) {
-      setError(e instanceof Error ? e.message : '残高を保存できませんでした')
+      setError(e instanceof Error ? describeUnknownError(e, isOnlineNow()) : '残高を保存できませんでした')
     } finally {
       setBusy(false)
     }

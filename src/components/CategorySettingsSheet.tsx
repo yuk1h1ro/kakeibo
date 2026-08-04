@@ -19,6 +19,7 @@ import {
 } from './categoryIcons'
 import useBodyScrollLock from '../hooks/useBodyScrollLock'
 import '../settings.css'
+import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
 
 interface Props {
   supabase: SupabaseClient
@@ -88,7 +89,7 @@ export default function CategorySettingsSheet({ supabase, onClose }: Props) {
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         setError('カテゴリの編集はオンライン時のみ可能です')
       } else {
-        setError(e instanceof Error ? e.message : String(e))
+        setError(describeUnknownError(e, isOnlineNow()))
       }
     } finally {
       setBusy(false)

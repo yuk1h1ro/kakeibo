@@ -17,6 +17,7 @@ import {
 import { getStoreCategories, lookupStoreCategory } from '../lib/storeCategories'
 import type { TransactionInput } from '../hooks/useTransactions'
 import '../settings.css'
+import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
 
 interface Props {
   onClose: () => void
@@ -77,7 +78,7 @@ export default function ReceiptBatchSheet({ onClose, onSaveAll }: Props) {
           apply(
             updateReceipt(itemsRef.current, target.id, {
               status: 'failed',
-              error: e instanceof Error ? e.message : String(e),
+              error: describeUnknownError(e, isOnlineNow()),
             })
           )
         }
@@ -120,7 +121,7 @@ export default function ReceiptBatchSheet({ onClose, onSaveAll }: Props) {
       )
       onClose()
     } catch (e) {
-      setSaveError(e instanceof Error ? e.message : String(e))
+      setSaveError(describeUnknownError(e, isOnlineNow()))
     } finally {
       setBusy(false)
     }

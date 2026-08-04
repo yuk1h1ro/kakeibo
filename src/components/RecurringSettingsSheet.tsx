@@ -20,6 +20,7 @@ import {
   type RecurringRuleInput,
 } from '../lib/recurringRules'
 import '../settings.css'
+import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
 
 interface Props {
   supabase: SupabaseClient
@@ -135,7 +136,7 @@ export default function RecurringSettingsSheet({ supabase, onClose }: Props) {
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         setError('繰り返し入力の編集はオンライン時のみ可能です')
       } else {
-        setError(e instanceof Error ? e.message : String(e))
+        setError(describeUnknownError(e, isOnlineNow()))
       }
     } finally {
       setBusy(false)
