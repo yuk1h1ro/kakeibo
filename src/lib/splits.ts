@@ -124,6 +124,46 @@ export function buildSplitInputs(
   }))
 }
 
+/**
+ * 分割を開いたときに、上段で入れてあった「彼女の負担分」を内訳へ引き継ぐ。(純粋関数)
+ *
+ * 先頭の内訳から順に、その内訳の金額を上限として詰める(按分にすると
+ * 割り切れない1円がどこかに寄り、預かり残高が静かにずれる余地を作るため)。
+ * 引き継がないと、上段に入れた負担分が buildSplitInputs で内訳の値に
+ * 上書きされて黙って消える。
+ */
+export function carryPartnerAmount(
+  parts: readonly SplitPart[],
+  partnerAmount: number
+): SplitPart[] {
+  let rest = Number.isInteger(partnerAmount) && partnerAmount > 0 ? partnerAmount : 0
+  return parts.map((p) => {
+    const take = Math.max(0, Math.min(rest, p.amount))
+    rest -= take
+    return { ...p, partnerAmount: take }
+  })
+}
+
+/**
+ * 分割を開いた瞬間に出す注意書き。(純粋関数)
+ *
+ * 分割は「自分が全額払った会計」を分けるものなので(このファイル冒頭の理由)、
+ * 上段で選んだ「支払った人」は使われず、彼女の負担分も内訳の値で上書きされる。
+ * 入れた値が黙って消えるのがいちばん困るので、消えた/移したことをその場に出す。
+ * 金額は ¥ 付きで書く(目隠し 機能169 が画面側で伏せられるように)。
+ */
+export function splitCarryNotice(carriedPartnerAmount: number, payerWasPartner: boolean): string | null {
+  const carried =
+    carriedPartnerAmount > 0
+      ? `上段の「彼女の負担分」${yenPlain(carriedPartnerAmount)} は内訳に振り分けました。内訳ごとに直せます。`
+      : ''
+  const payer = payerWasPartner
+    ? '「支払った人」は分割では使えないため、自分が全額払った扱いで保存されます(必要なら分割をやめてから入力してください)。'
+    : ''
+  const text = `${carried}${payer}`
+  return text === '' ? null : text
+}
+
 /** 分割された記録か。(純粋関数) */
 export function isSplitPart(t: Transaction): boolean {
   return typeof t.split_group === 'string' && t.split_group !== ''

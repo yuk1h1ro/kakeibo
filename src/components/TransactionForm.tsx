@@ -30,7 +30,9 @@ import { useTxFeature } from '../lib/txExtensions'
 import { collectTags, parseTagInput, sanitizeTags, MAX_TAGS_PER_TX } from '../lib/tags'
 import {
   buildSplitInputs,
+  carryPartnerAmount,
   evenSplit,
+  splitCarryNotice,
   isSplitPart,
   splitTotal,
   validateSplit,
@@ -170,6 +172,9 @@ export default function TransactionForm({
 
   // 機能096: 分割。開いている間だけ内訳を持つ(閉じれば普通の1件に戻る)
   const [splitParts, setSplitParts] = useState<SplitPart[] | null>(null)
+  // 分割を開いたときに「上段の入力をどう扱ったか」を伝える1行。
+  // 支払った人・彼女の負担分は分割では使えないので、黙って捨てないための表示
+  const [splitNotice, setSplitNotice] = useState<string | null>(null)
   // 金額入力の簡易電卓(保留中の値と演算子)。数字は入力欄か自前テンキーから入る
   const [calc, setCalc] = useState<{ pendingValue: number | null; pendingOp: CalcOp | null }>({
     pendingValue: null,
@@ -306,6 +311,7 @@ export default function TransactionForm({
     setTags([])
     setTagDraft('')
     setSplitParts(null)
+    setSplitNotice(null)
     // レシート読み取りのように店名だけ入ってくる場合も、手入力と同じ経路でカテゴリを補う
     setCategory(prefill.category)
     setAutoCategory(null)
@@ -363,6 +369,22 @@ export default function TransactionForm({
   const tagSuggestions = collectTags(knownTransactions ?? [], 30)
     .filter((t) => !tags.includes(t.tag))
     .slice(0, TAG_SUGGESTION_LIMIT)
+
+  /**
+   * 機能096: 分割を開く。
+   * 上段の「彼女の負担分」は内訳へ引き継ぎ、引き継いだこと・
+   * 「支払った人」が使われないことをその場に出す(黙って捨てない)。
+   */
+  const openSplit = () => {
+    const carried = withPartner && partnerNum > 0 ? Math.min(partnerNum, amountNum) : 0
+    setSplitParts(carryPartnerAmount(evenSplit(amountNum, 2, category), carried))
+    setSplitNotice(splitCarryNotice(carried, payer !== 'me'))
+  }
+
+  const closeSplit = () => {
+    setSplitParts(null)
+    setSplitNotice(null)
+  }
 
   // 機能096: 内訳の1つを書き換える
   const updatePart = (index: number, patch: Partial<SplitPart>) => {
@@ -518,6 +540,7 @@ export default function TransactionForm({
         setTags([])
         setTagDraft('')
         setSplitParts(null)
+        setSplitNotice(null)
         if (continueAfter) {
           setStreak((n) => n + 1)
           setLastSavedAmount(amountNum)
@@ -791,7 +814,12 @@ export default function TransactionForm({
               />
             </label>
 
-            {isExpense && (
+            {/* 分割中は上段の「彼女の負担分」を出さない (機能096)。
+                分割では内訳ごとの負担分だけが保存されるので、上段の欄を残すと
+                「入れたのに効かない欄」になる。開いたときに値を内訳へ引き継ぎ、
+                引き継いだことは split-notice に出している(黙って捨てない)。
+                「分割をやめる」を押せば、入れた値のまま元の欄に戻る */}
+            {isExpense && !splitting && (
               <div className="form-col">
                 <button
                   type="button"
@@ -944,7 +972,7 @@ export default function TransactionForm({
                     type="button"
                     className="btn-ghost"
                     disabled={!Number.isInteger(amountNum) || amountNum <= 0}
-                    onClick={() => setSplitParts(evenSplit(amountNum, 2, category))}
+                    onClick={() => openSplit()}
                   >
                     カテゴリを分けて記録する
                   </button>
@@ -953,6 +981,10 @@ export default function TransactionForm({
                     <p className="muted">
                       内訳ごとに1件ずつ記録します。上のカテゴリではなく、下の内訳のカテゴリで残ります
                     </p>
+                    {splitNotice && (
+                      // 目隠し (機能169) 中は、ここに出る金額も伏せる
+                      <p className="split-notice">{maskAmountsIn(splitNotice)}</p>
+                    )}
                     {splitParts.map((p, i) => (
                       <div className="split-part" key={i}>
                         <div className="split-part-head">
@@ -1023,7 +1055,7 @@ export default function TransactionForm({
                       >
                         内訳を足す
                       </button>
-                      <button type="button" className="btn-ghost" onClick={() => setSplitParts(null)}>
+                      <button type="button" className="btn-ghost" onClick={() => closeSplit()}>
                         分割をやめる
                       </button>
                     </div>

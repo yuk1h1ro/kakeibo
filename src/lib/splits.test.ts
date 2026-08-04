@@ -4,8 +4,10 @@ import { partnerBalance } from './partnerBalance'
 import {
   buildSplitInputs,
   evenSplit,
+  carryPartnerAmount,
   isSplitPart,
   splitBadgeLabel,
+  splitCarryNotice,
   splitPositions,
   splitSiblings,
   splitTotal,
@@ -204,5 +206,47 @@ describe('splitPositions / splitSiblings', () => {
     const target = rows.find((t) => t.id === 'b')!
     expect(splitSiblings(rows, target).map((t) => t.id).sort()).toEqual(['a1', 'b'])
     expect(splitPositions(rows).get('b')?.count).toBe(splitSiblings(rows, target).length)
+  })
+})
+
+describe('carryPartnerAmount / splitCarryNotice(上段の入力を捨てない)', () => {
+  it('上段の彼女の負担分を先頭の内訳から順に引き継ぐ', () => {
+    const parts = carryPartnerAmount(evenSplit(5000, 2, 'food'), 1200)
+    expect(parts.map((p) => p.partnerAmount)).toEqual([1200, 0])
+    // 内訳の金額そのものは変えない
+    expect(parts.map((p) => p.amount)).toEqual([2500, 2500])
+  })
+
+  it('1つの内訳に収まらないときは次の内訳へこぼす(合計は保つ)', () => {
+    const parts = carryPartnerAmount(evenSplit(5000, 2, 'food'), 3000)
+    expect(parts.map((p) => p.partnerAmount)).toEqual([2500, 500])
+    expect(parts.reduce((s, p) => s + p.partnerAmount, 0)).toBe(3000)
+  })
+
+  it('内訳の金額を超える負担分は入れない(保存できない下書きを作らない)', () => {
+    const parts = carryPartnerAmount(
+      [part(500, 0), part(500, 0, 'daily')],
+      99999
+    )
+    for (const p of parts) expect(p.partnerAmount).toBeLessThanOrEqual(p.amount)
+    expect(validateSplit(parts, 1000).ok).toBe(true)
+  })
+
+  it('負担分が無ければ0のまま', () => {
+    expect(carryPartnerAmount(evenSplit(1000, 2, 'food'), 0).map((p) => p.partnerAmount)).toEqual([
+      0, 0,
+    ])
+  })
+
+  it('引き継いだこと・支払った人が使えないことを画面に出す文を返す', () => {
+    expect(splitCarryNotice(1200, false)).toContain('¥1,200')
+    expect(splitCarryNotice(0, true)).toContain('支払った人')
+    const both = splitCarryNotice(1200, true)
+    expect(both).toContain('¥1,200')
+    expect(both).toContain('支払った人')
+  })
+
+  it('捨てるものが何も無ければ何も出さない', () => {
+    expect(splitCarryNotice(0, false)).toBeNull()
   })
 })
