@@ -265,6 +265,9 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
         <SettingsSheet
           supabase={supabase}
           onClose={() => setShowSettings(false)}
+          // CSV 書き出し (機能198)。未同期の記録も含んだ表示中の全件を渡す —
+          // バックアップなので「まだサーバーに届いていない分」こそ落としてはいけない
+          transactions={store.transactions}
           quarantinedCount={store.quarantined.length}
           onOpenQuarantine={() => {
             setShowSettings(false)
