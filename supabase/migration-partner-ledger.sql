@@ -55,6 +55,16 @@ alter table public.transactions
 -- 「partner_amount <= amount」を全種別に課したままだと調整行が入りません。
 -- (支出以外の行では partner_amount は常に 0 です)
 -- ------------------------------------------------------------
+-- schema.sql では partner_amount の check が amount という別の列を参照して
+-- いるため、PostgreSQL はこれを列制約ではなくテーブル制約として扱い、
+-- 自動で transactions_check という名前を付ける。
+-- transactions_partner_amount_check という名前では落とせないので、
+-- 両方の名前を落としてから付け直す。
+-- これを落とし損ねると、古い「partner_amount <= amount」が生き残り、
+-- amount がマイナスの調整行が必ず 23514 で弾かれる。
+alter table public.transactions
+  drop constraint if exists transactions_check;
+
 alter table public.transactions
   drop constraint if exists transactions_partner_amount_check;
 

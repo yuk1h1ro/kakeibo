@@ -183,6 +183,48 @@ export const DEFAULT_FILTER: HistoryFilter = {
   tags: [],
 }
 
+/**
+ * 保存された値(localStorage の JSON など)から絞り込み条件を読む。(純粋関数)
+ *
+ * 既定値をベースに、**知っているキーだけ**を上書きする形にしてある。
+ * 1項目ずつ手で写す形にしていたときは、HistoryFilter に項目が増えるたびに
+ * 写し忘れの穴が開いた(実際 tags(機能088)が写されておらず、
+ * 保存した条件を読み直すとタグだけ消えていた。タグだけで絞った条件は
+ * 既定値と同じ内容になり、「呼び出しても何も絞られないのに、
+ * 何も絞っていない画面でその条件が選択中に見える」壊れ方をしていた)。
+ *
+ * 読み手を FILTER_READERS の表にしてあるので、HistoryFilter に項目を足すと
+ * 表に穴が空き、**型エラーで気付ける**(実行時に静かに消えることがない)。
+ * 読めない値・知らないキーは既定値のままにする。
+ */
+type FilterReaders = {
+  [K in keyof Required<HistoryFilter>]: (raw: unknown) => Required<HistoryFilter>[K] | undefined
+}
+
+function stringArray(raw: unknown): string[] | undefined {
+  return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === 'string') : undefined
+}
+
+const FILTER_READERS: FilterReaders = {
+  query: (raw) => (typeof raw === 'string' ? raw : undefined),
+  // 知らない並び順・期間は既定に落とす(選べない値が入ると並べ替えが効かなくなる)
+  sort: (raw) => SORT_OPTIONS.find((o) => o.value === raw)?.value,
+  period: (raw) => PERIOD_OPTIONS.find((o) => o.value === raw)?.value,
+  categories: stringArray,
+  tags: stringArray,
+}
+
+export function parseHistoryFilter(raw: unknown): HistoryFilter {
+  const out: HistoryFilter = { ...DEFAULT_FILTER }
+  if (typeof raw !== 'object' || raw === null) return out
+  const src = raw as Record<string, unknown>
+  for (const key of Object.keys(FILTER_READERS) as (keyof FilterReaders)[]) {
+    const value = FILTER_READERS[key](src[key])
+    if (value !== undefined) Object.assign(out, { [key]: value })
+  }
+  return out
+}
+
 function lastDayOfMonth(month: string): string {
   const [y, m] = month.split('-').map(Number)
   const day = new Date(y, m, 0).getDate()
@@ -248,7 +290,7 @@ export function sameFilter(a: HistoryFilter, b: HistoryFilter): boolean {
     a.sort === b.sort &&
     a.period === b.period &&
     a.categories.length === b.categories.length &&
-    [...a.categories].sort().join(' ') === [...b.categories].sort().join(' ') &&
+    [...a.categories].sort().join('\u0000') === [...b.categories].sort().join('\u0000') &&
     at.length === bt.length &&
     [...at].sort().join('\u0000') === [...bt].sort().join('\u0000')
   )

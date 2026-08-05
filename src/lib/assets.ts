@@ -338,10 +338,10 @@ export async function recordBalances(
   throwOn(error)
   const saved = ((data ?? []) as unknown as BalanceRowDb[]).map(fromBalanceRow)
   // 同じ (資産, 日付) の古い行を差し替えてから足す
-  const replaced = new Set(saved.map((s) => `${s.assetId} ${s.asOf}`))
+  const replaced = new Set(saved.map((s) => `${s.assetId}\u0000${s.asOf}`))
   publish({
     balances: [
-      ...snapshot.balances.filter((b) => !replaced.has(`${b.assetId} ${b.asOf}`)),
+      ...snapshot.balances.filter((b) => !replaced.has(`${b.assetId}\u0000${b.asOf}`)),
       ...saved,
     ],
   })

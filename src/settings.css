@@ -640,3 +640,27 @@
 .settings-reset-config {
   margin-top: 8px;
 }
+
+/* ---------- 同期できなかった記録(隔離箱) ---------- */
+
+/* 「もう一度送る」と「破棄する」を横に並べる。
+   破棄は取り返しがつかないので、押しやすい左側には置かない */
+.quarantine-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.quarantine-actions .btn-primary {
+  flex: 1;
+}
+
+/* バナーから隔離箱を開くボタン。文章の続きとして読めるように行内に置く */
+.sync-banner .banner-link {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 0;
+  font-size: 12px;
+  text-decoration: underline;
+}

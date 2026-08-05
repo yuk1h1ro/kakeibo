@@ -81,6 +81,53 @@ describe('diffTransaction', () => {
     const changes = diffTransaction(tx(), input({ satisfaction: 'regret' }), labelOf)
     expect(changes[0]).toEqual({ label: '気分', from: '未設定', to: '後悔' })
   })
+
+  // 機能018: 預かり残高が動く操作。差分が空だと履歴ごと捨てられていた
+  it('彼女が払った額の変更を残す(残高が動く操作)', () => {
+    const changes = diffTransaction(tx(), input({ partner_paid: 1200 }), labelOf)
+    expect(changes).toEqual([{ label: '彼女が払った額', from: '¥0', to: '¥1,200' }])
+  })
+
+  it('彼女が払った額を取り消したことも残す', () => {
+    const before = tx({ partner_paid: 1200 })
+    const changes = diffTransaction(before, input({ partner_paid: 0 }), labelOf)
+    expect(changes).toEqual([{ label: '彼女が払った額', from: '¥1,200', to: '¥0' }])
+  })
+
+  // 機能088
+  it('タグの追加・削除を残す', () => {
+    expect(diffTransaction(tx(), input({ tags: ['デート'] }), labelOf)).toEqual([
+      { label: 'タグ', from: '(なし)', to: '#デート' },
+    ])
+    expect(diffTransaction(tx({ tags: ['デート'] }), input({ tags: [] }), labelOf)).toEqual([
+      { label: 'タグ', from: '#デート', to: '(なし)' },
+    ])
+  })
+
+  it('タグは並び順が違うだけなら変更扱いにしない', () => {
+    const before = tx({ tags: ['旅行', 'デート'] })
+    expect(diffTransaction(before, input({ tags: ['デート', '旅行'] }), labelOf)).toEqual([])
+  })
+
+  // 機能096: 束ねID(UUID)そのままでは読めないので、言葉で残す
+  it('分割の束ねは「分割の一部かどうか」が分かる言葉で残す', () => {
+    const changes = diffTransaction(
+      tx(),
+      input({ split_group: 'a1b2c3d4-e5f6-7890-1234-567890abcdef' }),
+      labelOf
+    )
+    expect(changes).toEqual([{ label: '分割', from: '分割なし', to: '分割の一部 (a1b2c3d4)' }])
+    expect(
+      diffTransaction(tx({ split_group: 'a1b2c3d4-x' }), input({ split_group: null }), labelOf)
+    ).toEqual([{ label: '分割', from: '分割の一部 (a1b2c3d4)', to: '分割なし' }])
+  })
+
+  it('後から足した列を送っていない環境では差分にしない', () => {
+    // partner_paid / tags / split_group 列が無い環境ではキーごと落として送るため、
+    // 「送らなかった = 変わっていない」を差分にすると嘘の履歴が残る
+    const before = tx({ partner_paid: 1200, tags: ['デート'], split_group: 'g1' })
+    expect(diffTransaction(before, input(), labelOf)).toEqual([])
+  })
 })
 
 describe('transactionSummary', () => {

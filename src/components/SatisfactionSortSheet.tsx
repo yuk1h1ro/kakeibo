@@ -5,14 +5,24 @@ import { categoryLabel, resolveCategoryVisual } from '../lib/categories'
 import { CategoryVisualBadge } from './categoryIcons'
 import { formatDate, yen } from '../lib/format'
 import { SATISFACTION_OPTIONS } from '../lib/satisfaction'
+import { splitPositions } from '../lib/splits'
 import type { Satisfaction, Transaction } from '../lib/types'
 import { ownAmount } from '../lib/types'
 import '../settings.css'
 
 interface Props {
-  /** 未設定の支出(新しい順)。開いた時点の並びで固定する */
+  /**
+   * 未設定の支出(新しい順)。開いた時点の並びで固定する。
+   * 分割した会計 (機能096) は束ねごとに代表1件だけが入っている
+   */
   targets: Transaction[]
   onAssign: (t: Transaction, value: Satisfaction) => Promise<void>
+  /**
+   * 分割した会計の仲間(自分自身を含む)を返す。省略時はその1件だけ。
+   * 代表1件に付けた気分を束ね全体に書くために使う — 代表にしか書かないと、
+   * 残りの断片が次に開いたときまた出てきて、畳んだ意味が無くなる
+   */
+  groupOf?: (t: Transaction) => Transaction[]
   onClose: () => void
 }
 
@@ -24,7 +34,12 @@ interface Props {
  * 対象の配列は開いた瞬間に固定する — 1件付けるたびに親から渡る配列が縮むと、
  * 「今どれを見ているか」が飛んでしまうため。
  */
-export default function SatisfactionSortSheet({ targets, onAssign, onClose }: Props) {
+export default function SatisfactionSortSheet({
+  targets,
+  onAssign,
+  groupOf,
+  onClose,
+}: Props) {
   const [queue] = useState<Transaction[]>(targets)
   const [index, setIndex] = useState(0)
   const [busy, setBusy] = useState(false)
@@ -33,12 +48,18 @@ export default function SatisfactionSortSheet({ targets, onAssign, onClose }: Pr
   useBodyScrollLock()
 
   const current: Transaction | undefined = queue[index]
+  // 分割の仲間(代表を含む)。分割でなければその1件だけ
+  const group = current ? (groupOf?.(current) ?? [current]) : []
+  const groupTotal = group.reduce((sum, t) => sum + ownAmount(t), 0)
+  // 「分割 1/2」の表示と同じ数え方をする (機能096)
+  const splitCount = current ? splitPositions(group).get(current.id)?.count ?? 1 : 1
 
   const assign = async (value: Satisfaction) => {
     if (!current || busy) return
     setBusy(true)
     try {
-      await onAssign(current, value)
+      // 1回の買い物に1つの気分。分割した行すべてに同じ値を書く
+      for (const t of group) await onAssign(t, value)
       setSorted((n) => n + 1)
       setIndex((i) => i + 1)
     } finally {
@@ -79,10 +100,13 @@ export default function SatisfactionSortSheet({ targets, onAssign, onClose }: Pr
                   </span>
                   <span className="sort-sub">
                     {formatDate(current.date)}・{categoryLabel(current.category)}
+                    {/* 機能096: 分割は1回の買い物。畳んで出していることと、
+                        付けた気分が内訳すべてに入ることをその場に書く */}
+                    {splitCount > 1 && `・分割${splitCount}件をまとめて付けます`}
                   </span>
                 </div>
               </div>
-              <div className="sort-amount">{yen(ownAmount(current))}</div>
+              <div className="sort-amount">{yen(groupTotal)}</div>
               <p className="muted sort-hint">
                 右へ払うと「満足」、左へ払うと「後悔」。ボタンでも付けられます
               </p>

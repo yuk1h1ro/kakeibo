@@ -18,6 +18,7 @@ import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { TransactionInput } from '../hooks/useTransactions'
 import type { Transaction } from './types'
+import { partnerPaid, tagsOf } from './types'
 import { formatDate, yenPlain } from './format'
 import { isSchemaError } from './serverErrors'
 
@@ -116,7 +117,34 @@ export function diffTransaction(
       v === 'good' ? '満足' : v === 'neutral' ? '普通' : v === 'regret' ? '後悔' : '未設定'
     push('気分', name(before.satisfaction), name(after.satisfaction))
   }
+  // 機能018: 彼女が払った額。これが変わると預かり残高が動く(partnerBalance.ts)。
+  // 「残高が動いた理由を後から追う」のがこの機能の目的なので、
+  // いちばん追いたいこの操作こそ差分に残す
+  if (after.partner_paid !== undefined) {
+    push('彼女が払った額', yenPlain(partnerPaid(before)), yenPlain(after.partner_paid))
+  }
+  // 機能088: タグ。並び順の違いだけで「変わった」ことにしない
+  if (after.tags !== undefined) {
+    push('タグ', tagListText(tagsOf(before)), tagListText(after.tags))
+  }
+  // 機能096: 分割の束ね。束ねID(UUID)そのものを出しても読めないので、
+  // 「分割の一部かどうか」が分かる言葉にして、区別のため先頭だけ添える
+  if (after.split_group !== undefined) {
+    push('分割', splitGroupText(before.split_group), splitGroupText(after.split_group))
+  }
   return out
+}
+
+/** タグの一覧を表示用の1行にする。並び順の違いは差分にしない。(純粋関数) */
+function tagListText(tags: readonly string[]): string {
+  if (tags.length === 0) return '(なし)'
+  return [...tags].sort().map((t) => `#${t}`).join(' ')
+}
+
+/** 分割の束ねを表示用の言葉にする。(純粋関数) */
+function splitGroupText(group: string | null | undefined): string {
+  if (typeof group !== 'string' || group === '') return '分割なし'
+  return `分割の一部 (${group.slice(0, 8)})`
 }
 
 /**

@@ -94,8 +94,3 @@ export function acquireBodyScrollLock(): () => void {
     }
   }
 }
-
-/** テスト用: 現在の参照カウント */
-export function _lockCount(): number {
-  return lockCount
-}

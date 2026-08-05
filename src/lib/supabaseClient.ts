@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { cleanupAfterSignOut, markSignOutRequested, takeSignOutRequest, clearLocalData, clearSupabaseSession } from './localData'
 
 const URL_KEY = 'kakeibo.supabaseUrl'
 const ANON_KEY = 'kakeibo.supabaseAnonKey'
@@ -57,6 +58,15 @@ export function getSupabase(): SupabaseClient | null {
   const config = resolveConfig()
   if (!config) return null
   client = createClient(config.url, config.anonKey)
+  // ログアウトの後始末はここに1つだけ置く。ログアウトのボタンが増えても
+  // 「セッションだけ消えて端末内のデータと鍵が残る」状態を作らないため。
+  // (未同期が残っているときは何も消さずに知らせるだけ — localData.ts)
+  //
+  // ただし SIGNED_OUT はセッション期限切れでも飛ぶ。意図を立てたときだけ
+  // 後始末する(そうしないと、何もしていないのに消去の確認が出る)
+  client.auth.onAuthStateChange((event) => {
+    if (event === 'SIGNED_OUT' && takeSignOutRequest()) cleanupAfterSignOut()
+  })
   return client
 }
 
@@ -79,8 +89,31 @@ export function saveConfig(url: string, anonKey: string): void {
   localStorage.setItem(ANON_KEY, anonKey.trim())
 }
 
+/**
+ * 接続設定をやり直す (AuthScreen の導線)。
+ *
+ * URL と anon キーだけを消すと、前の接続先のログイン状態(Supabase の
+ * セッション鍵)と、前の接続先から取り込んだ明細のキャッシュが端末に残る。
+ * 「別のプロジェクトに繋ぎ直す」ためのボタンなので、端末内は全部片付ける
+ * (サーバー上の記録は1件も消えない)。
+ */
 export function clearConfig(): void {
-  localStorage.removeItem(URL_KEY)
-  localStorage.removeItem(ANON_KEY)
+  clearLocalData([])
+  clearSupabaseSession()
   client = null
+}
+
+/**
+ * 利用者が押したログアウト。
+ *
+ * ここを通ったときだけ端末内の後始末をする。素の signOut() を直に呼ぶと
+ * セッション期限切れと区別が付かず、何もしていないのに消去の確認が出る。
+ * 後始末を断られてもログアウト自体は行う(消すかどうかとは別の話なので)。
+ */
+export async function signOutByUser(supabase: SupabaseClient): Promise<void> {
+  markSignOutRequested()
+  const { error } = await supabase.auth.signOut()
+  // 失敗して SIGNED_OUT が飛ばないときは、立てた意図を倒しておく
+  // (次に期限切れが来たときに後始末が誤発火しないようにする)
+  if (error) takeSignOutRequest()
 }

@@ -2,12 +2,19 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   fetchShareSnapshot,
   postShareComment,
+  type ShareCharge,
   type ShareComment,
   type ShareSnapshot,
 } from '../lib/shareView'
 import { formatDate, yen } from '../lib/format'
 import { categoryLabel } from '../lib/categories'
 import { partnerViewWording } from '../lib/partnerBalance'
+import {
+  chargeImpact,
+  paidRowNote,
+  signedAmountText,
+  splitCharges,
+} from '../lib/shareCharges'
 import CommentThread from './CommentThread'
 import '../share.css'
 import '../ledger.css'
@@ -87,7 +94,52 @@ export default function SharePage({ token }: Props) {
   return <ShareContent data={state.data} token={token} onAppendComment={appendComment} />
 }
 
-function ShareContent({
+/**
+ * 明細1行。金額は必ず **のこり(残高)への影響額** で出す。
+ * 支払い総額は共有ページに届いていないので、出しようがない = 出さない。
+ */
+function ChargeRow({
+  charge,
+  comments,
+  maxLength,
+  onSubmit,
+}: {
+  charge: ShareCharge
+  comments: ShareComment[]
+  maxLength: number
+  onSubmit: (body: string) => Promise<string | null>
+}) {
+  const label = charge.categoryLabel ?? categoryLabel(charge.category)
+  const sub = [formatDate(charge.date), label].filter(Boolean).join(' ・ ')
+  const impact = chargeImpact(charge)
+  return (
+    <div className="movement-item">
+      <div className="share-row">
+        <span className="share-row-body">
+          <span className="share-row-title">{charge.store || label || 'お買いもの'}</span>
+          <span className="share-row-sub">{sub}</span>
+          {/* 彼女が払った回は、内訳を書かないと符号の意味が読めない */}
+          {charge.paid > 0 && (
+            <span className="share-row-sub share-row-paid">{paidRowNote(charge, yen)}</span>
+          )}
+        </span>
+        <span className={`share-row-amount${impact > 0 ? ' positive' : ''}`}>
+          {signedAmountText(impact, yen)}
+        </span>
+      </div>
+      <CommentThread
+        comments={comments}
+        viewer="partner"
+        maxLength={maxLength}
+        onSubmit={onSubmit}
+      />
+    </div>
+  )
+}
+
+// 中身だけを描くところ。符号の出し方が彼女の理解を左右するので、
+// テストから直接描画して確かめられるように名前付きで出しておく
+export function ShareContent({
   data,
   token,
   onAppendComment,
@@ -107,6 +159,9 @@ function ShareContent({
   // 機能011: 符号ではなく言葉で意味を伝える。
   // 主語が彼女側になるので、利用者の画面とは別の言い回しを使う
   const wording = partnerViewWording(data.balance)
+
+  // 機能018: 「引かれた回」と「あなたが払った回」を分ける (lib/shareCharges.ts)
+  const { deducted, paidByPartner } = useMemo(() => splitCharges(data.charges), [data.charges])
 
   const submitComment = async (transactionId: string, body: string): Promise<string | null> => {
     const r = await postShareComment(token, transactionId, body)
@@ -137,44 +192,44 @@ function ShareContent({
         <p className="note">{wording.note}</p>
       </div>
 
+      {/* 機能018: 「引かれたもの」と「あなたが払ったもの」は節を分ける。
+          混ぜていた頃は、彼女が払った回まで「あなたの分として引かれたもの」に
+          マイナスで並び、実際には残高が増えているのに逆の符号に見えていた
+          (利用者側の画面とも符号が逆だった)。金額は必ず残高への影響額で出す */}
       <div className="card">
         <h2>あなたの分として引かれたもの</h2>
-        {data.charges.length === 0 ? (
+        {deducted.length === 0 ? (
           <p className="share-empty">まだありません</p>
         ) : (
-          data.charges.map((c) => {
-            const label = c.categoryLabel ?? categoryLabel(c.category)
-            const sub = [formatDate(c.date), label].filter(Boolean).join(' ・ ')
-            const comments = commentsByTx[c.id] ?? []
-            return (
-              <div className="movement-item" key={c.id}>
-                <div className="share-row">
-                  <span className="share-row-body">
-                    <span className="share-row-title">{c.store || label || 'お買いもの'}</span>
-                    <span className="share-row-sub">{sub}</span>
-                    {/* 機能018: あなたが払った回は、そのことも書かないと
-                        「引かれただけ」に見えてしまう */}
-                    {c.paid > 0 && (
-                      <span className="share-row-sub share-row-paid">
-                        このお会計は、あなたが {yen(c.paid)} 払いました
-                      </span>
-                    )}
-                  </span>
-                  <span className="share-row-amount">
-                    {c.amount > 0 ? `-${yen(c.amount)}` : '—'}
-                  </span>
-                </div>
-                <CommentThread
-                  comments={comments}
-                  viewer="partner"
-                  maxLength={data.maxCommentLength}
-                  onSubmit={(body) => submitComment(c.id, body)}
-                />
-              </div>
-            )
-          })
+          deducted.map((c) => (
+            <ChargeRow
+              key={c.id}
+              charge={c}
+              comments={commentsByTx[c.id] ?? []}
+              maxLength={data.maxCommentLength}
+              onSubmit={(body) => submitComment(c.id, body)}
+            />
+          ))
         )}
       </div>
+
+      {paidByPartner.length > 0 && (
+        <div className="card">
+          <h2>あなたが払ってくれたお会計</h2>
+          <p className="share-note">
+            あなたが払ってくれたお会計です。あなたの分をこえて出してくれたぶんは、のこりに足しています。
+          </p>
+          {paidByPartner.map((c) => (
+            <ChargeRow
+              key={c.id}
+              charge={c}
+              comments={commentsByTx[c.id] ?? []}
+              maxLength={data.maxCommentLength}
+              onSubmit={(body) => submitComment(c.id, body)}
+            />
+          ))}
+        </div>
+      )}
 
       <div className="card">
         <h2>あなたがあずけたお金</h2>

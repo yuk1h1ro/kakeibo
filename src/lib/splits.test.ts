@@ -4,7 +4,12 @@ import { partnerBalance } from './partnerBalance'
 import {
   buildSplitInputs,
   evenSplit,
+  carryPartnerAmount,
   isSplitPart,
+  splitBadgeLabel,
+  splitCarryNotice,
+  splitPositions,
+  splitSiblings,
   splitTotal,
   validateSplit,
   type SplitPart,
@@ -148,5 +153,100 @@ describe('isSplitPart', () => {
     expect(isSplitPart(tx({ split_group: 'g1' }))).toBe(true)
     expect(isSplitPart(tx({ split_group: null }))).toBe(false)
     expect(isSplitPart(tx({}))).toBe(false)
+  })
+})
+
+describe('splitPositions / splitSiblings', () => {
+  const tx = (p: Partial<Transaction>): Transaction => ({
+    id: 'a',
+    date: '2026-08-04',
+    type: 'expense',
+    amount: 1000,
+    category: 'food',
+    memo: '',
+    store: '',
+    partner_amount: 0,
+    created_at: '2026-08-04T03:00:00.000Z',
+    ...p,
+  })
+
+  const rows: Transaction[] = [
+    tx({ id: 'solo' }),
+    tx({ id: 'b', split_group: 'g1', created_at: '2026-08-04T03:00:02.000Z' }),
+    tx({ id: 'a1', split_group: 'g1', created_at: '2026-08-04T03:00:01.000Z' }),
+    tx({ id: 'c', split_group: 'g2', created_at: '2026-08-04T04:00:00.000Z' }),
+    tx({ id: 'd', split_group: 'g2', created_at: '2026-08-04T04:00:00.000Z' }),
+    tx({ id: 'e', split_group: 'g2', created_at: '2026-08-04T04:00:00.000Z' }),
+  ]
+
+  it('束ねごとに「何分の何番目か」が出る', () => {
+    const pos = splitPositions(rows)
+    expect(pos.get('a1')).toEqual({ index: 1, count: 2 })
+    expect(pos.get('b')).toEqual({ index: 2, count: 2 })
+    expect(pos.get('c')).toEqual({ index: 1, count: 3 })
+  })
+
+  it('分割でない記録は表に載せない', () => {
+    expect(splitPositions(rows).has('solo')).toBe(false)
+  })
+
+  it('作成時刻が同着でも番号が入れ替わらない(id で決めきる)', () => {
+    const forward = splitPositions(rows)
+    const backward = splitPositions([...rows].reverse())
+    for (const id of ['c', 'd', 'e']) {
+      expect(backward.get(id)).toEqual(forward.get(id))
+    }
+  })
+
+  it('表示は「分割 1/2」', () => {
+    expect(splitBadgeLabel({ index: 1, count: 2 })).toBe('分割 1/2')
+  })
+
+  it('splitSiblings と同じ束ねを指す', () => {
+    const target = rows.find((t) => t.id === 'b')!
+    expect(splitSiblings(rows, target).map((t) => t.id).sort()).toEqual(['a1', 'b'])
+    expect(splitPositions(rows).get('b')?.count).toBe(splitSiblings(rows, target).length)
+  })
+})
+
+describe('carryPartnerAmount / splitCarryNotice(上段の入力を捨てない)', () => {
+  it('上段の彼女の負担分を先頭の内訳から順に引き継ぐ', () => {
+    const parts = carryPartnerAmount(evenSplit(5000, 2, 'food'), 1200)
+    expect(parts.map((p) => p.partnerAmount)).toEqual([1200, 0])
+    // 内訳の金額そのものは変えない
+    expect(parts.map((p) => p.amount)).toEqual([2500, 2500])
+  })
+
+  it('1つの内訳に収まらないときは次の内訳へこぼす(合計は保つ)', () => {
+    const parts = carryPartnerAmount(evenSplit(5000, 2, 'food'), 3000)
+    expect(parts.map((p) => p.partnerAmount)).toEqual([2500, 500])
+    expect(parts.reduce((s, p) => s + p.partnerAmount, 0)).toBe(3000)
+  })
+
+  it('内訳の金額を超える負担分は入れない(保存できない下書きを作らない)', () => {
+    const parts = carryPartnerAmount(
+      [part(500, 0), part(500, 0, 'daily')],
+      99999
+    )
+    for (const p of parts) expect(p.partnerAmount).toBeLessThanOrEqual(p.amount)
+    expect(validateSplit(parts, 1000).ok).toBe(true)
+  })
+
+  it('負担分が無ければ0のまま', () => {
+    expect(carryPartnerAmount(evenSplit(1000, 2, 'food'), 0).map((p) => p.partnerAmount)).toEqual([
+      0, 0,
+    ])
+  })
+
+  it('引き継いだこと・支払った人が使えないことを画面に出す文を返す', () => {
+    expect(splitCarryNotice(1200, false)).toContain('¥1,200')
+    expect(splitCarryNotice(0, true)).toContain('支払った人')
+    const both = splitCarryNotice(1200, true)
+    expect(both).toContain('¥1,200')
+    expect(both).toContain('支払った人')
+  })
+
+  it('捨てるものが何も無ければ何も出さない', () => {
+    expect(splitCarryNotice(0, false)).toBeNull()
   })
 })

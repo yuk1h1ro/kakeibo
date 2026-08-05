@@ -44,16 +44,23 @@ export default function RowActionMenu({ tx, onDuplicate, onEdit, onDelete, onClo
         </p>
 
         <div className="hist-menu-sheet" style={{ marginTop: 12 }}>
-          <button
-            className="hist-menu-item"
-            onClick={() => {
-              onDuplicate(tx)
-              onClose()
-            }}
-          >
-            <IconCopy />
-            同じ内容で今日の日付に複製する
-          </button>
+          {/* 複製は支出のときだけ出す。
+              預かり・返金・調整は「実際にお金が動いた1回」を表す記録なので、
+              複製すると存在しない預かりが生まれ、残高が倍になり、
+              彼女にも「+¥30,000 預かりました」と嘘の通知が飛ぶ。
+              メニューの想定(「この前と同じものをまた買った」)も支出だけを指している */}
+          {isExpense && (
+            <button
+              className="hist-menu-item"
+              onClick={() => {
+                onDuplicate(tx)
+                onClose()
+              }}
+            >
+              <IconCopy />
+              同じ内容で今日の日付に複製する
+            </button>
+          )}
           <button
             className="hist-menu-item"
             onClick={() => {

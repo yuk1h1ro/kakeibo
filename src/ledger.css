@@ -31,12 +31,12 @@
 }
 
 .balance-direction.is-lent {
-  background: rgba(201, 59, 59, 0.12);
+  background: var(--expense-soft);
   color: var(--expense);
 }
 
 .balance-direction.is-holding {
-  background: rgba(21, 127, 61, 0.12);
+  background: var(--income-soft);
   color: var(--income);
 }
 
@@ -205,14 +205,6 @@
   cursor: pointer;
 }
 
-.tag-row-label {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
 /* ---------- 分割 (機能096) ---------- */
 
 .split-block {
@@ -299,4 +291,14 @@
 .share-row-paid {
   color: var(--income);
   font-size: 13px;
+}
+
+/* 分割を開いたときの「上段の入力をどう扱ったか」の1行 (機能096)。
+   注意書きだが失敗ではないので、エラー色ではなく本文色 + 左の罫線で示す */
+.split-notice {
+  font-size: 13px;
+  line-height: 1.6;
+  padding-left: 10px;
+  border-left: 3px solid var(--accent);
+  color: var(--text-secondary);
 }

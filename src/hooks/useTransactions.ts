@@ -8,6 +8,21 @@ import {
   type PendingOp,
 } from '../lib/offlineQueue'
 import {
+  clearSyncFailures,
+  discardQuarantineEntry,
+  findQuarantineEntry,
+  opsToQuarantine,
+  persistedSplitSiblings,
+  quarantineCount,
+  quarantineGuidance,
+  quarantineOps,
+  reachedAttemptLimit,
+  recordSyncFailure,
+  splitGroupOf,
+  useQuarantine,
+  type QuarantineReason,
+} from '../lib/quarantine'
+import {
   isSatisfactionUnavailable,
   markSatisfactionUnavailable,
   withoutSatisfaction,
@@ -70,6 +85,10 @@ export interface TransactionInput {
   tags?: string[]
   // 分割した会計の束ねID (機能096)
   split_group?: string | null
+  // 作成日時。ふだんは送らず DB の now() に任せるが、**元に戻す**ときだけは
+  // 元の値を写す (機能159)。写さないと復元した瞬間が created_at になり、
+  // 同じ日の中での並び順が変わり、レポートの「時間帯別」も復元時刻に付け替わる。
+  created_at?: string
 }
 
 /**
@@ -222,7 +241,11 @@ export function useTransactions(supabase: SupabaseClient) {
         setServerTx(rows)
         serverTxRef.current = rows
         saveTxCache(rows)
-        setErrorGuide(null)
+        // 「サーバーから取り込めた」ことは、送れなかった記録が片付いたことを意味しない。
+        // ここで一律に消していたせいで、隔離の案内が画面から1文字も残らず、
+        // 再読み込みすると痕跡がゼロになっていた。
+        // 隔離箱が空になるまでは、拒否の案内を消さない
+        setErrorGuide((prev) => (prev?.kind === 'rejected' && quarantineCount() > 0 ? prev : null))
         // 取り込めたときだけ更新時刻を進める(機能154)
         const now = new Date().toISOString()
         setLastSyncedAt(now)
@@ -233,6 +256,53 @@ export function useTransactions(supabase: SupabaseClient) {
     }
     setLoading(false)
   }, [supabase])
+
+  /**
+   * 送れなかった op を隔離箱へ移す。移せた件数を返し、移せなければ null。
+   *
+   * ここが「記録を失わない」ための最後の砦なので、順番を必ず守る:
+   *   1. 隔離箱に **保存できたことを確かめて** から
+   *   2. キューから外す
+   * 逆順にすると、保存に失敗した瞬間に記録が消える。
+   *
+   * 分割 (split_group) は会計まるごと扱う。すでにサーバーへ入ってしまった
+   * 片割れがあれば削除の op を積み、その内容も隔離箱に入れておく —
+   * 「3,000円の会計が 2,000円だけ残る」という中途半端な状態を作らないため。
+   */
+  const quarantineFromQueue = useCallback(
+    (
+      op: PendingOp,
+      reason: QuarantineReason,
+      err: ServerErrorLike,
+      rows: readonly Transaction[]
+    ): number | null => {
+      const group = opsToQuarantine(loadQueue(), op)
+      // 取り消す相手は「手元で内容が分かっている行」だけに限る。
+      // split_group でまとめてサーバーから消す手もあるが、それだと中身を
+      // 隔離箱に持っていけない = 記録を失う。見えている範囲だけを丁寧に扱う
+      const siblings = persistedSplitSiblings(rows, splitGroupOf(op), group)
+      // 消す前に、同じ内容で入れ直せる形にして隔離箱へ持っていく
+      const undoOps: PendingOp[] = siblings.map((row) => ({
+        opId: crypto.randomUUID(),
+        kind: 'insert',
+        id: row.id,
+        // 元に戻すのと同じ内容(created_at も含む)。再送すれば元どおりになる
+        payload: restoreInput(row),
+        queuedAt: row.created_at,
+      }))
+      if (!quarantineOps([...group, ...undoOps], reason, err.message || null)) return null
+      let ops = loadQueue()
+      for (const o of group) ops = removeOp(o.opId)
+      const now = new Date().toISOString()
+      for (const row of siblings) {
+        ops = appendOp({ opId: crypto.randomUUID(), kind: 'delete', id: row.id, queuedAt: now })
+      }
+      setPendingOps(ops)
+      clearSyncFailures(group.map((o) => o.opId))
+      return group.length + undoOps.length
+    },
+    []
+  )
 
   // 保留キューを先頭から順に Supabase へ送る
   const flush = useCallback(async () => {
@@ -272,6 +342,11 @@ export function useTransactions(supabase: SupabaseClient) {
           err = { message: e instanceof Error ? e.message : String(e) }
         }
         if (err) {
+          if (isNetworkError(err.message)) {
+            // 通信起因 — 届いてすらいないので、キューは保持したまま静かに中断する。
+            // 「断られた回数」にも数えない(圏外を何度も通っただけで隔離しないため)
+            break
+          }
           if (isSchemaError(err)) {
             // satisfaction(感情スタンプ)は「無くても記録は成り立つ」項目なので、
             // その列が無いだけなら諦めて同じ op をやり直す。ここで中断すると
@@ -296,27 +371,48 @@ export function useTransactions(supabase: SupabaseClient) {
               markTxFeatureUnavailable('tagging')
               continue
             }
-            // それ以外の migration 未実行 — 実行すれば通るので op は必ず残す。
-            // どの SQL を実行すればよいかは、code / details / hint が残っている
-            // ここでしか分からない。決め打ちの文言ではなく、必ず err から引く
-            setErrorGuide(guidanceForServerError(err, isOnlineNow()))
-            break
           }
-          if (isLedgerTypeRejection(err, op.payload?.type)) {
+          // ここから先は「サーバーに届いたうえで断られた」失敗。
+          // 直せる失敗(migration 未実行)か、直しようのない拒否(制約違反)かで
+          // 扱いを変えるが、**どちらでも op を捨てない** のは共通の約束。
+          const ledgerRejected = isLedgerTypeRejection(err, op.payload?.type)
+          if (ledgerRejected) {
             // 返金・調整の種別が DB のチェック制約に無い = migration 未実行。
-            // 実行すれば通るので、絶対に op を捨てない(捨てると記録が消える)
+            // 導線を閉じて、これ以上同じ失敗を増やさない
             markTxFeatureUnavailable('settlement')
-            setErrorGuide(ledgerRejectionGuidance(err))
+          }
+          const guide = isSchemaError(err)
+            ? // どの SQL を実行すればよいかは、code / details / hint が残っている
+              // ここでしか分からない。決め打ちの文言ではなく、必ず err から引く
+              guidanceForServerError(err, isOnlineNow())
+            : ledgerRejected
+              ? ledgerRejectionGuidance(err)
+              : syncRejectedGuidance(err, isOnlineNow())
+          // 送り直せば通る見込みがあるのは migration 系だけ。
+          // それ以外(制約違反など)は何度送っても同じなので、すぐ隔離する
+          const retryable = isSchemaError(err) || ledgerRejected
+          const attempts = recordSyncFailure(op.opId)
+          if (!retryable || reachedAttemptLimit(attempts)) {
+            // 同じ op が何度も断られると、その後ろの記録がすべて送れなくなる。
+            // 記録は隔離箱(localStorage)に移して必ず残したうえで、先へ進む
+            const moved = quarantineFromQueue(
+              op,
+              retryable ? 'repeated' : 'rejected',
+              err,
+              localRows
+            )
+            if (moved !== null) {
+              setErrorGuide(quarantineGuidance(guide, moved))
+              flushedSomething = true
+              continue
+            }
+            // 隔離箱に保存できなかった(容量超過など)。
+            // 捨てるくらいなら、キューに残したまま止まるほうがまし
+            setErrorGuide(guide)
             break
           }
-          if (isNetworkError(err.message)) {
-            // 通信起因 — キューは保持したまま静かに中断し、次のトリガーで再試行
-            break
-          }
-          // 永続的な拒否(制約違反など)— この op は破棄して先へ進む(無限再試行しない)
-          setPendingOps(removeOp(op.opId))
-          setErrorGuide(syncRejectedGuidance(err, isOnlineNow()))
-          flushedSomething = true
+          setErrorGuide(guide)
+          break
         } else {
           // 同期成功 — 彼女残高に影響する op なら Discord に通知する。
           // 旧行の参照(localRows)は「キューから op を消す前」に確保する
@@ -328,6 +424,8 @@ export function useTransactions(supabase: SupabaseClient) {
           if (message) notifyLowBalanceIfNeeded(partnerBalance(nextRows))
           localRows = nextRows
           setPendingOps(removeOp(op.opId))
+          // 断られた回数は「連続で」数えたいので、通った時点で忘れる
+          clearSyncFailures([op.opId])
           flushedSomething = true
         }
       }
@@ -339,7 +437,7 @@ export function useTransactions(supabase: SupabaseClient) {
     if (flushedSomething && loadQueue().length === 0) {
       await refresh()
     }
-  }, [supabase, refresh])
+  }, [supabase, refresh, quarantineFromQueue])
 
   // マウント時: まずキャッシュ表示 → サーバーから取得 → 保留分を再送
   useEffect(() => {
@@ -450,8 +548,9 @@ export function useTransactions(supabase: SupabaseClient) {
   /**
    * 複数件をまとめて追加する (機能096 の分割保存で使う)。
    * 1件ずつ insert op を積むだけなので、オフラインでも失われない。
-   * 途中で切れても「一部だけ保存された」状態になるが、キューは順に必ず送られるので
-   * 最終的には全件そろう(1件も入らないより、分割の一部が残るほうが復旧しやすい)。
+   * 途中で切れてもキューは順に必ず送られるので、最終的には全件そろう。
+   * 1件がサーバーに拒否されたときは、flush が split_group 単位で隔離し、
+   * 先に入っていた片割れも取り消す — 金額の一部だけが残ることはない。
    */
   const addMany = useCallback(
     async (inputs: readonly TransactionInput[]) => {
@@ -562,7 +661,14 @@ export function useTransactions(supabase: SupabaseClient) {
    * 抜き取る方式だと「まさに送信中だった delete」と競合し、
    * サーバー上は消えたのに取り消せたつもりになる = データを失う恐れがあるため。
    * delete → insert の順で送れば、どちらのタイミングでも最後は「在る」に落ち着く。
-   * 行IDを変えないので、共有ページのコメントなど取引IDを指すものとの縁も切れない。
+   *
+   * 共有ページのコメントとの結び付きも、行IDを変えないことで戻る。
+   * ただし「縁が切れない」わけではない — delete がサーバーに届いた瞬間、
+   * コメントは *見えなくなる*(共有ページの関数が transactions と join しているため)。
+   * 以前は partner_share_comments の外部キーが on delete cascade で、
+   * この瞬間にコメントが **物理削除** され、同じIDで入れ直しても戻らなかった。
+   * 外部キーを外して orphan を許すようにしたので、いまは行を戻せば
+   * コメントもそのまま戻る(supabase/migration-partner-share.sql)。
    */
   const restoreMany = useCallback(
     async (txs: readonly Transaction[]) => {
@@ -585,6 +691,41 @@ export function useTransactions(supabase: SupabaseClient) {
     },
     [flush, dismissUndo]
   )
+
+  // ---------- 隔離した記録の再送・破棄 ----------
+
+  /**
+   * 隔離した記録をもう一度キューに積む(設定シートの「再送する」)。
+   *
+   * キューに積めたことを確かめてから隔離箱を空にする。順番を逆にすると、
+   * 積み損ねた瞬間に記録が消える。
+   * op はそのままの行ID・内容で積み直すので、同じ会計が二重に増えることはない。
+   */
+  const retryQuarantined = useCallback(
+    async (entryId: string) => {
+      const entry = findQuarantineEntry(entryId)
+      if (!entry) return
+      const queuedAt = new Date().toISOString()
+      let ops: PendingOp[] = loadQueue()
+      for (const op of entry.ops) {
+        ops = appendOp({ ...op, opId: crypto.randomUUID(), queuedAt })
+      }
+      setPendingOps(ops)
+      const queued = loadQueue()
+      if (entry.ops.every((op) => queued.some((q) => q.id === op.id && q.kind === op.kind))) {
+        discardQuarantineEntry(entryId)
+      }
+      await flush()
+    },
+    [flush]
+  )
+
+  /** 隔離した記録を捨てる(設定シートの「破棄する」)。利用者の明示操作だけで呼ぶこと */
+  const discardQuarantined = useCallback((entryId: string) => {
+    discardQuarantineEntry(entryId)
+    // 隔離箱が空になったら、残っていた拒否の案内も役目を終える
+    if (quarantineCount() === 0) setErrorGuide((prev) => (prev?.kind === 'rejected' ? null : prev))
+  }, [])
 
   /** 取り消しバーの「元に戻す」。直前に削除した行をまとめて戻す (機能159) */
   const undoDelete = useCallback(async () => {
@@ -612,6 +753,10 @@ export function useTransactions(supabase: SupabaseClient) {
     await refresh()
   }, [flush, refresh])
 
+  // 同期できずに隔離した記録。0件でない限り画面に出し続ける
+  // (利用者が中身を確かめて再送/破棄するまで、勝手に消えない)
+  const quarantined = useQuarantine()
+
   // 1行しか置けない場所(テストや将来の呼び出し側)のために畳んだ形も返す。
   // 画面に出すのは errorGuide のほう — 畳んだ文字列を分類し直させないこと
   const error = errorGuide ? formatGuidance(errorGuide) : null
@@ -634,6 +779,10 @@ export function useTransactions(supabase: SupabaseClient) {
     undoableDeletes,
     undoDelete,
     dismissUndo,
+    // 同期できずに隔離した記録(中身の確認・再送・破棄)
+    quarantined,
+    retryQuarantined,
+    discardQuarantined,
     pendingCount: pendingOps.length,
     isOnline,
     syncing,

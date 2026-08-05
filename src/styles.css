@@ -8,7 +8,8 @@
    デザイントークン
    - アクセントは1色(選択状態・今日・保存ボタン・タブのアクティブのみ)
    - 意味色: --expense(支出=落ち着いた赤) / --income(収入・預かり=深い緑)
-   - 影は --shadow-1 の1段のみ / 角丸はカード12・ボタン10・シート16
+   - 影は --shadow-1(面) と --shadow-2(浮いているもの) の2段のみ
+   - 角丸はカード12・ボタン10・シート16
    ============================================================ */
 
 :root {
@@ -27,8 +28,16 @@
   --on-accent: #ffffff; /* on accent = 5.04:1 */
   --expense: #c93b3b; /* on #fff = 5.03:1 */
   --income: #157f3d; /* on #fff = 5.08:1 */
+  /* 意味色の淡い面と線。--accent-soft と同じ役割。
+     ここをトークンにしないと rgba() を直書きすることになり、
+     ダークモードで --expense が変わってもその面だけ取り残される */
+  --expense-soft: rgba(201, 59, 59, 0.12);
+  --expense-line: rgba(201, 59, 59, 0.35);
+  --income-soft: rgba(21, 127, 61, 0.12);
   --warning-bg: rgba(250, 178, 25, 0.15);
   --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.08);
+  /* 本文の上に浮くもの(取り消しバーなど)専用。面の影より1段強い */
+  --shadow-2: 0 6px 20px rgba(0, 0, 0, 0.18);
   --radius-card: 12px;
   --radius-btn: 10px;
   --radius-sheet: 16px;
@@ -51,8 +60,13 @@
     --on-accent: #101223; /* on accent ≈ 6:1 */
     --expense: #e5776e; /* on #1d1d1f = 5.77:1 */
     --income: #4cc38a; /* on #1d1d1f = 7.60:1 */
+    /* 暗い面の上では同じ不透明度だと沈むので、少しだけ強める */
+    --expense-soft: rgba(229, 119, 110, 0.16);
+    --expense-line: rgba(229, 119, 110, 0.4);
+    --income-soft: rgba(76, 195, 138, 0.16);
     --warning-bg: rgba(250, 178, 25, 0.12);
     --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --shadow-2: 0 6px 20px rgba(0, 0, 0, 0.5);
   }
 }
 
@@ -866,13 +880,6 @@ textarea:focus {
 }
 
 /* ---------- 履歴リスト ---------- */
-
-.tx-group-date {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
-  margin: 6px 0 4px;
-}
 
 .tx-row {
   display: flex;

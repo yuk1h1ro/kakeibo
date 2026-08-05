@@ -21,6 +21,7 @@ import {
 import { balanceWording, isLowBalance, partnerBalance } from '../lib/partnerBalance'
 import { useLowBalanceThreshold } from '../lib/lowBalanceSettings'
 import type { Transaction } from '../lib/types'
+import { withCategory } from '../lib/txActions'
 import type { TransactionInput, useTransactions } from '../hooks/useTransactions'
 import '../ledger.css'
 import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
@@ -368,19 +369,14 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
           targets={recategorize.targets}
           onClose={() => setRecategorize(null)}
           onApply={async () => {
-            // 一括更新もオフラインキュー経由。未同期のまま失われない
+            // 一括更新もオフラインキュー経由。未同期のまま失われない。
+            // 内容は withCategory(= その行の写し + カテゴリだけ差し替え)から作る。
+            // 項目を手書きしていた頃は partner_paid が抜けており、彼女への通知が
+            // 「差分 −¥5,000」のような実在しない金額を出していた
             await store.updateMany(
               recategorize.targets.map((t) => ({
                 id: t.id,
-                input: {
-                  date: t.date,
-                  type: t.type,
-                  amount: t.amount,
-                  category: recategorize.category,
-                  memo: t.memo,
-                  store: t.store,
-                  partner_amount: t.partner_amount,
-                },
+                input: withCategory(t, recategorize.category),
               }))
             )
             setRecategorize(null)

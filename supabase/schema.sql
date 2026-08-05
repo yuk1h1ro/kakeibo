@@ -457,8 +457,15 @@ create table if not exists public.partner_share_comments (
   -- データの持ち主(= 利用者)。彼女の書き込みでは RPC がリンクの持ち主を入れる。
   user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
 
-  -- コメント先の明細。明細が消えたらコメントも消える。
-  transaction_id uuid not null references public.transactions (id) on delete cascade,
+  -- コメント先の明細のID。
+  --
+  -- **わざと外部キーを張っていません。** 以前は on delete cascade 付きの
+  -- 外部キーだったため、削除の取り消し (機能159) で同じIDの行を入れ直しても、
+  -- delete がサーバーに届いた時点でコメントが物理削除されており、戻りませんでした。
+  -- 明細が消えている間はコメントが見えなくなるだけ(下の関数が
+  -- transactions と join しているので、見えない明細のコメントは返らない)で、
+  -- 行そのものは残ります。行を戻せばコメントも一緒に戻ります。
+  transaction_id uuid not null,
 
   -- 書いた人。'owner' = 利用者(アプリから) / 'partner' = 彼女(共有ページから)
   author text not null check (author in ('owner', 'partner')),
@@ -504,6 +511,33 @@ create policy "delete_own_partner_share_comments"
   on public.partner_share_comments
   for delete
   using (auth.uid() = user_id);
+
+-- すでにこのテーブルを作ってある環境から、明細への外部キー(on delete cascade)を外す。
+-- 制約を落とすだけなので、**いま入っているコメントは1件も消えません**。
+-- 名前を決め打ちにしないのは、作られた時期によって制約名が違い得るため。
+do $$
+declare
+  c record;
+begin
+  if to_regclass('public.partner_share_comments') is null then
+    return;
+  end if;
+  for c in
+    select con.conname
+      from pg_constraint con
+      join pg_class rel on rel.oid = con.conrelid
+      join pg_namespace ns on ns.oid = rel.relnamespace
+     where ns.nspname = 'public'
+       and rel.relname = 'partner_share_comments'
+       and con.contype = 'f'
+       and con.confrelid = to_regclass('public.transactions')
+  loop
+    execute format(
+      'alter table public.partner_share_comments drop constraint %I', c.conname
+    );
+  end loop;
+end
+$$;
 
 create index if not exists idx_partner_share_comments_user_id
   on public.partner_share_comments (user_id);
@@ -880,6 +914,14 @@ alter table public.transactions
 -- 「partner_amount <= amount」を全種別に課したままだと調整行が入りません。
 -- (支出以外の行では partner_amount は常に 0 です)
 -- ------------------------------------------------------------
+-- 上の transactions テーブル定義の partner_amount の check は amount という
+-- 別の列を参照するため、PostgreSQL がテーブル制約に格上げして
+-- transactions_check という名前を付ける。ここで落としておかないと
+-- 古い「partner_amount <= amount」が生き残り、amount がマイナスの
+-- 調整行が必ず 23514 で弾かれる。
+alter table public.transactions
+  drop constraint if exists transactions_check;
+
 alter table public.transactions
   drop constraint if exists transactions_partner_amount_check;
 
