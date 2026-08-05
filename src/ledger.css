@@ -75,7 +75,10 @@
   font-size: 16px; /* iOS が拡大しない最小サイズ */
 }
 
-/* ---------- 精算シート (機能012) ---------- */
+/* ---------- 預かり・返金・調整の記録カード (機能012) ----------
+   もとは専用のシートの中身だった。シートは要素の間の余白を
+   親(.modal-sheet)まかせにしていたが、カードに移したので
+   ここで自前で持つ(* の reset で余白は 0 から始まる)。 */
 
 .settle-modes {
   display: flex;
@@ -109,18 +112,23 @@
   line-height: 1.5;
 }
 
+/* 切り替えチップと入力フォームの間。ここが詰まると、どの種類を選んでいるかと
+   何を打つ欄なのかが1かたまりに見えてしまう */
+.settle-hint {
+  margin: 8px 0 12px;
+}
+
+.settle-note {
+  margin-top: 10px;
+}
+
 .settle-preview {
+  margin-top: 12px;
   padding: 10px 12px;
   border-radius: var(--radius-btn);
   background: var(--fill);
   font-size: 15px;
   line-height: 1.5;
-}
-
-.settle-open-btn {
-  width: 100%;
-  min-height: 44px;
-  font-size: 16px;
 }
 
 /* ---------- 支払った人 (機能018) ---------- */

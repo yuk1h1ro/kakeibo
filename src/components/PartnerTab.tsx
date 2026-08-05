@@ -25,7 +25,13 @@ import {
 } from '../lib/partnerComments'
 import CommentThread from './CommentThread'
 import ShareLinkCard from './ShareLinkCard'
-import PartnerSettlementSheet from './PartnerSettlementSheet'
+import {
+  DEFAULT_SETTLEMENT_MODE,
+  SETTLEMENT_MODES,
+  settlementInput,
+  settlementMode,
+  type SettlementMode,
+} from '../lib/partnerSettlement'
 import {
   DEFAULT_LOW_BALANCE_THRESHOLD,
   balanceWording,
@@ -59,9 +65,18 @@ export default function PartnerTab({ store, supabase, onEdit }: Props) {
   const threshold = useLowBalanceThreshold()
   const low = isLowBalance(balance, threshold)
 
-  // 機能012: 返金・受け取り・調整の入口。列が無い環境では出さない
+  // 機能012: 返金・調整も「預かり残高を動かす」同じ操作なので、預かりと1枚のカードにまとめ、
+  // 種類の切り替えだけを出す。列が無い環境では切り替えを出さず、預かりだけが使える状態に倒す
+  // (下の mode の解決を参照。この分岐が消えると未実行の環境で保存が弾かれる)
   const settlementAvailable = useTxFeature('settlement')
-  const [settleOpen, setSettleOpen] = useState(false)
+  const [selectedMode, setSelectedMode] = useState<SettlementMode>(DEFAULT_SETTLEMENT_MODE)
+  const mode = settlementAvailable ? selectedMode : DEFAULT_SETTLEMENT_MODE
+  const modeDef = settlementMode(mode)
+
+  // 入力中の1件が残高に与える影響額(符号つき)。押す前に結果を見せるための安全装置で、
+  // フォームから通知される。0 のときは何も打っていないので見込みも出さない
+  const [draftImpact, setDraftImpact] = useState(0)
+  const afterWording = balanceWording(balance + draftImpact)
 
   // 残高が動いた行だけを新しい順に(storeが日付降順)。
   // 預かり・返金・調整に加えて、彼女が払った回(機能018)もここに出る
@@ -133,35 +148,67 @@ export default function PartnerTab({ store, supabase, onEdit }: Props) {
         )}
       </div>
 
-      {settlementAvailable && (
-        <div className="card">
-          <h2>返金・受け取り・調整</h2>
-          <p className="muted">
-            余った分を返した・現金で受け取った・ズレを直した、を記録します(どれも履歴に残ります)
-          </p>
-          <button
-            type="button"
-            className="btn-ghost settle-open-btn"
-            onClick={() => setSettleOpen(true)}
-          >
-            精算を記録する
-          </button>
-        </div>
-      )}
-
       {unread > 0 && (
         <div className="comment-unread-banner">💬 彼女から新しいコメントが{unread}件あります</div>
       )}
 
+      {/* 機能012: 預かる・返す・調整はどれも「預かり残高を動かす1つの操作」なので、
+          入口を1枚のカードにまとめる。以前は返す・調整だけが別カードのボタンから
+          開くシートに入っていて、同じことをする場所が画面に2つあった */}
       <div className="card">
-        <h2>預かりを記録</h2>
+        <h2>{modeDef.heading}</h2>
+        {settlementAvailable && (
+          <>
+            <div className="settle-modes" role="group" aria-label="記録する種類">
+              {SETTLEMENT_MODES.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  className={`settle-mode${mode === m.id ? ' selected' : ''}`}
+                  aria-pressed={mode === m.id}
+                  onClick={() => setSelectedMode(m.id)}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <p className="muted settle-hint">{modeDef.hint}</p>
+          </>
+        )}
         <TransactionForm
-          fixedType="partner_deposit"
-          submitLabel="預かりを記録"
+          fixedType={modeDef.txType}
+          submitLabel={modeDef.submitLabel}
+          onPartnerImpactChange={setDraftImpact}
           onSubmit={async (input) => {
-            await store.add(input)
+            // 何が保存されるかは partnerSettlement.ts の純粋関数が決める。
+            // フォームの都合(タグなど)は残しつつ、記録の意味を決める部分
+            // — 種別・金額の符号・分類/店名/負担分が空であること — だけを上書きする
+            await store.add({
+              ...input,
+              ...settlementInput({
+                mode,
+                // 調整の向きはフォーム側のボタンが持っているので、符号から読み戻す
+                amount: Math.abs(input.amount),
+                direction: input.amount < 0 ? -1 : 1,
+                date: input.date,
+                memo: input.memo,
+              }),
+            })
           }}
         />
+        {draftImpact !== 0 && (
+          <p className="settle-preview" aria-live="polite">
+            この記録のあと: <strong>{yen(afterWording.magnitude)}</strong>({afterWording.title})
+          </p>
+        )}
+        {settlementAvailable && (
+          <p className="muted settle-note">
+            どの操作も履歴に1件の記録として残ります(あとから編集・削除もできます)。
+            日付・金額と、ここに書いた{mode === 'adjust' ? '理由' : 'メモ'}は
+            <strong>共有リンクの画面にも表示されます</strong>
+            — 残高が動いた理由を彼女からも追えるようにするためです
+          </p>
+        )}
       </div>
 
       <ShareLinkCard supabase={supabase} />
@@ -187,17 +234,6 @@ export default function PartnerTab({ store, supabase, onEdit }: Props) {
           ))
         )}
       </div>
-
-      {settleOpen && (
-        <PartnerSettlementSheet
-          balance={balance}
-          onClose={() => setSettleOpen(false)}
-          onSubmit={async (input) => {
-            // 追加もオフラインキュー経由。通信が無くても記録は失われない
-            await store.add(input)
-          }}
-        />
-      )}
     </>
   )
 }

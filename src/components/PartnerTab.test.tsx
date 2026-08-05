@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import PartnerTab from './PartnerTab'
@@ -16,6 +16,9 @@ import type { Transaction } from '../lib/types'
 //   2. 動きの履歴の1行ずつの符号が、上の残高と足し算で一致すること
 //      — 共有ページでは実際にここが逆になっていた(SharePage.test.tsx 参照)
 //   3. 残高に関係しない支出が「動きの履歴」に混ざらないこと
+//   4. 残高を動かす操作の入口が1か所しかないこと (機能012)
+//      — 預かりと返金・調整が別々のカードに分かれていた頃は、
+//        同じことをする場所が画面に2つあった
 // ============================================================
 
 function tx(over: Partial<Transaction> = {}): Transaction {
@@ -104,6 +107,32 @@ describe('彼女タブの残高低下アラート (機能010)', () => {
   })
 })
 
+describe('残高を動かす記録カード (機能012)', () => {
+  it('預かり・返金・調整を1枚のカードで切り替える(別の入口は作らない)', () => {
+    const html = render([])
+    expect(html).toContain('記録する種類')
+    for (const label of ['預かる', '返す', '調整']) {
+      expect(html).toContain(`>${label}</button>`)
+    }
+    // シートを開くためだけのボタンは廃止した
+    expect(html).not.toContain('精算を記録する')
+    expect(html).not.toContain('返金・受け取り・調整')
+  })
+
+  it('既定は「預かる」— いちばん使う操作なので選び直さずに打ち始められる', () => {
+    const html = render([])
+    expect(html).toContain('aria-pressed="true">預かる')
+    expect(html).toContain('<h2>預かりを記録</h2>')
+    expect(html).toContain('預かり金額(円)')
+  })
+
+  it('調整の理由が共有ページにも出ることを、記録する場所に書いておく', () => {
+    // 「なぜ残高が動いたのか」を彼女からも追えるのがこの記録の値打ち。
+    // 書いた内容が相手にも見えることを、書く前に伝える
+    expect(render([])).toContain('共有リンクの画面にも表示されます')
+  })
+})
+
 describe('彼女タブの「動きの履歴」', () => {
   it('残高が動いた行だけを出す(自分だけの支出は出さない)', () => {
     const html = render([
@@ -152,5 +181,32 @@ describe('彼女タブの「動きの履歴」', () => {
   it('1件も無いときは空だと伝える', () => {
     const html = render([tx({ partner_amount: 0 })])
     expect(html).toContain('記録がありません')
+  })
+})
+
+// マイグレーション未実行の環境。txExtensions はモジュール内に判定を持つので、
+// 他のテストに漏らさないよう登録簿ごと作り直して最後に置いている
+// (react-dom/server も同じ登録簿から取らないと hooks が動かない)
+describe('マイグレーション未実行の環境 (機能012)', () => {
+  it('種類の切り替えを出さず、従来どおり預かりだけが使える', async () => {
+    vi.resetModules()
+    const { markTxFeatureUnavailable } = await import('../lib/txExtensions')
+    markTxFeatureUnavailable('settlement')
+    const [{ renderToStaticMarkup: renderFresh }, { default: FreshPartnerTab }] = await Promise.all([
+      import('react-dom/server'),
+      import('./PartnerTab'),
+    ])
+    const store = { transactions: [], add: async () => {} } as unknown as ReturnType<
+      typeof useTransactions
+    >
+    const html = renderFresh(
+      <FreshPartnerTab store={store} supabase={{} as SupabaseClient} onEdit={() => {}} />
+    )
+    expect(html).toContain('<h2>預かりを記録</h2>')
+    expect(html).toContain('預かり金額(円)')
+    // 保存できない種別を選べてしまうと、記録がサーバーに弾かれる
+    expect(html).not.toContain('記録する種類')
+    expect(html).not.toContain('>返す</button>')
+    expect(html).not.toContain('>調整</button>')
   })
 })

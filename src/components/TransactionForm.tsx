@@ -27,6 +27,7 @@ import {
 import type { Satisfaction, Transaction, TransactionType } from '../lib/types'
 import { partnerPaid, satisfactionOf, tagsOf } from '../lib/types'
 import { useTxFeature } from '../lib/txExtensions'
+import { settlementImpact } from '../lib/partnerSettlement'
 import { collectTags, parseTagInput, sanitizeTags, MAX_TAGS_PER_TX } from '../lib/tags'
 import {
   buildSplitInputs,
@@ -67,8 +68,9 @@ interface Props {
   submitLabel: string
   onSubmit: (input: TransactionInput) => Promise<void>
   onDelete?: () => Promise<void>
-  // 新規入力タブでは type 固定の支出フォームとして使う
-  fixedType?: 'expense' | 'partner_deposit'
+  // 新規入力タブでは type 固定の支出フォームとして使う。
+  // 彼女タブの記録カードは、選んだ種類(預かる/返す/調整)をここで切り替える (機能012)
+  fixedType?: 'expense' | 'partner_deposit' | 'partner_refund' | 'partner_adjust'
   // 任意: 外部からのプリフィル(編集モーダルでは使わない)
   prefill?: FormPrefill
   // 任意: 日付だけの差し替え(履歴カレンダーから「その日で入力する」)
@@ -107,6 +109,17 @@ const AMOUNT_LABEL: Record<TransactionType, string> = {
   partner_deposit: '預かり金額(円)',
   partner_refund: '返した金額(円)',
   partner_adjust: '調整する金額(円)',
+}
+
+/**
+ * メモ欄の例文。種別ごとに「何を書けばいいのか」が変わる。
+ * 特に調整は理由そのものが記録の値打ちなので、例を出さないと空欄で保存されやすい。
+ */
+const MEMO_PLACEHOLDER: Record<TransactionType, string> = {
+  expense: '例: スーパーで買い物',
+  partner_deposit: '例: 8月分の食費として',
+  partner_refund: '例: 8月末に現金で返した',
+  partner_adjust: '例: 7/3 の割り勘の計算違いを修正',
 }
 
 const PAYER_OPTIONS: readonly { id: Payer; label: string }[] = [
@@ -191,6 +204,12 @@ export default function TransactionForm({
   // カテゴリ→金額の2タップ(機能051)を最短距離に保つ。
   // 編集時は「今入っている内容を確かめる」画面なので最初から開く
   const [detailsOpen, setDetailsOpen] = useState(initial !== undefined)
+
+  // 調整 (機能012) は理由を残すことが記録の目的そのものなので、
+  // 理由欄が畳まれたままにならないように開いておく
+  useEffect(() => {
+    if (isAdjust) setDetailsOpen(true)
+  }, [isAdjust])
 
   // 連続保存(機能048)の手応え。通常保存では 0 に戻す
   const [streak, setStreak] = useState(0)
@@ -425,7 +444,13 @@ export default function TransactionForm({
   useEffect(() => {
     if (!onPartnerImpactChange) return
     if (!isExpense) {
-      onPartnerImpactChange(0)
+      // 預かり・返金・調整も残高を動かす (機能012)。
+      // 「押す前に結果が見える」ことが安全装置なので、支出と同じ経路で親に伝える。
+      // 影響額の決め方は partnerSettlement.ts の純粋関数に任せる(保存後の残高とずれない)
+      const magnitude = Number.isFinite(amountNum) && amountNum > 0 ? amountNum : 0
+      onPartnerImpactChange(
+        settlementImpact({ type, amount: isAdjust ? adjustSign * magnitude : magnitude })
+      )
       return
     }
     if (splitting && splitParts) {
@@ -445,6 +470,11 @@ export default function TransactionForm({
     splitting,
     splitParts,
     onPartnerImpactChange,
+    // 預かり・返金・調整の見込み表示に効く(支出では使われない)
+    type,
+    isAdjust,
+    adjustSign,
+    amountNum,
   ])
 
   const partnerPaidValid =
@@ -601,10 +631,13 @@ export default function TransactionForm({
       {isAdjust && (
         <div className="field">
           <span>どちらに直しますか</span>
-          <div className="payer-row" role="group" aria-label="調整の向き">
+          {/* 残高の向きを決める2択。すぐ上の種類チップ(settle-mode)と同じ見た目・
+              同じ 16px にそろえる — 押し間違いがそのまま残高の符号になる操作なので、
+              他のチップより小さくしない */}
+          <div className="settle-modes" role="group" aria-label="調整の向き">
             <button
               type="button"
-              className={`payer-chip${adjustSign === 1 ? ' selected' : ''}`}
+              className={`settle-mode${adjustSign === 1 ? ' selected' : ''}`}
               aria-pressed={adjustSign === 1}
               onClick={() => setAdjustSign(1)}
             >
@@ -612,7 +645,7 @@ export default function TransactionForm({
             </button>
             <button
               type="button"
-              className={`payer-chip${adjustSign === -1 ? ' selected' : ''}`}
+              className={`settle-mode${adjustSign === -1 ? ' selected' : ''}`}
               aria-pressed={adjustSign === -1}
               onClick={() => setAdjustSign(-1)}
             >
@@ -805,10 +838,11 @@ export default function TransactionForm({
             )}
 
             <label className="field">
-              <span>メモ(任意)</span>
+              {/* 調整だけは「なぜ直したか」が記録の本体なので、任意のメモではなく理由として聞く */}
+              <span>{isAdjust ? '理由(あとで見返すために書いておくと安心です)' : 'メモ(任意)'}</span>
               <input
                 type="text"
-                placeholder={isExpense ? '例: スーパーで買い物' : '例: 8月分の食費として'}
+                placeholder={MEMO_PLACEHOLDER[type]}
                 value={memo}
                 onChange={(e) => setMemo(e.target.value)}
               />
