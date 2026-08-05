@@ -227,6 +227,85 @@
   word-break: break-all;
 }
 
+/* ---------- 履歴のまとめ送信(彼女タブ → Discord カード) ---------- */
+
+/* Webhook を設定しているときだけ出る導線。設定と地続きに見えるよう
+   区切り線を1本だけ引き、押せるものは 44px の高さを確保する */
+.discord-backlog {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--baseline);
+}
+
+.discord-backlog .btn-ghost {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 8px;
+  font-size: 16px;
+}
+
+.backlog-last {
+  margin-top: 10px;
+}
+
+.backlog-warn {
+  margin-top: 8px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.backlog-warn code {
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.backlog-preview-label {
+  margin-top: 12px;
+}
+
+/* 送る文面そのもの。長い行があっても**横スクロールを出さない**
+   (iPhone で画面ごと横に動くと、下のボタンが押しにくくなる)。
+   縦に伸びすぎないよう高さだけ抑え、そこだけを縦にスクロールさせる */
+.backlog-preview {
+  margin-top: 6px;
+  padding: 10px 12px;
+  max-height: 40vh;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--baseline);
+  border-radius: var(--radius-btn);
+}
+
+.backlog-details {
+  margin-top: 10px;
+}
+
+.backlog-details summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.backlog-run {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 12px;
+  font-size: 16px;
+}
+
+.backlog-progress,
+.backlog-result {
+  margin-top: 8px;
+  line-height: 1.7;
+}
+
 /* ---------- Gemini APIキー設定シート(レシート読み取り) ---------- */
 
 .gemini-desc {
@@ -727,4 +806,12 @@
 
 .csv-run {
   margin-top: 10px;
+}
+
+/* まとめ送信のシートは押す要素が多い。iPhone で読める/押せる下限
+   (44px・16px)をシートの中では必ず満たす */
+.backlog-sheet .sheet-header .btn-ghost {
+  min-height: 44px;
+  padding: 0 12px;
+  font-size: 16px;
 }

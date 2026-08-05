@@ -193,6 +193,15 @@ describe('Discord通知カード', () => {
     expect(html).toContain('解除も同じように伝わります')
   })
 
+  it('Webhook 未設定のときは、履歴のまとめ送信の導線を出さない', () => {
+    // 送り先が無いのに押させない。押しても何も起きないボタンは、
+    // 「壊れている」と読まれて設定そのものを疑わせる
+    const html = render([
+      tx({ id: 'd', type: 'partner_deposit', amount: 30000, category: null, store: '' }),
+    ])
+    expect(html).not.toContain('これまでの履歴をまとめて送る')
+  })
+
   it('同期できているかどうかが分かるまでは、未実行の注意を出さない', () => {
     // 起動直後は確かめ終わっていない。ここで注意を出すと毎回ちらつく
     const html = render([])

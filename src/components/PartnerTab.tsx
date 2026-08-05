@@ -24,6 +24,7 @@ import {
 } from '../lib/partnerComments'
 import CommentThread from './CommentThread'
 import ShareLinkCard from './ShareLinkCard'
+import PartnerBacklogSheet from './PartnerBacklogSheet'
 import {
   DEFAULT_SETTLEMENT_MODE,
   SETTLEMENT_MODES,
@@ -214,7 +215,9 @@ export default function PartnerTab({ store, supabase, onEdit }: Props) {
 
       <LowBalanceCard threshold={threshold} />
 
-      <DiscordNotifyCard supabase={supabase} />
+      {/* 履歴のまとめ送信は Discord カードの中に置く(送り先の設定と同じ場所)。
+          未設定のときはカードごと入力欄になるので、導線も自然に出ない */}
+      <DiscordNotifyCard supabase={supabase} transactions={store.transactions} />
 
       <div className="card">
         <h2>動きの履歴</h2>
@@ -295,7 +298,13 @@ function LowBalanceCard({ threshold }: { threshold: number }) {
  *   ・同期できていないとき(マイグレーション未実行)は、その旨と結果を書く
  * の2つをこのカードの責任にしている。
  */
-function DiscordNotifyCard({ supabase }: { supabase: SupabaseClient }) {
+function DiscordNotifyCard({
+  supabase,
+  transactions,
+}: {
+  supabase: SupabaseClient
+  transactions: readonly Transaction[]
+}) {
   // 保存・解除・他の端末からの反映は、すべてストア側の状態変化として届く。
   // 画面が自分のコピーを持つと、初回同期でサーバーの値を採ったときに
   // 古い表示が残ってしまう
@@ -307,6 +316,8 @@ function DiscordNotifyCard({ supabase }: { supabase: SupabaseClient }) {
   // 「URLと通信状態を確認してください」と両方を並べていた頃は、いちばん多い
   // 「チャンネルを作り直して URL が無効になった」にたどり着けなかった
   const [testFailure, setTestFailure] = useState<DiscordFailure | null>(null)
+  // 履歴のまとめ送信 (シートは押されたときだけ作る)
+  const [showBacklog, setShowBacklog] = useState(false)
 
   const handleSave = () => {
     const url = input.trim()
@@ -379,6 +390,20 @@ function DiscordNotifyCard({ supabase }: { supabase: SupabaseClient }) {
           {testState === 'fail' && testFailure && (
             <p className="error-text discord-result">{discordFailureMessage(testFailure)}</p>
           )}
+          {/* 過去ぶんのまとめ送信。
+              Webhook URL が端末の中にしか無かったあいだ、スマホからの記録は
+              1通も通知されていなかった。彼女は過去の増減をほとんど知らないので、
+              あとから追いつかせるための導線をここに置く。
+              **未設定のときは出さない**(送り先が無いのに押させない) */}
+          <div className="discord-backlog">
+            <p className="muted">
+              設定する前の増減は通知されていません。
+              <strong>これまでの履歴をまとめて送る</strong>と、彼女が読める形で追いつけます
+            </p>
+            <button type="button" className="btn-ghost" onClick={() => setShowBacklog(true)}>
+              これまでの履歴をまとめて送る
+            </button>
+          </div>
         </>
       ) : (
         <div className="discord-form">
@@ -399,6 +424,13 @@ function DiscordNotifyCard({ supabase }: { supabase: SupabaseClient }) {
             保存
           </button>
         </div>
+      )}
+      {showBacklog && (
+        <PartnerBacklogSheet
+          supabase={supabase}
+          transactions={transactions}
+          onClose={() => setShowBacklog(false)}
+        />
       )}
     </div>
   )
