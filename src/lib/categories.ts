@@ -124,9 +124,17 @@ function getArchivedSnapshot(): Category[] {
   return archivedSnapshot
 }
 
-/** アクティブなカテゴリ一覧 (sort_order 順)。ストア更新時に再描画される */
+/**
+ * アクティブなカテゴリ一覧 (sort_order 順)。ストア更新時に再描画される。
+ *
+ * 第3引数(サーバー用のスナップショット)にも同じ関数を渡している。
+ * ブラウザでの動きは何も変わらないが、渡していないと
+ * renderToStaticMarkup で描いた瞬間に例外になり、このフックを使う画面
+ * (入力タブ・入力フォーム・彼女タブ)をテストから描けなくなるため。
+ * 他のストア (txExtensions / satisfaction ほか) もすべて同じ形にしてある。
+ */
 export function useCategories(): Category[] {
-  return useSyncExternalStore(subscribe, getSnapshot)
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 /**
@@ -135,7 +143,7 @@ export function useCategories(): Category[] {
  * 過去の記録の表示は archived に関係なく resolve() が解決するので影響しない。
  */
 export function useArchivedCategories(): Category[] {
-  return useSyncExternalStore(subscribe, getArchivedSnapshot)
+  return useSyncExternalStore(subscribe, getArchivedSnapshot, getArchivedSnapshot)
 }
 
 // ---------- 互換API(同期関数のまま維持) ----------
