@@ -97,6 +97,37 @@ function compareRank(a: RankItem, b: RankItem): number {
   return a.key < b.key ? -1 : a.key > b.key ? 1 : 0
 }
 
+/**
+ * 束ねるキーを **複数** 返せるランキング。
+ *
+ * タグ (機能088) のように「1件に複数付く軸」は、1件をキーの数だけ数える必要がある。
+ * カテゴリ・お店(キーが必ず1つ)もこの関数を通しているのは、同額のときの並び順や
+ * 集計の取り方が軸ごとにブレないようにするため。
+ *
+ * 同じ取引に同じキーが2つ来ても1回しか数えない(DB に重複したタグが
+ * 残っていても、その1件が二重に足されないように)。
+ */
+export function rankByKeys(
+  txs: readonly Transaction[],
+  r: DateRange,
+  keysOf: (t: Transaction) => readonly string[],
+  labelOf: (key: string) => string
+): RankItem[] {
+  const acc = new Map<string, RankItem>()
+  for (const t of ownExpenses(txs, r)) {
+    const seen = new Set<string>()
+    for (const key of keysOf(t)) {
+      if (seen.has(key)) continue
+      seen.add(key)
+      const item = acc.get(key) ?? { key, label: labelOf(key), total: 0, count: 0 }
+      item.total += ownAmount(t)
+      item.count += 1
+      acc.set(key, item)
+    }
+  }
+  return [...acc.values()].sort(compareRank)
+}
+
 // お店別・カテゴリ別の共通処理。束ねるキーと表示名の付け方だけを差し替える
 function rankBy(
   txs: readonly Transaction[],
@@ -104,15 +135,7 @@ function rankBy(
   keyOf: (t: Transaction) => string,
   labelOf: (key: string) => string
 ): RankItem[] {
-  const acc = new Map<string, RankItem>()
-  for (const t of ownExpenses(txs, r)) {
-    const key = keyOf(t)
-    const item = acc.get(key) ?? { key, label: labelOf(key), total: 0, count: 0 }
-    item.total += ownAmount(t)
-    item.count += 1
-    acc.set(key, item)
-  }
-  return [...acc.values()].sort(compareRank)
+  return rankByKeys(txs, r, (t) => [keyOf(t)], labelOf)
 }
 
 /** お店(店名)別の集計。store が空の記録は「店名なし」に束ねる */
