@@ -31,6 +31,7 @@ import { partnerPaid, satisfactionOf, tagsOf } from '../lib/types'
 import { useTxFeature } from '../lib/txExtensions'
 import { settlementImpact } from '../lib/partnerSettlement'
 import { collectTags, parseTagInput, sanitizeTags, MAX_TAGS_PER_TX } from '../lib/tags'
+import { mergeTripTag, tripAutoTag, useTripMode } from '../lib/tripMode'
 import {
   buildSplitInputs,
   carryPartnerAmount,
@@ -184,6 +185,24 @@ export default function TransactionForm({
   // 機能088: タグ
   const [tags, setTags] = useState<string[]>(() => (initial ? tagsOf(initial) : []))
   const [tagDraft, setTagDraft] = useState('')
+
+  // ---- 旅行モード (tripMode.ts) ----
+  // オンの間、これから作る支出に自動でタグを付ける。
+  //
+  // 編集シート(initial あり)では効かせない。すでに保存された記録を開いただけで
+  // タグが増えると、直したつもりのない事実が静かに変わってしまうため。
+  // 預かり・返金・調整も対象外 — 旅行かどうかは支出の性質で、残高の付け替えには
+  // 意味を持たない(彼女タブの見た目も変わらない)。
+  const tripMode = useTripMode()
+  // 「旅行中でも、コンビニで買う自分用のもの」のための1件だけの取り消し。
+  // 保存するたびに false へ戻す(1件ごとの判断を次に持ち越さない)
+  const [tripTagSkipped, setTripTagSkipped] = useState(false)
+  const tripTag = tripAutoTag(initial !== undefined || !isExpense ? null : tripMode, {
+    taggingAvailable,
+    skippedForThisEntry: tripTagSkipped,
+  })
+  /** 旅行モードの表示を出すか(オンで、この記録に効きうる場面のときだけ) */
+  const tripRowVisible = tripMode !== null && !initial && isExpense && taggingAvailable
 
   // 機能096: 分割。開いている間だけ内訳を持つ(閉じれば普通の1件に戻る)
   const [splitParts, setSplitParts] = useState<SplitPart[] | null>(null)
@@ -381,6 +400,7 @@ export default function TransactionForm({
     setTagDraft('')
     setSplitParts(null)
     setSplitNotice(null)
+    setTripTagSkipped(false)
     // レシート読み取りのように店名だけ入ってくる場合も、手入力と同じ経路でカテゴリを補う
     setCategory(prefill.category)
     setAutoCategory(null)
@@ -581,8 +601,9 @@ export default function TransactionForm({
     setBusy(true)
     setError(null)
     try {
-      // 打ちかけのタグ(確定していない文字列)も取りこぼさずに拾う
-      const finalTags = sanitizeTags([...tags, ...parseTagInput(tagDraft)])
+      // 打ちかけのタグ(確定していない文字列)も取りこぼさずに拾い、
+      // 旅行モードのタグを足す(オフのときは tripTag が null なので何も変わらない)
+      const finalTags = mergeTripTag([...tags, ...parseTagInput(tagDraft)], tripTag)
       const payload: TransactionInput = {
         date,
         type,
@@ -622,6 +643,9 @@ export default function TransactionForm({
         setTagDraft('')
         setSplitParts(null)
         setSplitNotice(null)
+        // 「この1件だけ旅行タグを外す」も1件ごとの判断。次の記録には持ち越さない
+        // (持ち越すと、外したことを忘れたまま旅行中の記録が抜け落ちる)
+        setTripTagSkipped(false)
         if (continueAfter) {
           setStreak((n) => n + 1)
           setLastSavedAmount(amountNum)
@@ -1270,6 +1294,35 @@ export default function TransactionForm({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* 旅行モードがオンのときだけ、保存ボタンのすぐ上に「何が付くか」を出す。
+          ここに置くのは、押す直前に必ず目に入る最後の場所だから。
+          同じ行が「この1件だけ外す」の操作も兼ねる — 旅行中でもコンビニで
+          自分用のものを買うことはあり、そのために毎回モードを切る運用は続かない。
+          オフのときは何も描かないので、入力の手数は1タップも増えない */}
+      {tripRowVisible && tripMode !== null && (
+        <div className={`trip-tag-row${tripTag === null ? ' is-off' : ''}`} aria-live="polite">
+          <span className="trip-tag-row-text">
+            {tripTag !== null ? (
+              <>
+                この記録に <strong>#{tripMode.tag}</strong> が自動で付きます
+              </>
+            ) : (
+              <>
+                この記録には <strong>#{tripMode.tag}</strong> を付けません
+              </>
+            )}
+          </span>
+          <button
+            type="button"
+            className="trip-tag-row-btn"
+            aria-pressed={tripTag === null}
+            onClick={() => setTripTagSkipped(!tripTagSkipped)}
+          >
+            {tripTag !== null ? 'この1件だけ外す' : 'やっぱり付ける'}
+          </button>
         </div>
       )}
 

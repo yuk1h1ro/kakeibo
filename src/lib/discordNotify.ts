@@ -10,6 +10,7 @@ import {
   type PartnerTxLike,
 } from './partnerBalance'
 import { loadLowBalanceThreshold } from './lowBalanceSettings'
+import { getWebhookUrl } from './discordWebhook'
 
 // 残高計算の本体は partnerBalance.ts(純粋関数)に置いてある。
 // 従来ここから import していた箇所のために再エクスポートする。
@@ -21,42 +22,23 @@ export type { PartnerTxLike }
 // 彼女の預かり残高が増減したとき、設定済みの Discord チャンネルへ
 // Webhook で通知する。通知はあくまで補助機能であり、送信に失敗しても
 // 家計簿の記録・同期は一切止めない(throw しない)のが絶対条件。
-// Webhook URL はこの端末の localStorage にのみ保存されるため、
-// 通知されるのは「この端末で記録して同期された分」だけ。
+//
+// Webhook URL の置き場所は discordWebhook.ts に移した(Supabase +
+// localStorage キャッシュ)。以前はこの端末の localStorage にしか無く、
+// 「PCでは設定したがスマホではしていない」ために、いちばん入力に使っている
+// スマホからの記録だけが通知されていなかった。いまはどの端末で設定しても
+// 全部の端末から通知が飛ぶ。
 // ============================================================
 
-const STORAGE_KEY = 'kakeibo.discordWebhook'
-
-export function getWebhookUrl(): string | null {
-  try {
-    return localStorage.getItem(STORAGE_KEY)
-  } catch {
-    return null
-  }
-}
-
-export function saveWebhookUrl(url: string): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, url)
-  } catch {
-    // 保存できなくてもアプリは落とさない
-  }
-}
-
-export function clearWebhookUrl(): void {
-  try {
-    localStorage.removeItem(STORAGE_KEY)
-  } catch {
-    // no-op
-  }
-}
-
-export function isValidWebhookUrl(url: string): boolean {
-  return (
-    url.startsWith('https://discord.com/api/webhooks/') ||
-    url.startsWith('https://discordapp.com/api/webhooks/')
-  )
-}
+// 保存場所が変わっても呼び出し側(monthlySummary など)は変えずに済むよう、
+// 従来どおりこのモジュールからも読めるようにしておく
+export {
+  getWebhookUrl,
+  saveWebhookUrl,
+  clearWebhookUrl,
+  isValidWebhookUrl,
+  maskWebhookUrl,
+} from './discordWebhook'
 
 /**
  * テスト送信の結果。
@@ -205,7 +187,10 @@ export function formatPartnerNotification(n: PartnerNotification): string {
 // 過剰にならないための歯止め:
 //   しきい値を **またいだ瞬間だけ** 送る(lowBalanceAction)。下回ったままの日は
 //   何日続いても送らない。しきい値以上に戻ると、また鳴らせる状態に戻る。
-//   「鳴らした印」は端末の localStorage に持つ(Webhook 設定と同じ粒度)。
+//   「鳴らした印」は端末の localStorage に持つ。Webhook URL は端末間で同期する
+//   ようになったが、この印は同期しない ——「1回だけ」の意味を端末ごとにしておけば、
+//   同期の失敗で印が消えても最悪もう1通鳴るだけで済む(逆に、印だけが同期されて
+//   URL が届いていない端末があると、鳴るべき1通が消える)。
 
 const LOW_ALERT_KEY = 'kakeibo.lowBalanceNotified'
 

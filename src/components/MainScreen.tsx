@@ -10,6 +10,7 @@ import { generateDueTransactions, initRecurringRules } from '../lib/recurringRul
 import { initTransactionTemplates, isTemplatesUnavailable } from '../lib/transactionTemplates'
 import { initSatisfaction } from '../lib/satisfaction'
 import { initAssets, isAssetsTabVisible, useAssetsStore } from '../lib/assets'
+import { initDiscordWebhook } from '../lib/discordWebhook'
 import { todayISO } from '../lib/format'
 import { withSatisfaction } from '../lib/txActions'
 import { amountMaskToggleLabel, toggleAmountMask, useAmountMasked } from '../lib/amountMask'
@@ -99,6 +100,11 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
     void initSatisfaction(supabase)
     // 資産・純資産 (機能101)。テーブルが無ければ資産タブを出さないだけ
     void initAssets(supabase)
+    // Discord の Webhook URL。他の端末で設定・解除した内容をここで取り込み、
+    // この端末にしか無かった URL はここでサーバーへ引き上げる。
+    // テーブルが無い/通信できないときはキャッシュに触らないので、
+    // **通知はどの場合でも従来どおり飛び続ける**(discordWebhook.ts を参照)
+    void initDiscordWebhook(supabase)
   }, [supabase])
 
   // 感情スタンプの付け直し(機能143)。編集と同じ update 経路なので

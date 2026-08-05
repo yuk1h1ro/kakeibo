@@ -205,6 +205,28 @@
   margin-top: 8px;
 }
 
+/* 「どの端末で設定しても他の端末に反映される」ことの説明。
+   本文と同じ大きさだと読み飛ばされるので、少しだけ字間を空けて行間を広く取る */
+.discord-sync-note {
+  margin-top: 6px;
+  line-height: 1.7;
+}
+
+/* マイグレーション未実行のときだけ出る注意。
+   長い一文なので、折り返しても横スクロールが出ないようにする
+   (code 要素にファイル名が入るため break-all が要る) */
+.discord-sync-warn {
+  margin-top: 8px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.discord-sync-warn code {
+  /* iPhone で読める下限。等幅にすると本文より小さく見えるので少し上げる */
+  font-size: 13px;
+  word-break: break-all;
+}
+
 /* ---------- Gemini APIキー設定シート(レシート読み取り) ---------- */
 
 .gemini-desc {

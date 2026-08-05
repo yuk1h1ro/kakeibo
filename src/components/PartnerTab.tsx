@@ -6,15 +6,14 @@ import { formatDate, yen } from '../lib/format'
 import { categoryLabel, resolveCategoryVisual } from '../lib/categories'
 import { CategoryVisualBadge } from './categoryIcons'
 import type { useTransactions } from '../hooks/useTransactions'
+import { sendTestMessage, discordFailureMessage, type DiscordFailure } from '../lib/discordNotify'
 import {
   clearWebhookUrl,
-  getWebhookUrl,
   isValidWebhookUrl,
+  maskWebhookUrl,
   saveWebhookUrl,
-  sendTestMessage,
-  discordFailureMessage,
-  type DiscordFailure,
-} from '../lib/discordNotify'
+  useDiscordWebhook,
+} from '../lib/discordWebhook'
 import {
   addOwnerComment,
   fetchComments,
@@ -215,7 +214,7 @@ export default function PartnerTab({ store, supabase, onEdit }: Props) {
 
       <LowBalanceCard threshold={threshold} />
 
-      <DiscordNotifyCard />
+      <DiscordNotifyCard supabase={supabase} />
 
       <div className="card">
         <h2>動きの履歴</h2>
@@ -285,13 +284,22 @@ function LowBalanceCard({ threshold }: { threshold: number }) {
   )
 }
 
-// Webhook URL は表示時に伏せる(先頭40文字だけ見せる)
-function maskUrl(url: string): string {
-  return url.length > 40 ? `${url.slice(0, 40)}…` : url
-}
-
-function DiscordNotifyCard() {
-  const [savedUrl, setSavedUrl] = useState<string | null>(() => getWebhookUrl())
+/**
+ * Discord 通知の設定 (機能009)。
+ *
+ * Webhook URL は discord_settings で端末間に同期される (discordWebhook.ts)。
+ * 以前はこの端末の localStorage にしか無く、「PCでは設定したがスマホでは
+ * していない」ために、いちばん入力に使っているスマホからの記録だけが
+ * 通知されないことが実際に起きた。そのため、
+ *   ・「他の端末にも反映される」ことを設定の場に書く
+ *   ・同期できていないとき(マイグレーション未実行)は、その旨と結果を書く
+ * の2つをこのカードの責任にしている。
+ */
+function DiscordNotifyCard({ supabase }: { supabase: SupabaseClient }) {
+  // 保存・解除・他の端末からの反映は、すべてストア側の状態変化として届く。
+  // 画面が自分のコピーを持つと、初回同期でサーバーの値を採ったときに
+  // 古い表示が残ってしまう
+  const { url: savedUrl, sync } = useDiscordWebhook()
   const [input, setInput] = useState('')
   const [inputError, setInputError] = useState<string | null>(null)
   const [testState, setTestState] = useState<'idle' | 'sending' | 'ok' | 'fail'>('idle')
@@ -308,8 +316,9 @@ function DiscordNotifyCard() {
       )
       return
     }
-    saveWebhookUrl(url)
-    setSavedUrl(url)
+    // 端末への保存は同期的に済むので、await せずに画面を進める。
+    // サーバーへの書き込みが遅くても・失敗しても、この端末からの通知は即座に効く
+    void saveWebhookUrl(supabase, url)
     setInput('')
     setInputError(null)
     setTestState('idle')
@@ -324,8 +333,7 @@ function DiscordNotifyCard() {
   }
 
   const handleClear = () => {
-    clearWebhookUrl()
-    setSavedUrl(null)
+    void clearWebhookUrl(supabase)
     setTestState('idle')
     setTestFailure(null)
   }
@@ -334,10 +342,24 @@ function DiscordNotifyCard() {
     <div className="card">
       <h2>Discord通知</h2>
       <p className="muted">預かり残高が変わったとき、Discordのチャンネルに自動で通知します</p>
+      {/* どの端末で設定しても全部の端末に反映されることを、設定する場所に書く。
+          「スマホでも設定したか」を利用者に覚えさせないための一文 */}
+      <p className="muted discord-sync-note">
+        この設定は<strong>ログインしている端末すべてで共有されます</strong>
+        — スマホで設定すればPCにも、PCで設定すればスマホにも反映され、解除も同じように伝わります
+      </p>
+      {sync === 'local' && (
+        <p className="error-text discord-sync-warn" role="status">
+          いまはこの端末にだけ保存されています(<code>supabase/migration-discord-webhook.sql</code>
+          が未実行です)。この状態でも通知は届きますが、
+          <strong>この端末で記録した分だけ</strong>になります
+        </p>
+      )}
       {savedUrl ? (
         <>
           <p className="discord-status">✓ 通知は有効です</p>
-          <p className="muted discord-url">{maskUrl(savedUrl)}</p>
+          {/* 伏字。見えるのはホストと Webhook ID の頭までで、トークンは出さない */}
+          <p className="muted discord-url">{maskWebhookUrl(savedUrl)}</p>
           <div className="discord-actions">
             <button
               type="button"
