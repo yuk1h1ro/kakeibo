@@ -419,11 +419,250 @@
   color: var(--text-muted);
 }
 
+/* ---------- 088: タグ軸(日常/非日常・タグ別・回ごと) ---------- */
+
+/* 「普段」と「特別」を並べる。狭い画面でも横に伸びないよう、
+   1fr 2列 + 折り返し可の作りにする(横スクロールを出さない) */
+.rp-split-figures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.rp-split-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rp-split-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* 帯と同じ見た目の印。色だけに頼らず、特別のほうは斜線で区別する */
+.rp-split-swatch {
+  width: 14px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.rp-split-swatch.everyday {
+  background: var(--accent);
+}
+
+.rp-split-swatch.special {
+  background:
+    repeating-linear-gradient(
+      45deg,
+      var(--accent) 0 3px,
+      transparent 3px 7px
+    ),
+    var(--accent-soft);
+}
+
+.rp-split-amount {
+  font-size: 24px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.rp-split-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.rp-split-bar {
+  margin-bottom: 10px;
+}
+
+.rp-split-tags {
+  list-style: none;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rp-split-tags li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rp-split-tag-label {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.rp-split-tag-value {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rp-split-tag-count {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* 設定の開閉。操作要素は 44px 以上・16px 以上。
+   .btn-ghost が 13px を持っているので、要素名を足して確実に上書きする
+   (CSS の読み込み順に勝ち負けを預けない) */
+button.rp-tag-picker-btn {
+  margin-top: 12px;
+  width: 100%;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.rp-tag-picker {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.rp-tag-picker-note {
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+
+.rp-tag-picker-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.rp-tag-picker-actions button {
+  flex: 1;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.rp-tag-picker-actions button.btn-ghost {
+  font-size: 16px;
+}
+
+/* タグのチップ。入力画面のチップ(.tag-chip)とは別に定義しているのは、
+   レポートは指で押す前提でタップ領域 44px を確保したいため */
+.rp-tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.rp-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 14px;
+  font-size: 16px;
+  color: var(--text-secondary);
+  background: var(--fill);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.rp-tag-chip.is-on {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.rp-tag-empty {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-secondary);
+}
+
+.rp-tag-detail {
+  margin-top: 6px;
+  padding-top: 4px;
+}
+
+.rp-tag-span {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.rp-event-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 出来事の行。狭い画面(iPhone)で横に並べると日付か金額のどちらかが
+   潰れるので、上に「いつ」下に「いくら + 期間で見る」を積む */
+.rp-event-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  padding: 10px 12px;
+}
+
+.rp-event-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.rp-event-when {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.rp-event-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.rp-event-side {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rp-event-amount {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.rp-event-btn,
+button.rp-event-btn {
+  min-height: 44px;
+  font-size: 16px;
+  white-space: nowrap;
+}
+
 /* 折りたたみの開閉で内容が飛び込んでこないよう、動きは控えめに。
    さらに「動きを減らす」設定では一切動かさない */
 @media (prefers-reduced-motion: no-preference) {
   .rp-suggest-row,
-  .rp-heat-cell {
+  .rp-heat-cell,
+  .rp-tag-chip {
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
 }
