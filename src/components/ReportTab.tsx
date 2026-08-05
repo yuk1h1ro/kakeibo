@@ -40,12 +40,15 @@ import MonthlyTrend from './charts/MonthlyTrend'
 import SatisfactionSortSheet from './SatisfactionSortSheet'
 import { splitSiblings } from '../lib/splits'
 import VerticalBars from './charts/VerticalBars'
+import EverydayCard from './report/EverydayCard'
 import FixedCostCard from './report/FixedCostCard'
 import GranularityCard from './report/GranularityCard'
 import HeatmapCard from './report/HeatmapCard'
 import PaceCard from './report/PaceCard'
 import RecurringSuggestCard from './report/RecurringSuggestCard'
+import TagBreakdownCard from './report/TagBreakdownCard'
 import YearSummaryCard from './report/YearSummaryCard'
+import { useTxFeature } from '../lib/txExtensions'
 import '../report.css'
 
 // 月表示と任意期間表示。任意期間では「前月比」「月次推移」のような
@@ -80,6 +83,8 @@ export default function ReportTab({ transactions, onSetSatisfaction }: ReportTab
   // 感情スタンプ (機能219 + 143)
   const satisfactionAvailable = useSatisfactionAvailable()
   const [showSortSheet, setShowSortSheet] = useState(false)
+  // タグ (機能088)。tags 列が無い環境ではタグ関係のカードごと出さない
+  const taggingAvailable = useTxFeature('tagging')
 
   const swipeRef = useRef<HTMLDivElement>(null)
 
@@ -104,6 +109,15 @@ export default function ReportTab({ transactions, onSetSatisfaction }: ReportTab
   const jumpTo = (target: string) => {
     setNavDir(target > month ? 'next' : 'prev')
     setMonth(target)
+  }
+
+  // 「この期間で見る」— タグの回ごとの集計から、既存の任意期間 (機能128) に渡す。
+  // 期間の指定は画面のいちばん上にあるので、押した結果が見えるよう先頭へ戻す
+  const pickRange = (start: string, end: string) => {
+    setMode('range')
+    setRangeStart(start)
+    setRangeEnd(end)
+    window.scrollTo({ top: 0 })
   }
 
   useSwipeNav(swipeRef, {
@@ -320,6 +334,17 @@ export default function ReportTab({ transactions, onSetSatisfaction }: ReportTab
                 <PaceCard transactions={transactions} month={month} today={today} />
               )}
 
+              {/* 088 をレポートに通す(日常 / 非日常)。
+                  「旅行を除いた普段の支出はいくらか」は内訳より先に知りたい数字なので、
+                  カテゴリ別の前に置く。tags 列が無い環境では出さない */}
+              {taggingAvailable && (
+                <EverydayCard
+                  transactions={transactions}
+                  range={range}
+                  periodLabel={periodLabel}
+                />
+              )}
+
               <div className="card">
                 <h2>カテゴリ別支出</h2>
                 <CategoryBars
@@ -390,6 +415,17 @@ export default function ReportTab({ transactions, onSetSatisfaction }: ReportTab
                   </button>
                 )}
               </div>
+
+              {/* 088: タグ別の集計と、タグの中のカテゴリ内訳・回ごとの集計。
+                  カテゴリ / お店 と並ぶ「もう1つの切り口」なので、ランキングの直後に置く */}
+              {taggingAvailable && (
+                <TagBreakdownCard
+                  transactions={transactions}
+                  range={range}
+                  periodLabel={periodLabel}
+                  onPickRange={pickRange}
+                />
+              )}
 
               {/* 117: 曜日別・時間帯別 */}
               <div className="card">

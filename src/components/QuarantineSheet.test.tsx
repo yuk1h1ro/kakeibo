@@ -90,3 +90,97 @@ describe('同期できなかった記録の画面', () => {
     expect(html).not.toContain('破棄する')
   })
 })
+
+describe('隔離された記録の中身の読み取り', () => {
+  it('隔離された束が複数あるときは、束ごとに分けて出す(混ざらない)', () => {
+    const html = render([
+      entry({ id: 'e1' }),
+      entry({
+        id: 'e2',
+        reason: 'repeated',
+        detail: 'timeout',
+        ops: [
+          {
+            opId: 'o9',
+            kind: 'insert',
+            id: 'r9',
+            queuedAt: '2026-08-04T11:00:00.000Z',
+            payload: {
+              date: '2026-08-04',
+              type: 'partner_deposit',
+              amount: 30000,
+              category: null,
+              memo: '',
+              store: '',
+              partner_amount: 0,
+            },
+          },
+        ],
+      }),
+    ])
+    // それぞれの束が、自分の件数と合計を持っている
+    expect(html).toContain('2件')
+    expect(html).toContain('1件')
+    expect(html).toContain('¥3,000')
+    expect(html).toContain('¥30,000')
+    expect(html).toContain('彼女から預かり')
+    // 再送・破棄の道は束ごとに1組ずつある
+    expect(html.match(/もう一度送る/g)).toHaveLength(2)
+  })
+
+  it('何をしようとした記録かが分かる(追加・修正・削除)', () => {
+    const html = render([
+      entry({
+        ops: [
+          {
+            opId: 'u1',
+            kind: 'update',
+            id: 'r1',
+            queuedAt: '2026-08-04T10:00:00.000Z',
+            payload: {
+              date: '2026-08-04',
+              type: 'expense',
+              amount: 500,
+              category: 'food',
+              memo: '',
+              store: 'カフェ',
+              partner_amount: 0,
+            },
+          },
+          { opId: 'd1', kind: 'delete', id: 'r2', queuedAt: '2026-08-04T10:00:00.000Z' },
+        ],
+      }),
+    ])
+    expect(html).toContain('修正')
+    expect(html).toContain('削除')
+    // 削除は中身が残っていないので、金額は「—」と正直に書く
+    expect(html).toContain('この記録の削除')
+    expect(html).toContain('—')
+  })
+
+  it('預かりの記録も、支出と同じように何が入っているか読める', () => {
+    const html = render([
+      entry({
+        ops: [
+          {
+            opId: 'p1',
+            kind: 'insert',
+            id: 'r1',
+            queuedAt: '2026-08-04T10:00:00.000Z',
+            payload: {
+              date: '2026-08-04',
+              type: 'partner_refund',
+              amount: 5000,
+              category: null,
+              memo: '現金で返した',
+              store: '',
+              partner_amount: 0,
+            },
+          },
+        ],
+      }),
+    ])
+    expect(html).toContain('彼女に返金')
+    expect(html).toContain('¥5,000')
+  })
+})

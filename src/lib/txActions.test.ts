@@ -6,6 +6,7 @@ import {
   restoreInput,
   transactionToInput,
   withCategory,
+  withSatisfaction,
 } from './txActions'
 
 function tx(p: Partial<Transaction> = {}): Transaction {
@@ -150,5 +151,76 @@ describe('categoryBulkTargets', () => {
       tx({ id: 'c', type: 'partner_deposit', category: null }),
     ]
     expect(categoryBulkTargets(rows, 'food').map((t) => t.id)).toEqual(['b'])
+  })
+})
+
+describe('withSatisfaction (機能143)', () => {
+  it('気分以外は1つも変わらない', () => {
+    const before = tx()
+    const input = withSatisfaction(before, 'regret')
+    expect(input.satisfaction).toBe('regret')
+    expect(input.amount).toBe(before.amount)
+    expect(input.date).toBe(before.date)
+    expect(input.category).toBe(before.category)
+    expect(input.partner_amount).toBe(before.partner_amount)
+  })
+
+  it('彼女が払った額を落とさない(嘘の差分通知を彼女に送らないため)', () => {
+    // 実際にあった不具合: 画面側で項目を手書きしていて partner_paid が抜け、
+    // 通知の差分計算がそれを 0 とみなして「差分 −¥5,000」を彼女に送っていた
+    const input = withSatisfaction(tx({ amount: 5000, partner_amount: 2000, partner_paid: 5000 }), 'good')
+    expect(input.partner_paid).toBe(5000)
+    expect(input.partner_amount).toBe(2000)
+  })
+
+  it('タグと分割の束ねも落とさない(気分を付けただけで内訳が壊れないこと)', () => {
+    const input = withSatisfaction(tx({ tags: ['旅行'], split_group: 'g1' }), 'neutral')
+    expect(input.tags).toEqual(['旅行'])
+    expect(input.split_group).toBe('g1')
+  })
+
+  it('自動生成の印も残る(気分を付けただけで手入力の記録に化けない)', () => {
+    expect(withSatisfaction(tx({ source: 'recurring' }), 'good').source).toBe('recurring')
+  })
+
+  it('気分を外す(null)ときもキーを送る(未設定のときの「キーごと落とす」とは別)', () => {
+    const input = withSatisfaction(tx({ satisfaction: 'good' }), null)
+    expect('satisfaction' in input).toBe(true)
+    expect(input.satisfaction).toBeNull()
+  })
+
+  it('書き換えなので created_at は送らない', () => {
+    expect('created_at' in withSatisfaction(tx(), 'good')).toBe(false)
+  })
+})
+
+describe('既存の記録を書き戻す組み立て関数に共通の約束', () => {
+  // 「1つの項目が抜ける」だけで残高・通知・内訳のどれかが静かに壊れる。
+  // 組み立て関数を新しく足したときも、この一覧に入れて同じ約束を守らせること
+  const builders: [string, (t: Transaction) => ReturnType<typeof transactionToInput>][] = [
+    ['transactionToInput', (t) => transactionToInput(t)],
+    ['withCategory', (t) => withCategory(t, 'daily')],
+    ['withSatisfaction', (t) => withSatisfaction(t, 'good')],
+    ['restoreInput', (t) => restoreInput(t)],
+  ]
+
+  it.each(builders)('%s は、その行が持っている事実を1つも落とさない', (_name, build) => {
+    const before = tx({
+      partner_amount: 2000,
+      partner_paid: 5000,
+      amount: 5000,
+      tags: ['旅行'],
+      split_group: 'g1',
+      source: 'recurring',
+      satisfaction: 'neutral',
+    })
+    const input = build(before)
+    expect(input.partner_amount).toBe(2000)
+    expect(input.partner_paid).toBe(5000)
+    expect(input.tags).toEqual(['旅行'])
+    expect(input.split_group).toBe('g1')
+    expect(input.source).toBe('recurring')
+    expect(input.date).toBe(before.date)
+    expect(input.type).toBe(before.type)
   })
 })

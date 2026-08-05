@@ -7,7 +7,7 @@
 // ============================================================
 
 import type { TransactionInput } from '../hooks/useTransactions'
-import type { Transaction } from './types'
+import type { Satisfaction, Transaction } from './types'
 
 /**
  * 既存の行を、そのまま書き戻せる内容に写す。(純粋関数)
@@ -65,6 +65,21 @@ export function duplicateInput(t: Transaction, todayIso: string): TransactionInp
 /** 一括カテゴリ変更 (機能151)。カテゴリ以外は一切変えない。(純粋関数) */
 export function withCategory(t: Transaction, category: string | null): TransactionInput {
   return { ...transactionToInput(t), category }
+}
+
+/**
+ * 気分スタンプの付け直し (機能143)。気分以外は一切変えない。(純粋関数)
+ *
+ * 画面側で `{ date, type, amount, ... , satisfaction }` と項目を手書きしていた頃は
+ * partner_paid が抜けており、サーバーのデータは部分更新なので無事だったが、
+ * 通知の差分計算がそれを 0 とみなして「記録が修正されました 差分 −¥5,000」という
+ * **実在しない差分を彼女に送っていた**。組み立ては必ずここを通すこと。
+ */
+export function withSatisfaction(
+  t: Transaction,
+  satisfaction: Satisfaction | null
+): TransactionInput {
+  return { ...transactionToInput(t), satisfaction }
 }
 
 /**

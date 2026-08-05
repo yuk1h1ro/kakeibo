@@ -12,6 +12,7 @@ import type { TransactionInput } from '../hooks/useTransactions'
 import { isSchemaError, type ServerErrorLike } from './serverErrors'
 import { formatGuidance, guidanceForServerError, isOnlineNow } from './errorGuidance'
 import { pendingOccurrences, type Recurrence, type RecurrenceKind } from './recurrence'
+import { hasGeneratedMark, recordGeneratedMark } from './recurringLedger'
 
 export interface RecurringRule {
   id: string
@@ -271,12 +272,18 @@ export async function deleteRecurringRule(supabase: SupabaseClient, id: string):
  * 生成してしまう。取引側はオフラインキュー経由なので、積んだあとに通信が
  * 切れても失われない(重複生成の回避を、生成漏れの回避より優先している)。
  *
+ * この優先順位は変えていない。副作用として残る「印だけ進んで取引が無い」状態は、
+ * 生成のたびに端末へ控えを残し(recurringLedger.ts)、起動時に突き合わせて
+ * **あとから積み直す**ことで手当てする。行IDを自分で採って控えに残しておくのは、
+ * 積み直しのときに同じIDを使うため — 万一二重に積んでも、同じIDの行は
+ * データベースの主キーが弾く。家賃が2件になることはこの一点で防いでいる。
+ *
  * 戻り値は生成した件数。テーブルが無い・オフライン・未生成なしなら 0。
  */
 export async function generateDueTransactions(
   supabase: SupabaseClient,
   today: string,
-  enqueue: (input: TransactionInput) => Promise<void>
+  enqueue: (input: TransactionInput, id?: string) => Promise<void>
 ): Promise<number> {
   if (tableMissing) return 0
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return 0
@@ -302,7 +309,15 @@ export async function generateDueTransactions(
     }
     setRules(rules.map((r) => (r.id === rule.id ? { ...r, lastGeneratedDate: today } : r)))
     for (const date of dates) {
-      await enqueue(buildRecurringTransaction(rule, date))
+      // 念のための二重生成止め。印が何らかの理由で巻き戻っても、
+      // 同じ(ルール, 日)の控えがすでにあれば作らない
+      if (hasGeneratedMark(rule.id, date)) continue
+      const input = buildRecurringTransaction(rule, date)
+      const txId = crypto.randomUUID()
+      // 控えは **積む前に** 残す。積んだあとに残すと、控えを残せないまま
+      // op だけが失われたときに「作ったはずのもの」を誰も知らない状態になる
+      recordGeneratedMark({ ruleId: rule.id, date, txId, input })
+      await enqueue(input, txId)
       generated += 1
     }
   }

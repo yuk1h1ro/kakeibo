@@ -60,12 +60,14 @@ create table if not exists public.transactions (
 alter table public.transactions enable row level security;
 
 -- 自分の行だけ参照 (SELECT) できる
+drop policy if exists "select_own_transactions" on public.transactions;
 create policy "select_own_transactions"
   on public.transactions
   for select
   using (auth.uid() = user_id);
 
 -- 自分の user_id の行だけ追加 (INSERT) できる
+drop policy if exists "insert_own_transactions" on public.transactions;
 create policy "insert_own_transactions"
   on public.transactions
   for insert
@@ -73,6 +75,7 @@ create policy "insert_own_transactions"
 
 -- 自分の行だけ更新 (UPDATE) できる。
 -- with check により、更新後も自分の行であることを保証 (user_id の付け替え防止)
+drop policy if exists "update_own_transactions" on public.transactions;
 create policy "update_own_transactions"
   on public.transactions
   for update
@@ -80,6 +83,7 @@ create policy "update_own_transactions"
   with check (auth.uid() = user_id);
 
 -- 自分の行だけ削除 (DELETE) できる
+drop policy if exists "delete_own_transactions" on public.transactions;
 create policy "delete_own_transactions"
   on public.transactions
   for delete
@@ -132,12 +136,14 @@ create table if not exists public.categories (
 alter table public.categories enable row level security;
 
 -- 自分の行だけ参照 (SELECT) できる
+drop policy if exists "select_own_categories" on public.categories;
 create policy "select_own_categories"
   on public.categories
   for select
   using (auth.uid() = user_id);
 
 -- 自分の user_id の行だけ追加 (INSERT) できる
+drop policy if exists "insert_own_categories" on public.categories;
 create policy "insert_own_categories"
   on public.categories
   for insert
@@ -145,6 +151,7 @@ create policy "insert_own_categories"
 
 -- 自分の行だけ更新 (UPDATE) できる。
 -- with check により、更新後も自分の行であることを保証 (user_id の付け替え防止)
+drop policy if exists "update_own_categories" on public.categories;
 create policy "update_own_categories"
   on public.categories
   for update
@@ -152,6 +159,7 @@ create policy "update_own_categories"
   with check (auth.uid() = user_id);
 
 -- 自分の行だけ削除 (DELETE) できる
+drop policy if exists "delete_own_categories" on public.categories;
 create policy "delete_own_categories"
   on public.categories
   for delete
@@ -194,22 +202,26 @@ create table if not exists public.store_categories (
 -- Row Level Security (transactions と同じく本人の行のみ読み書き可)
 alter table public.store_categories enable row level security;
 
+drop policy if exists "select_own_store_categories" on public.store_categories;
 create policy "select_own_store_categories"
   on public.store_categories
   for select
   using (auth.uid() = user_id);
 
+drop policy if exists "insert_own_store_categories" on public.store_categories;
 create policy "insert_own_store_categories"
   on public.store_categories
   for insert
   with check (auth.uid() = user_id);
 
+drop policy if exists "update_own_store_categories" on public.store_categories;
 create policy "update_own_store_categories"
   on public.store_categories
   for update
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
+drop policy if exists "delete_own_store_categories" on public.store_categories;
 create policy "delete_own_store_categories"
   on public.store_categories
   for delete
@@ -270,22 +282,26 @@ create table if not exists public.recurring_rules (
 -- Row Level Security (transactions と同じく本人の行のみ読み書き可)
 alter table public.recurring_rules enable row level security;
 
+drop policy if exists "select_own_recurring_rules" on public.recurring_rules;
 create policy "select_own_recurring_rules"
   on public.recurring_rules
   for select
   using (auth.uid() = user_id);
 
+drop policy if exists "insert_own_recurring_rules" on public.recurring_rules;
 create policy "insert_own_recurring_rules"
   on public.recurring_rules
   for insert
   with check (auth.uid() = user_id);
 
+drop policy if exists "update_own_recurring_rules" on public.recurring_rules;
 create policy "update_own_recurring_rules"
   on public.recurring_rules
   for update
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
+drop policy if exists "delete_own_recurring_rules" on public.recurring_rules;
 create policy "delete_own_recurring_rules"
   on public.recurring_rules
   for delete
@@ -327,22 +343,26 @@ create table if not exists public.transaction_templates (
 -- Row Level Security (transactions と同じく本人の行のみ読み書き可)
 alter table public.transaction_templates enable row level security;
 
+drop policy if exists "select_own_transaction_templates" on public.transaction_templates;
 create policy "select_own_transaction_templates"
   on public.transaction_templates
   for select
   using (auth.uid() = user_id);
 
+drop policy if exists "insert_own_transaction_templates" on public.transaction_templates;
 create policy "insert_own_transaction_templates"
   on public.transaction_templates
   for insert
   with check (auth.uid() = user_id);
 
+drop policy if exists "update_own_transaction_templates" on public.transaction_templates;
 create policy "update_own_transaction_templates"
   on public.transaction_templates
   for update
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
+drop policy if exists "delete_own_transaction_templates" on public.transaction_templates;
 create policy "delete_own_transaction_templates"
   on public.transaction_templates
   for delete
@@ -493,11 +513,25 @@ create policy "select_own_partner_share_comments"
   for select
   using (auth.uid() = user_id);
 
+-- コメント先の明細も、必ず自分のものであることを確かめる。
+-- ここを user_id だけで通していたころは、**他人の明細のIDを指したコメント**を
+-- 自分の行として作れた(共有ページ側の RPC は明細の持ち主を見ているのに、
+-- アプリ側の直接 INSERT だけが素通りしていた = 非対称)。
+-- 明細への外部キーは意図的に張っていない(削除の取り消しでコメントを戻すため)ので、
+-- 持ち主の確認はこのポリシーでしか行えない。
+-- なお、これは **書き込む瞬間**の確認で、あとから明細が消えてもコメントは残る
+-- (orphan を許す設計はそのまま。asset_balances の INSERT と同じ形)。
 drop policy if exists "insert_own_partner_share_comments" on public.partner_share_comments;
 create policy "insert_own_partner_share_comments"
   on public.partner_share_comments
   for insert
-  with check (auth.uid() = user_id);
+  with check (
+    auth.uid() = user_id
+    and exists (
+      select 1 from public.transactions t
+      where t.id = transaction_id and t.user_id = auth.uid()
+    )
+  );
 
 drop policy if exists "update_own_partner_share_comments" on public.partner_share_comments;
 create policy "update_own_partner_share_comments"

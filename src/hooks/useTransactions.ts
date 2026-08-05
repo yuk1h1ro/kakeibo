@@ -16,12 +16,18 @@ import {
   quarantineCount,
   quarantineGuidance,
   quarantineOps,
+  quarantinedRowIds,
   reachedAttemptLimit,
   recordSyncFailure,
   splitGroupOf,
   useQuarantine,
   type QuarantineReason,
 } from '../lib/quarantine'
+import {
+  confirmGeneratedMarks,
+  forgetGeneratedMarks,
+  reconcileGeneratedMarks,
+} from '../lib/recurringLedger'
 import {
   isSatisfactionUnavailable,
   markSatisfactionUnavailable,
@@ -55,6 +61,7 @@ import {
   type Guidance,
 } from '../lib/errorGuidance'
 import { categoryLabel } from '../lib/categories'
+import { todayISO } from '../lib/format'
 import {
   diffTransaction,
   initChangeLog,
@@ -209,6 +216,10 @@ export function useTransactions(supabase: SupabaseClient) {
     typeof navigator !== 'undefined' ? navigator.onLine : true
   )
   const [syncing, setSyncing] = useState(false)
+  // この起動でサーバーから一度でも取り込めたか。
+  // 「サーバーに無い」を根拠に判断してよいのは、取り込めたときだけ
+  // (端末に残っている lastSyncedAt は前回の起動のものなので使えない)
+  const [serverSynced, setServerSynced] = useState(false)
   // サーバーから取り込みに成功した最後の時刻 (機能154)
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(() => loadLastSyncedAt())
 
@@ -241,6 +252,7 @@ export function useTransactions(supabase: SupabaseClient) {
         setServerTx(rows)
         serverTxRef.current = rows
         saveTxCache(rows)
+        setServerSynced(true)
         // 「サーバーから取り込めた」ことは、送れなかった記録が片付いたことを意味しない。
         // ここで一律に消していたせいで、隔離の案内が画面から1文字も残らず、
         // 再読み込みすると痕跡がゼロになっていた。
@@ -423,6 +435,10 @@ export function useTransactions(supabase: SupabaseClient) {
           // 個々の op の通知とは別に、確定した残高そのものを見て判断する
           if (message) notifyLowBalanceIfNeeded(partnerBalance(nextRows))
           localRows = nextRows
+          // 繰り返し入力が作った行なら、「サーバーが受け付けた」ことをここで控えに記す。
+          // 取り込み直しを待たずにこの瞬間に記すのが肝心 — 待つと、その隙に
+          // 別の端末で消された記録を「届いていない」と誤認して復活させてしまう
+          if (op.kind === 'insert') confirmGeneratedMarks([op.id])
           setPendingOps(removeOp(op.opId))
           // 断られた回数は「連続で」数えたいので、通った時点で忘れる
           clearSyncFailures([op.opId])
@@ -456,6 +472,46 @@ export function useTransactions(supabase: SupabaseClient) {
   useEffect(() => {
     void initTxExtensions(supabase)
   }, [supabase])
+
+  // ---------- 繰り返し入力の取りこぼしの回復 ----------
+  /**
+   * 「生成済みの印だけ進んで、取引がどこにも無い」状態を起動時に見つけて積み直す。
+   *
+   * 判断できるのは **サーバーから取り込めて、かつ送信待ちが1件も無い** ときだけ。
+   * どちらかが欠けていると「サーバーに無い」が「まだ届いていない」と区別できず、
+   * 送信中の記録をもう一度積んでしまう。
+   *
+   * 積み直す中身と行IDは控え(recurringLedger)がそのまま持っているので、
+   * ルールが編集・削除されていても、当時の内容のまま戻る。
+   * 利用者が消した記録は控えごと忘れているため、ここには絶対に現れない。
+   */
+  const recoveredRef = useRef(false)
+  useEffect(() => {
+    if (recoveredRef.current) return
+    if (loading || !serverSynced || pendingOps.length > 0) return
+    recoveredRef.current = true
+    const lost = reconcileGeneratedMarks({
+      serverIds: new Set(serverTx.map((t) => t.id)),
+      queuedIds: new Set(loadQueue().map((o) => o.id)),
+      quarantinedIds: new Set(quarantinedRowIds()),
+      today: todayISO(),
+    })
+    if (lost.length === 0) return
+    const queuedAt = new Date().toISOString()
+    let ops: PendingOp[] = loadQueue()
+    for (const m of lost) {
+      ops = appendOp({
+        opId: crypto.randomUUID(),
+        kind: 'insert',
+        // 控えに残した行IDをそのまま使う。二重になっても主キーが弾く
+        id: m.txId,
+        payload: m.input,
+        queuedAt,
+      })
+    }
+    setPendingOps(ops)
+    void flush()
+  }, [loading, serverSynced, pendingOps.length, serverTx, flush])
 
   // オンライン/オフラインの追跡。復帰時は自動で再同期
   useEffect(() => {
@@ -528,14 +584,21 @@ export function useTransactions(supabase: SupabaseClient) {
 
   useEffect(() => clearUndoTimer, [])
 
+  /**
+   * 1件追加する。
+   *
+   * `id` は通常渡さない。繰り返し入力だけは「どの行を作ったか」を端末に控えて
+   * あとから積み直せるようにするため、呼び出し側が採ったIDを渡してくる
+   * (積み直しでも同じIDを使うので、二重に入っても主キーが弾く)。
+   */
   const add = useCallback(
-    async (input: TransactionInput) => {
+    async (input: TransactionInput, id?: string) => {
       const op: PendingOp = {
         opId: crypto.randomUUID(),
         kind: 'insert',
         // 行IDをクライアント側で採番することで、未同期の行への
         // update/delete も同じIDで一貫して扱える
-        id: crypto.randomUUID(),
+        id: id ?? crypto.randomUUID(),
         payload: input,
         queuedAt: new Date().toISOString(),
       }
@@ -615,6 +678,9 @@ export function useTransactions(supabase: SupabaseClient) {
 
   const remove = useCallback(
     async (id: string) => {
+      // 利用者が自分で消した記録は、繰り返し入力の回復対象から必ず外す。
+      // ここを忘れると「消したはずの家賃」が次の起動でよみがえる
+      forgetGeneratedMarks([id])
       const before = txRef.current.find((t) => t.id === id)
       if (before) {
         logRemoved(before)
@@ -641,6 +707,8 @@ export function useTransactions(supabase: SupabaseClient) {
   const removeMany = useCallback(
     async (txs: readonly Transaction[]) => {
       if (txs.length === 0) return
+      // まとめての削除も「利用者が自分で消した」ことに変わりはない(remove と同じ)
+      forgetGeneratedMarks(txs.map((t) => t.id))
       const queuedAt = new Date().toISOString()
       let ops: PendingOp[] = loadQueue()
       for (const t of txs) {
@@ -722,6 +790,10 @@ export function useTransactions(supabase: SupabaseClient) {
 
   /** 隔離した記録を捨てる(設定シートの「破棄する」)。利用者の明示操作だけで呼ぶこと */
   const discardQuarantined = useCallback((entryId: string) => {
+    // 「破棄する」も利用者の明示操作。繰り返し入力の控えも一緒に忘れないと、
+    // 破棄したはずの記録が次の起動で積み直されてしまう
+    const entry = findQuarantineEntry(entryId)
+    if (entry) forgetGeneratedMarks(entry.ops.map((o) => o.id))
     discardQuarantineEntry(entryId)
     // 隔離箱が空になったら、残っていた拒否の案内も役目を終える
     if (quarantineCount() === 0) setErrorGuide((prev) => (prev?.kind === 'rejected' ? null : prev))

@@ -86,12 +86,24 @@ export function collectTags(txs: readonly Transaction[], limit = 30): TagUsage[]
 }
 
 /**
+ * 選んだタグのどれかが実際に付いているか。(純粋関数)
+ *
+ * 「選んでいないときは全件を通す」絞り込み用の matchesAnyTag とは別に用意した。
+ * レポートの日常/非日常の切り分け(reportTags.ts)は、この判定で支出を
+ * **2つに分ける**ので、「1つも選んでいない = 全件が特別」になってしまうと
+ * 意味が反転する。分ける側は「付いていない = false」でなければならない。
+ */
+export function hasAnyTag(t: Transaction, selected: readonly string[]): boolean {
+  if (selected.length === 0) return false
+  const own = tagsOf(t)
+  return selected.some((tag) => own.includes(tag))
+}
+
+/**
  * 選んだタグのどれかが付いているか。(純粋関数)
  * OR で判定するのは、カテゴリの絞り込み(既存)と同じ挙動にそろえるため。
  * 選んでいないとき(空配列)は全件を通す。
  */
 export function matchesAnyTag(t: Transaction, selected: readonly string[]): boolean {
-  if (selected.length === 0) return true
-  const own = tagsOf(t)
-  return selected.some((tag) => own.includes(tag))
+  return selected.length === 0 || hasAnyTag(t, selected)
 }
