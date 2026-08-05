@@ -297,6 +297,9 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
             <TransactionForm
               initial={editing}
               submitLabel="更新する"
+              // 編集シートでも「そのカテゴリで使ったお店」「過去のタグ」を候補に出す
+              // (入力タブと同じ操作でお店を選び直せるようにするため)
+              knownTransactions={store.transactions}
               onSubmit={async (input) => {
                 await store.update(editing.id, input)
                 setEditing(null)

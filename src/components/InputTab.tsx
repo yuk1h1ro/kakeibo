@@ -4,15 +4,17 @@ import TransactionForm, { type DatePrefill, type FormPrefill } from './Transacti
 import GeminiKeySheet from './GeminiKeySheet'
 import ReceiptBatchSheet from './ReceiptBatchSheet'
 import RecategorizeSheet from './RecategorizeSheet'
-import { yen } from '../lib/format'
+import { todayISO, yen } from '../lib/format'
 import { categoryLabel, resolveCategoryVisual, useCategories } from '../lib/categories'
 import { CategoryVisualBadge } from './categoryIcons'
 import { IconGear } from './icons'
 import { hasGeminiKey, scanReceipt } from '../lib/receiptScan'
 import {
+  normalizeStoreName,
   rememberStoreCategory,
   transactionsToRecategorize,
 } from '../lib/storeCategories'
+import { buildStoreIndex } from '../lib/storePicker'
 import {
   isTemplatesUnavailable,
   templateLabel,
@@ -123,6 +125,15 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
     if (input.type !== 'expense' || input.store === '' || input.category === null) return
     const previous = await rememberStoreCategory(supabase, input.store, input.category)
     if (previous === null || previous === input.category) return
+    // すでに3つ以上のカテゴリで使っている店では聞かない。
+    // 同じ店を複数カテゴリで使う(コンビニで食費と日用品)のが普通なので、
+    // そういう店の過去をまとめて塗り替えると、実際に買ったものの記録が消えるうえ、
+    // カテゴリごとの店の候補(storePicker.ts)まで痩せてしまう
+    const uses =
+      buildStoreIndex(store.transactions, [], todayISO()).byStore.get(
+        normalizeStoreName(input.store)
+      ) ?? []
+    if (uses.filter((u) => u.category !== input.category).length > 1) return
     const targets = transactionsToRecategorize(store.transactions, input.store, input.category)
     if (targets.length === 0) return // 該当が無いときは聞かない
     setRecategorize({ storeName: input.store, category: input.category, targets })

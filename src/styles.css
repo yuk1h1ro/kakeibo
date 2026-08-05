@@ -277,6 +277,7 @@ textarea:focus {
 .amount-clear,
 .calc-key,
 .date-chip,
+.store-chip,
 .recent-chip,
 .tab-bar button {
   transition: transform 0.08s ease, filter 0.08s ease, background-color 0.08s ease;
@@ -289,6 +290,7 @@ textarea:focus {
 .amount-clear:active,
 .calc-key:active,
 .date-chip:active,
+.store-chip:active,
 .recent-chip:active {
   transform: scale(0.97);
   filter: brightness(0.92);
@@ -302,6 +304,7 @@ textarea:focus {
   .amount-clear:active,
   .calc-key:active,
   .date-chip:active,
+  .store-chip:active,
   .recent-chip:active {
     filter: brightness(1.25);
   }
@@ -1450,6 +1453,91 @@ textarea:focus {
 .auto-category-note {
   margin-top: 8px;
   line-height: 1.5;
+}
+
+/* ============================================================
+   入力フローの組み替え: カテゴリ → お店 → 金額 → メモ/彼女の分 → 日付 → 保存
+   画面の並びがそのまま操作の順番になるので、段の番号を左に添えて
+   「上から下へ進むだけ」であることを見た目でも伝える。
+   ============================================================ */
+
+.form-step {
+  scroll-margin-top: 12px;
+}
+
+/* .field > span の display:block を上書きするため、同じ強さの指定にしている */
+.field > span.step-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.step-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--fill);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- カテゴリで絞ったお店の候補 ---------- */
+
+/* 候補は必ず折り返す。横に流すと iPhone で横スクロールが出る */
+.store-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* 入力の主役なので、タップ領域も文字も大きく取る */
+.store-chip {
+  min-height: 44px;
+  max-width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--baseline);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 600;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.store-chip.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.store-hint {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* 今日以外の日付で入力しているときだけ、金額のすぐ下に出す1行 (機能053) */
+.date-lead {
+  padding: 8px 12px;
+  border-radius: var(--radius-btn);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.date-lead strong {
+  font-weight: 700;
 }
 
 /* 連続撮影への導線(単発の読み取りボタンの下) */

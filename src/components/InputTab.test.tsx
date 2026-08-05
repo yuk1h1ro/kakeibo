@@ -80,6 +80,38 @@ describe('入力タブの残高カード (機能011)', () => {
   })
 })
 
+describe('入力フォームの並び(上から下がそのまま操作の順番)', () => {
+  const order = (html: string, needle: string): number => html.indexOf(needle)
+
+  it('カテゴリ → お店 → 金額 → メモ → 日付 → 保存 の順に並ぶ', () => {
+    const html = render([tx()])
+    const form = html.slice(html.indexOf('支出を記録'))
+    const steps = [
+      'カテゴリ',
+      'お店(任意)',
+      '支払い金額(円)',
+      'メモ(任意)',
+      '彼女の分もまとめて払った',
+      '日付',
+      '記録する',
+    ].map((s) => order(form, s))
+    expect(steps).toEqual([...steps].sort((a, b) => a - b))
+    expect(steps.every((i) => i >= 0)).toBe(true)
+  })
+
+  it('主線(カテゴリ〜日付)は畳まれていない — 「開く」操作が縦の流れに割り込まないこと', () => {
+    const html = render([tx()])
+    const form = html.slice(html.indexOf('支出を記録'))
+    // 折りたたみは気分・タグ・分割の1枠だけ
+    expect([...form.matchAll(/class="detail-toggle"/g)]).toHaveLength(1)
+  })
+
+  it('カテゴリ未選択のときは、お店の欄でカテゴリを先に選ぶよう促す', () => {
+    const html = render([tx()])
+    expect(html).toContain('カテゴリを選ぶと、そのカテゴリで使ったお店が並びます')
+  })
+})
+
 describe('入力タブの「最近の記録から入力」', () => {
   it('同じ(カテゴリ・金額・お店・メモ)の記録は1つにまとめる', () => {
     const html = render([
