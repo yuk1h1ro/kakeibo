@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import InputTab from './InputTab'
 import type { useTransactions } from '../hooks/useTransactions'
 import type { Transaction } from '../lib/types'
+import { endTripMode, startTripMode } from '../lib/tripMode'
 
 // ============================================================
 // 入力タブ。いちばん最初に開く画面で、上に預かり残高が出ている。
@@ -151,5 +152,30 @@ describe('入力タブの「最近の記録から入力」', () => {
       tx({ id: 'd', type: 'partner_deposit', amount: 30000, category: null, store: '' }),
     ])
     expect(html).not.toContain('最近の記録から入力')
+  })
+})
+
+// ============================================================
+// 旅行モードの置き場所 (tripMode.ts)。
+// 解除し忘れが最大の失敗なので、アプリを開いて最初に目に入る位置
+// —— 残高カードよりも上 —— にあることを固定しておく。
+// ============================================================
+describe('旅行モードの入り口', () => {
+  afterEach(() => endTripMode())
+
+  it('オフのときは1行のボタンだけで、残高カードより上にある', () => {
+    const html = render([tx()])
+    expect(html).toContain('旅行・デート中にする')
+    expect(html.indexOf('旅行・デート中にする')).toBeLessThan(html.indexOf('彼女とのお金'))
+    // オフのときはタグの表示を一切出さない(入力の手数を増やさない)
+    expect(html).not.toContain('日目')
+  })
+
+  it('オンのときは、付くタグと日数を出した帯になる', () => {
+    startTripMode('旅行')
+    const html = render([tx()])
+    expect(html).toContain('旅行モード中')
+    expect(html).toContain('#旅行 ・ 1日目')
+    expect(html).toContain('終わる')
   })
 })
