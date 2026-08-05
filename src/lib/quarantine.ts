@@ -262,6 +262,15 @@ export function quarantineCount(): number {
   return loadQuarantine().length
 }
 
+/**
+ * 隔離箱に入っている行のID。
+ * 繰り返し入力の生成台帳との突き合わせで「まだ行き先が決まっていない行」を
+ * 見分けるために使う(隔離中のものを積み直すと二重になる)。
+ */
+export function quarantinedRowIds(): string[] {
+  return loadQuarantine().flatMap((e) => e.ops.map((o) => o.id))
+}
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
