@@ -11,7 +11,7 @@ import { initTransactionTemplates, isTemplatesUnavailable } from '../lib/transac
 import { initSatisfaction } from '../lib/satisfaction'
 import { initAssets, isAssetsTabVisible, useAssetsStore } from '../lib/assets'
 import { todayISO } from '../lib/format'
-import { transactionToInput } from '../lib/txActions'
+import { withSatisfaction } from '../lib/txActions'
 import { amountMaskToggleLabel, toggleAmountMask, useAmountMasked } from '../lib/amountMask'
 import { type Guidance } from '../lib/errorGuidance'
 import InputTab from './InputTab'
@@ -104,12 +104,13 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
   // 感情スタンプの付け直し(機能143)。編集と同じ update 経路なので
   // オフラインでもキューに積まれ、記録が失われることはない。
   //
-  // 内容は必ず transactionToInput(= その行が持っている事実の写し)から作る。
-  // 項目を手書きしていた頃は partner_paid が抜けており、サーバーのデータは
-  // 部分更新なので無事だったが、通知の差分計算がそれを 0 とみなして
-  // 「記録が修正されました 差分 −¥5,000」という実在しない差分を彼女に送っていた。
+  // 内容は必ず withSatisfaction(= transactionToInput が写した「その行が持っている
+  // 事実」に気分だけを乗せたもの)から作る。項目を手書きしていた頃は partner_paid が
+  // 抜けており、サーバーのデータは部分更新なので無事だったが、通知の差分計算が
+  // それを 0 とみなして「記録が修正されました 差分 −¥5,000」という
+  // 実在しない差分を彼女に送っていた(組み立てと理由は lib/txActions.ts)。
   const setSatisfaction = async (t: Transaction, value: Satisfaction) => {
-    await store.update(t.id, { ...transactionToInput(t), satisfaction: value })
+    await store.update(t.id, withSatisfaction(t, value))
   }
 
   // 履歴のカレンダーで選んだ日付をそのまま入力タブへ持っていく(機能053)
