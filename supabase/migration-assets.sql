@@ -137,12 +137,23 @@ create policy "insert_own_asset_balances"
     )
   );
 
+-- 更新後の asset_id の持ち主も確認する。
+-- INSERT では確かめているのに UPDATE では見ていなかったため、自分の残高行の
+-- asset_id を **他人の資産に付け替えられた**(INSERT と非対称だった)。
+-- using(更新できる行の範囲)は自分の行だけで足りるので、確認は
+-- with check(更新後の姿)側に足す — INSERT ポリシーとまったく同じ形。
 drop policy if exists "update_own_asset_balances" on public.asset_balances;
 create policy "update_own_asset_balances"
   on public.asset_balances
   for update
   using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+  with check (
+    auth.uid() = user_id
+    and exists (
+      select 1 from public.assets a
+      where a.id = asset_id and a.user_id = auth.uid()
+    )
+  );
 
 drop policy if exists "delete_own_asset_balances" on public.asset_balances;
 create policy "delete_own_asset_balances"

@@ -152,11 +152,25 @@ create policy "select_own_partner_share_comments"
   for select
   using (auth.uid() = user_id);
 
+-- コメント先の明細も、必ず自分のものであることを確かめる。
+-- ここを user_id だけで通していたころは、**他人の明細のIDを指したコメント**を
+-- 自分の行として作れた(共有ページ側の RPC は明細の持ち主を見ているのに、
+-- アプリ側の直接 INSERT だけが素通りしていた = 非対称)。
+-- 明細への外部キーは意図的に張っていない(削除の取り消しでコメントを戻すため)ので、
+-- 持ち主の確認はこのポリシーでしか行えない。
+-- なお、これは **書き込む瞬間**の確認で、あとから明細が消えてもコメントは残る
+-- (orphan を許す設計はそのまま。asset_balances の INSERT と同じ形)。
 drop policy if exists "insert_own_partner_share_comments" on public.partner_share_comments;
 create policy "insert_own_partner_share_comments"
   on public.partner_share_comments
   for insert
-  with check (auth.uid() = user_id);
+  with check (
+    auth.uid() = user_id
+    and exists (
+      select 1 from public.transactions t
+      where t.id = transaction_id and t.user_id = auth.uid()
+    )
+  );
 
 drop policy if exists "update_own_partner_share_comments" on public.partner_share_comments;
 create policy "update_own_partner_share_comments"
