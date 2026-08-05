@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import useBodyScrollLock from '../hooks/useBodyScrollLock'
 import CategorySettingsSheet from './CategorySettingsSheet'
+import CsvExportSheet from './CsvExportSheet'
 import RecurringSettingsSheet from './RecurringSettingsSheet'
 import { categoryLabel } from '../lib/categories'
 import { yen } from '../lib/format'
@@ -16,6 +17,7 @@ import { clearConfig, getConfiguredUrl, hasStoredConfig } from '../lib/supabaseC
 import { privacyBlurStateLabel } from '../lib/privacyBlur'
 import { setPrivacyBlurEnabled, usePrivacyBlurEnabled } from '../lib/privacyShield'
 import { isRecurringUnavailable } from '../lib/recurringRules'
+import type { Transaction } from '../lib/types'
 import {
   deleteTransactionTemplate,
   isTemplatesUnavailable,
@@ -27,6 +29,12 @@ import '../settings.css'
 interface Props {
   supabase: SupabaseClient
   onClose: () => void
+  /**
+   * CSV 書き出し (機能198) に渡す記録。未同期の分も含めた「いま画面に出ている全件」。
+   * 省略できるようにしてあるのは、この設定シートを単体で描くとき(テストなど)に
+   * 書き出し以外の設定だけを試せるようにするため。既定は0件 = 書き出せない状態。
+   */
+  transactions?: readonly Transaction[]
   /**
    * 同期できずに隔離された記録の件数と、その一覧を開く導線。
    * 0件のときは行ごと出さない(押しても何も無い導線を見せない)。
@@ -63,10 +71,11 @@ const AMOUNT_MASK_OPTIONS: { masked: boolean; label: string }[] = [
 export default function SettingsSheet({
   supabase,
   onClose,
+  transactions = [],
   quarantinedCount = 0,
   onOpenQuarantine,
 }: Props) {
-  const [child, setChild] = useState<'category' | 'recurring' | null>(null)
+  const [child, setChild] = useState<'category' | 'recurring' | 'csv' | null>(null)
   const keypadPref = useKeypadPreference()
   const privacyBlur = usePrivacyBlurEnabled()
   const amountMasked = useAmountMasked()
@@ -116,6 +125,17 @@ export default function SettingsSheet({
                 </button>
               </li>
             )}
+            {/* CSV 書き出し (機能198)。
+                Supabase の無料プランに自動バックアップが無いことへの備えなので、
+                マイグレーションの有無に関係なく必ず出す(いつでも控えを取れること自体が要件) */}
+            <li>
+              <button className="settings-row" onClick={() => setChild('csv')}>
+                <span className="settings-row-title">CSV で書き出す</span>
+                <span className="settings-row-sub">
+                  記録の控えを端末に保存する(バックアップ)
+                </span>
+              </button>
+            </li>
             {/* サーバーに断られて端末に取り置いた記録。
                 残っている間だけ出す = ふだんは存在しない行 */}
             {quarantinedCount > 0 && onOpenQuarantine && (
@@ -279,6 +299,9 @@ export default function SettingsSheet({
       )}
       {child === 'recurring' && (
         <RecurringSettingsSheet supabase={supabase} onClose={() => setChild(null)} />
+      )}
+      {child === 'csv' && (
+        <CsvExportSheet transactions={transactions} onClose={() => setChild(null)} />
       )}
     </>
   )

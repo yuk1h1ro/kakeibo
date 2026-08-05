@@ -664,3 +664,45 @@
   font-size: 12px;
   text-decoration: underline;
 }
+
+/* ---------- CSV 書き出し(機能198) ---------- */
+
+/* 期間のチップ。年が増えても折り返すだけで、横スクロールを出さない */
+.csv-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.csv-range .date-chip {
+  /* 押し間違えたくない場所なので、指の当たる幅を確保して字も大きめにする */
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: 16px;
+}
+
+.csv-month {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+/* 月の選択欄。iOS は 16px 未満の入力欄に触れると画面を勝手に拡大するので、
+   ここは必ず 16px 以上にする */
+.csv-month-select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 10px;
+  font-size: 16px;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--baseline);
+  border-radius: var(--radius-btn);
+}
+
+.csv-run {
+  margin-top: 10px;
+}
