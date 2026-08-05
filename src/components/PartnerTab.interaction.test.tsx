@@ -10,7 +10,9 @@ import {
   getWebhookUrl,
   initDiscordWebhook,
   resetDiscordWebhookForTest,
+  saveWebhookUrl,
 } from '../lib/discordWebhook'
+import { resetBacklogSendsForTest } from '../lib/partnerBacklogSends'
 import type { Transaction } from '../lib/types'
 
 // ============================================================
@@ -38,6 +40,8 @@ window.scrollTo = () => {}
 beforeEach(() => {
   localStorage.clear()
   resetDiscordWebhookForTest()
+  // 「どこまで送ったか」もモジュールに載るので、1件ずつ初期状態に戻す
+  resetBacklogSendsForTest()
 })
 
 function deposit(amount: number): Transaction {
@@ -335,6 +339,202 @@ describe('Discord通知のテスト送信', () => {
     await user.click(discordCard().getByRole('button', { name: 'テスト送信' }))
 
     await waitFor(() => expect(discordCard().getByText(/テスト通知を送信しました/)).toBeTruthy())
+  })
+})
+
+// ============================================================
+// これまでの履歴をまとめて送る
+//
+// Webhook URL が端末の中にしか無かったあいだ、スマホからの記録は1通も
+// 通知されていなかった。彼女は過去の増減をほとんど知らないので、あとから
+// まとめて追いつかせる。ここで確かめるのは、**押す前後の安全**:
+//   ・送り先が無いときは押させない
+//   ・押す前に「何件・何通」と実物が見えること
+//   ・送ったあと、同じものをもう一度押せないこと(彼女の通知欄が二度埋まる)
+//   ・失敗したとき、どこまで届いたかと次にすることが出ること
+// 中身の組み立て・2,000文字での分割・再開の判定は lib 側のテストが持つ。
+// ============================================================
+
+/** テーブルごとに違う応答を返す supabase もどき(履歴の送信記録つき) */
+function backlogSupabase(cursorRow: Record<string, unknown> | null = null) {
+  const upserts: Record<string, unknown>[] = []
+  const client = {
+    auth: { getSession: async () => ({ data: { session: { user: { id: 'u1' } } } }) },
+    from: (table: string) => ({
+      select: () => ({
+        maybeSingle: async () => ({
+          data: table === 'partner_backlog_sends' ? cursorRow : null,
+          error: null,
+        }),
+      }),
+      upsert: async (payload: Record<string, unknown>) => {
+        if (table === 'partner_backlog_sends') upserts.push(payload)
+        return { error: null }
+      },
+      order: async () => ({ data: [], error: null }),
+      insert: () => ({ select: () => ({ single: async () => ({ data: null, error: null }) }) }),
+      update: () => ({ eq: () => ({ eq: async () => ({ error: null }) }) }),
+    }),
+  } as unknown as SupabaseClient
+  return { client, upserts }
+}
+
+function expense(id: string, date: string, total: number, partner: number, store: string): Transaction {
+  return {
+    id,
+    date,
+    type: 'expense',
+    amount: total,
+    category: 'food',
+    memo: '',
+    store,
+    partner_amount: partner,
+    created_at: `${date}T02:00:00.000Z`,
+  }
+}
+
+/** 彼女タブを描いて、Discord カードから「まとめて送る」シートを開く */
+async function openBacklog(transactions: Transaction[], client: SupabaseClient) {
+  await saveWebhookUrl(client, WEBHOOK)
+  const store = { transactions, add: async () => {} } as unknown as ReturnType<typeof useTransactions>
+  render(<PartnerTab store={store} supabase={client} onEdit={() => {}} />)
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('button', { name: 'これまでの履歴をまとめて送る' }))
+  // 前回どこまで送ったかを読み終えるまで、送信ボタンは出さない
+  await waitFor(() => expect(screen.getByRole('button', { name: /Discord に送る/ })).toBeTruthy())
+  return user
+}
+
+describe('履歴のまとめ送信', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('Webhook 未設定のときは導線を出さない(送り先が無いのに押させない)', () => {
+    const { client } = backlogSupabase()
+    setup(30000, client)
+    expect(screen.queryByRole('button', { name: 'これまでの履歴をまとめて送る' })).toBeNull()
+  })
+
+  it('押す前に、件数・通数と1通目の実物を見せる', async () => {
+    const { client } = backlogSupabase()
+    await openBacklog(
+      [deposit(30000), expense('e1', '2026-08-02', 3000, 1500, '一緒の夕飯')],
+      client
+    )
+
+    expect(screen.getByRole('button', { name: 'Discord に送る(2件・1通)' })).toBeTruthy()
+    // 実物(1通目)がそのまま出る
+    expect(document.body.textContent).toContain('📖 これまでの預かり金の記録')
+    expect(document.body.textContent).toContain('一緒の夕飯 −¥1,500 → 残り ¥28,500')
+    expect(document.body.textContent).toContain('いまの残高: ¥28,500(預かり中)')
+  })
+
+  it('利用者個人の支出は、送る中身に1件も入らない', async () => {
+    const { client } = backlogSupabase()
+    await openBacklog(
+      [
+        deposit(30000),
+        expense('own', '2026-08-01', 500, 0, '自分だけのコーヒー'),
+        expense('e1', '2026-08-02', 3000, 1500, '一緒の夕飯'),
+      ],
+      client
+    )
+    expect(screen.getByRole('button', { name: 'Discord に送る(2件・1通)' })).toBeTruthy()
+    expect(document.body.textContent).not.toContain('自分だけのコーヒー')
+  })
+
+  it('送ると Discord に届き、何件を何通で送ったか言い切る', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })))
+    const { client, upserts } = backlogSupabase()
+    const user = await openBacklog([deposit(30000)], client)
+
+    await user.click(screen.getByRole('button', { name: /Discord に送る/ }))
+    await waitFor(() => expect(screen.getByText(/1件を1通に分けて送りました/)).toBeTruthy())
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1)
+    // どこまで送ったかがサーバーに残る(別の端末で送り直させないため)
+    await waitFor(() => expect(upserts).toHaveLength(1))
+    expect(upserts[0]).toMatchObject({ last_tx_id: 'd30000', sent_messages: 1 })
+  })
+
+  it('送り終えると「前回の続き」は空になり、二度押しできない', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })))
+    const { client } = backlogSupabase()
+    const user = await openBacklog([deposit(30000)], client)
+
+    await user.click(screen.getByRole('button', { name: /Discord に送る/ }))
+    await waitFor(() => expect(screen.getByText(/1件を1通に分けて送りました/)).toBeTruthy())
+
+    // 送り先を持たない0件の送信になり、ボタンそのものが押せない
+    const button = screen.getByRole('button', { name: 'Discord に送る(0件・0通)' }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    expect(screen.getByText(/すべて送信済みです/)).toBeTruthy()
+    // 二度目に開いても1通しか出ていない
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1)
+  })
+
+  it('前回の続きがあるときは、その分だけを送る', async () => {
+    // 8月1日の預かりまで送信済み。続きは 8月2日の1件だけ
+    const { client } = backlogSupabase({
+      last_date: '2026-08-01',
+      last_created_at: '2026-08-01T01:00:00.000Z',
+      last_tx_id: 'd30000',
+      sent_entries: 1,
+      sent_messages: 1,
+      last_sent_at: '2026-08-01T10:00:00.000Z',
+    })
+    await openBacklog(
+      [deposit(30000), expense('e1', '2026-08-02', 3000, 1500, '一緒の夕飯')],
+      client
+    )
+    expect(screen.getByRole('button', { name: 'Discord に送る(1件・1通)' })).toBeTruthy()
+    expect(document.body.textContent).toContain('一緒の夕飯')
+    expect(document.body.textContent).toContain('これまでに1件・1通')
+  })
+
+  it('「全期間(送り直す)」を選べば、送信済みでももう一度送れる', async () => {
+    const { client } = backlogSupabase({
+      last_date: '2026-08-02',
+      last_created_at: '2026-08-02T02:00:00.000Z',
+      last_tx_id: 'e1',
+      sent_entries: 2,
+      sent_messages: 1,
+      last_sent_at: '2026-08-02T10:00:00.000Z',
+    })
+    const user = await openBacklog(
+      [deposit(30000), expense('e1', '2026-08-02', 3000, 1500, '一緒の夕飯')],
+      client
+    )
+    expect(screen.getByRole('button', { name: 'Discord に送る(0件・0通)' })).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: '全期間(送り直す)' }))
+    expect(screen.getByRole('button', { name: 'Discord に送る(2件・1通)' })).toBeTruthy()
+  })
+
+  it('失敗したときは、どこまで届いたかと URL の取り直し方まで出す', async () => {
+    vi.stubGlobal('fetch', async () => new Response('', { status: 404 }))
+    const { client } = backlogSupabase()
+    const user = await openBacklog([deposit(30000)], client)
+
+    await user.click(screen.getByRole('button', { name: /Discord に送る/ }))
+    await waitFor(() => expect(screen.getByText(/まだ何も届いていません/)).toBeTruthy())
+    // 原因ごとの対処 (discordFailureMessage) をそのまま出す
+    expect(screen.getByText(/Webhook URL が古い/)).toBeTruthy()
+  })
+
+  it('件数が多くても1件1通にはしない(まとめて数通)', async () => {
+    // 100件。1件1通なら彼女の通知欄が100通で埋まる
+    const rows = [deposit(300000)]
+    for (let i = 0; i < 100; i++) {
+      const day = String((i % 28) + 1).padStart(2, '0')
+      rows.push(expense(`e${i}`, `2026-06-${day}`, 3000, 1500, `会計${i}`))
+    }
+    const { client } = backlogSupabase()
+    await openBacklog(rows, client)
+
+    const label = (screen.getByRole('button', { name: /Discord に送る/ }).textContent ?? '')
+    expect(label).toContain('101件')
+    const messages = Number(/・(\d+)通/.exec(label)?.[1])
+    expect(messages).toBeGreaterThan(1)
+    expect(messages).toBeLessThan(10)
   })
 })
 
