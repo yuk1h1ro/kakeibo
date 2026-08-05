@@ -650,7 +650,10 @@ begin
     'transaction_templates',
     'partner_share_links',
     'partner_share_comments',
-    'partner_summary_sends'
+    'partner_summary_sends',
+    -- Webhook URL の同期先 (このファイル末尾の節)。ここではまだ作られて
+    -- いないので初回は素通りするが、末尾の節が自前で revoke している
+    'discord_settings'
   ]
   loop
     if to_regclass('public.' || t) is not null then
@@ -1310,3 +1313,116 @@ comment on column public.transactions.split_group is
 create index if not exists idx_transactions_split_group
   on public.transactions (split_group)
   where split_group is not null;
+
+-- ============================================================
+-- Discord の Webhook URL を端末間で同期する
+--
+-- 既存プロジェクトへの追加は supabase/migration-discord-webhook.sql を実行する。
+-- 内容は同じもので、どちらも複数回実行して安全。
+--
+-- ---- なぜテーブルを増やしてまで同期するのか ----
+-- Webhook URL は端末の localStorage にしかありませんでした。そのため
+-- 「PCでは設定したがスマホではしていない」状態が起こり、**いちばん入力に
+-- 使っているスマホからの記録だけが通知されない**という事故が実際に起きました。
+-- 通知は彼女に残高の増減を知らせるための機能なので、ここが抜けると
+-- 機能そのものの存在理由が失われます。
+--
+-- ---- 秘密の扱いについて ----
+-- Webhook URL は「知っていれば誰でもそのチャンネルに投稿できる」トークンです。
+-- ただし RLS で本人の行だけに絞ったうえで anon からテーブル権限を剥がして
+-- 置く分には、端末の localStorage に置くより危険が増えません。
+-- むしろ端末を失くしたときは、ログアウトの後始末で端末側だけを消せます。
+-- Gemini の APIキーは同期しません(レシートを撮るのはスマホだけで、
+-- 鍵を移動させない方が安全なため)。
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- discord_settings テーブル
+-- 1ユーザー1行。user_id を主キーにしているので、行が増えることはありません。
+--
+-- webhook_url を null 許容にして「解除」を **行の削除ではなく null の保存**で
+-- 表しているのは、解除を他の端末へ確実に伝えるためです。行ごと消すと、
+-- 古い URL をキャッシュしたままの端末が次に開いたときに「サーバーには何も無い
+-- = まだ誰も設定していない」と読み、キャッシュを引き上げ直して
+-- **解除したはずの通知が復活**してしまいます。
+-- ------------------------------------------------------------
+create table if not exists public.discord_settings (
+  -- 行の所有者 兼 主キー。未指定なら実行ユーザーの ID が自動で入る。
+  -- ユーザー削除時は一緒に削除される (on delete cascade)
+  user_id uuid primary key default auth.uid() references auth.users (id) on delete cascade,
+
+  -- Discord の Webhook URL。null = 未設定、または解除済み
+  webhook_url text,
+
+  -- 最後に設定・解除した日時
+  updated_at timestamptz not null default now(),
+
+  -- レコード作成日時
+  created_at timestamptz not null default now()
+);
+
+-- 形式のおかしな値を置かせない。アプリ側 (discordWebhook.ts の
+-- isValidWebhookUrl) と同じ条件を、画面を通さない書き込みにも効かせる。
+alter table public.discord_settings
+  drop constraint if exists discord_settings_webhook_url_check;
+
+alter table public.discord_settings
+  add constraint discord_settings_webhook_url_check
+  check (
+    webhook_url is null
+    or (
+      char_length(webhook_url) between 34 and 300
+      and (
+        webhook_url like 'https://discord.com/api/webhooks/%'
+        or webhook_url like 'https://discordapp.com/api/webhooks/%'
+      )
+    )
+  );
+
+comment on table public.discord_settings is
+  '彼女への Discord 通知の送り先。1ユーザー1行。'
+  '端末間で同期するために置いている(端末ごとの localStorage はキャッシュ)。';
+
+comment on column public.discord_settings.webhook_url is
+  'Discord の Webhook URL。null = 未設定または解除済み。'
+  '解除を行の削除ではなく null で表すのは、他の端末に解除を伝えるため。';
+
+-- Row Level Security (transactions と同じく本人の行のみ読み書き可)
+alter table public.discord_settings enable row level security;
+
+drop policy if exists "select_own_discord_settings" on public.discord_settings;
+create policy "select_own_discord_settings"
+  on public.discord_settings
+  for select
+  using (auth.uid() = user_id);
+
+drop policy if exists "insert_own_discord_settings" on public.discord_settings;
+create policy "insert_own_discord_settings"
+  on public.discord_settings
+  for insert
+  with check (auth.uid() = user_id);
+
+-- 保存も解除も upsert (insert ... on conflict do update) で行うため、
+-- update 側のポリシーが無いと解除だけが静かに失敗します。
+drop policy if exists "update_own_discord_settings" on public.discord_settings;
+create policy "update_own_discord_settings"
+  on public.discord_settings
+  for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "delete_own_discord_settings" on public.discord_settings;
+create policy "delete_own_discord_settings"
+  on public.discord_settings
+  for delete
+  using (auth.uid() = user_id);
+
+-- anon からテーブル権限を剥がす(上の共有機能の節と同じ理由)。
+-- ここを忘れると、共有ページから Webhook URL を読める余地が残ります。
+do $$
+begin
+  if to_regclass('public.discord_settings') is not null then
+    revoke all on table public.discord_settings from anon;
+  end if;
+end
+$$;

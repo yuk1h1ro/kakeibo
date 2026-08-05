@@ -4,6 +4,7 @@ import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import TransactionForm from './TransactionForm'
 import { setKeypadPreference } from '../lib/keypadSettings'
+import { endTripMode, startTripMode } from '../lib/tripMode'
 import type { TransactionInput } from '../hooks/useTransactions'
 import type { Transaction } from '../lib/types'
 
@@ -24,7 +25,11 @@ import type { Transaction } from '../lib/types'
 // 他のテストの実行環境は node のまま変わらない。
 // ============================================================
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  // 旅行モードは端末に残る状態なので、テストをまたいで持ち越さない
+  endTripMode()
+})
 
 type User = ReturnType<typeof userEvent.setup>
 
@@ -170,6 +175,146 @@ describe('入力フォームが保存する内容', () => {
     expect(submitted).toHaveLength(2)
     expect(submitted[1]).toMatchObject({ amount: 500, partner_paid: 0, partner_amount: 0 })
     expect(submitted[1].tags).toEqual([])
+  })
+})
+
+// ============================================================
+// 旅行モード。
+//
+// 守りたいのは「保存される内容」— 画面の見た目より、**tags に何が入るか**。
+//   ・オンなら入る / オフなら入らない(オフの挙動が1文字も変わらないこと)
+//   ・自動と手動の両方が付く
+//   ・その1件だけ外せて、外した判断は次に持ち越さない
+//   ・編集シートでは効かない(開いただけで記録の中身が変わらない)
+// ============================================================
+describe('旅行モードの自動タグ', () => {
+  /** カテゴリと金額だけ打って保存する(いちばん短い経路) */
+  async function saveSimple(user: User, amount = '1000') {
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', amount)
+    await user.click(saveButton())
+  }
+
+  it('オンのとき、保存した記録にそのタグが入る', async () => {
+    startTripMode('旅行')
+    const { user, submitted } = setup()
+    await saveSimple(user)
+    expect(submitted[0].tags).toEqual(['旅行'])
+  })
+
+  it('オフのときは何も入らない(モードを使わない人の保存内容は変わらない)', async () => {
+    const { user, submitted } = setup()
+    await saveSimple(user)
+    expect(submitted[0].tags).toEqual([])
+    // オフのときは画面にも何も出さない = 入力の手数が増えない
+    expect(screen.queryByRole('button', { name: 'この1件だけ外す' })).toBeNull()
+  })
+
+  it('手で付けたタグと共存する(自動+手動の両方が付く)', async () => {
+    startTripMode('旅行')
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '1000')
+    await openOptions(user)
+    await user.type(field('タグ'), 'おみやげ')
+    await user.click(saveButton())
+    expect(submitted[0].tags).toEqual(['旅行', 'おみやげ'])
+  })
+
+  it('その1件だけ外せる(旅行中のコンビニで買う自分用のもの)', async () => {
+    startTripMode('旅行')
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '300')
+    await user.click(button('この1件だけ外す'))
+    expect(screen.getByText(/を付けません/)).toBeTruthy()
+    await user.click(saveButton())
+    expect(submitted[0].tags).toEqual([])
+  })
+
+  it('外したあと、押し直せばまた付く', async () => {
+    startTripMode('旅行')
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '300')
+    await user.click(button('この1件だけ外す'))
+    await user.click(button('やっぱり付ける'))
+    await user.click(saveButton())
+    expect(submitted[0].tags).toEqual(['旅行'])
+  })
+
+  it('「この1件だけ外す」は次の記録に持ち越さない(外したまま旅行の記録が抜けないように)', async () => {
+    startTripMode('旅行')
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '300')
+    await user.click(button('この1件だけ外す'))
+    await user.click(saveButton())
+
+    await typeAmount(user, '支払い金額(円)', '2000')
+    await user.click(saveButton())
+
+    expect(submitted[0].tags).toEqual([])
+    expect(submitted[1].tags).toEqual(['旅行'])
+  })
+
+  it('編集シートでは自動で付かない(開いて更新しただけで記録が変質しないこと)', async () => {
+    startTripMode('旅行')
+    const submitted: TransactionInput[] = []
+    const user = userEvent.setup()
+    render(
+      <TransactionForm
+        initial={{
+          id: 't1',
+          date: '2026-08-03',
+          type: 'expense',
+          amount: 2000,
+          category: 'food',
+          memo: '',
+          store: '',
+          partner_amount: 0,
+          created_at: '2026-08-03T01:00:00.000Z',
+        }}
+        submitLabel="更新する"
+        onSubmit={async (input) => {
+          submitted.push(input)
+        }}
+      />
+    )
+    await user.click(button('更新する'))
+    expect(submitted[0].tags).toEqual([])
+  })
+
+  it('分割して保存しても、内訳のすべてにタグが乗る', async () => {
+    // 旅行中の1会計を分けたときだけタグが落ちると、その回の合計が合わなくなる
+    startTripMode('旅行')
+    const { user, splitSubmitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '3000')
+    await openOptions(user)
+    await user.click(button('カテゴリを分けて記録する'))
+    await user.selectOptions(screen.getByLabelText('内訳 2 のカテゴリ'), 'daily')
+    await user.click(saveButton())
+
+    expect(splitSubmitted[0].every((i) => i.tags?.includes('旅行'))).toBe(true)
+  })
+
+  it('預かり・返金には効かない(旅行かどうかは支出の性質のため)', async () => {
+    startTripMode('旅行')
+    const submitted: TransactionInput[] = []
+    const user = userEvent.setup()
+    render(
+      <TransactionForm
+        fixedType="partner_deposit"
+        submitLabel="記録する"
+        onSubmit={async (input) => {
+          submitted.push(input)
+        }}
+      />
+    )
+    await typeAmount(user, '預かり金額(円)', '30000')
+    await user.click(saveButton())
+    expect(submitted[0].tags).toEqual([])
   })
 })
 

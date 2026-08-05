@@ -289,7 +289,11 @@ begin
     'transaction_templates',
     'partner_share_links',
     'partner_share_comments',
-    'partner_summary_sends'
+    'partner_summary_sends',
+    -- Webhook URL の同期先 (migration-discord-webhook.sql)。
+    -- あちらでも同じ revoke をしているが、実行の順番はどちらが先でも
+    -- よいので、両方に名前を並べておく
+    'discord_settings'
   ]
   loop
     if to_regclass('public.' || t) is not null then

@@ -1987,3 +1987,211 @@ body.keypad-open .modal-sheet {
     animation: none;
   }
 }
+
+/* ============================================================
+   旅行モード (tripMode.ts / TripModeCard.tsx)
+
+   色はトークンだけを使う(ダークモードで取り残されないように)。
+   オンのときはアクセント、長引いたときだけ警告色に切り替える。
+   触れる要素は 44px 以上・16px 以上 — iPhone が主な利用環境のため。
+   ============================================================ */
+
+/* ---------- オフのときの入り口(入力タブの最上段の1行) ---------- */
+
+.trip-start {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 14px;
+  border: 1px dashed var(--baseline);
+  border-radius: var(--radius-btn);
+  background: var(--surface);
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.trip-emoji {
+  flex-shrink: 0;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.trip-start-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* 幅の狭い端末でも、長い説明でカードを押し広げない */
+  min-width: 0;
+}
+
+.trip-start-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.trip-start-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ---------- オンのときの帯 ---------- */
+
+.trip-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-card);
+  background: var(--accent-soft);
+  box-shadow: var(--shadow-1);
+}
+
+/* 長引いたときは色ごと変える。文字だけを足しても、毎日見ていると素通りする */
+.trip-banner.is-overdue {
+  border-color: var(--expense-line);
+  background: var(--warning-bg);
+}
+
+.trip-banner-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.trip-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.trip-banner-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* 「#旅行 ・ 3日目」。長いタグでも折り返して、横スクロールを出さない */
+.trip-banner-badge {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.trip-banner.is-overdue .trip-banner-badge {
+  color: var(--expense);
+}
+
+/* 解除は「いつでもここで終われる」ことが分かる大きさで置く。
+   押し間違えても記録は1件も変わらない(以後のタグが付かなくなるだけ)ので、
+   確認ダイアログは挟まない — 挟むと、切るのが億劫になって切り忘れる */
+.trip-end {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: var(--radius-btn);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.trip-banner.is-overdue .trip-end {
+  background: var(--expense);
+  color: #ffffff;
+}
+
+.trip-banner-note {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.trip-reminder {
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ---------- 開始シートのタグ候補 ---------- */
+
+.trip-tag-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.trip-tag-option {
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--baseline);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 入力フォームの中の1行(保存ボタンの直前) ---------- */
+
+.trip-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-btn);
+  background: var(--accent-soft);
+}
+
+/* この1件だけ外している状態。付くときと同じ強さで出すと、外したことに
+   気づかないまま次の記録へ進んでしまうので、色を落として区別する */
+.trip-tag-row.is-off {
+  border-color: var(--baseline);
+  border-style: dashed;
+  background: transparent;
+}
+
+/* 幅が足りないときは、文を削らずにボタンを次の行へ落とす
+   (375px では「何が付くか」の一文が1行に収まり、下にボタンが並ぶ) */
+.trip-tag-row-text {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.trip-tag-row.is-off .trip-tag-row-text {
+  color: var(--text-muted);
+}
+
+.trip-tag-row-btn {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid var(--baseline);
+  border-radius: var(--radius-btn);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 16px;
+  cursor: pointer;
+}
