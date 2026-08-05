@@ -18,7 +18,7 @@
 |---|---|---|---|
 | `src/lib` の純関数 | — | **685件・42ファイル** | 厚い。日付計算・集計・絞り込み・ジェスチャ判定・残高計算はほぼ完全に守られている |
 | `src/lib` のストア（購読・localStorage） | 14モジュール | 直列化の純関数のみ | `subscribe` / `notify` / `useSyncExternalStore` は未検証 |
-| `src/components` | 23ファイル・約5,500行 | **ゼロ** | React Testing Library すら入っていない |
+| `src/components` | 23ファイル・約5,500行 | **177件・14ファイル** | 段階1〜3まで対応済み（下記）。まだ入っていないのは資産の入力シート・レシートの連続撮影・繰り返し入力の設定 |
 | CSS | 約5,000行 | **ゼロ** | 目視のみ |
 | Supabase 連携（init / CRUD） | — | 一部（モッククライアント） | `storeCategories` `recurringRules` `partnerComments` `shareLinks` `transactionTemplates` にあり |
 
@@ -34,20 +34,28 @@
 いずれも**純関数側は正しく、呼び出し方だけが間違っていた**ものです。685件のテストは1件も落ちませんでした。
 この層に検出手段が無い限り、同種の不具合はまた入ります。
 
-### 何から始めるか
+### どこまで入れたか（2026-08-05 追記）
 
-一度に網羅しようとせず、**壊れると痛い順**に入れるのが現実的です。
+**この課題は3段階とも着手済みです。** 一度に網羅せず、壊れると痛い順に入れました。
 
-1. **`renderToStaticMarkup` による描画テスト**（依存追加なしで今すぐ書ける）
-   `QuarantineSheet` と `ShareContent` では既にこの方法でテストが書かれています（`src/lib/quarantine.test.ts` / `shareCharges.test.ts` 付近）。同じやり方で `PartnerTab`・`HistoryTxRow`・`SharePage` の表示崩れを拾えます。
-2. **payload を組み立てている箇所の単体テスト**
-   `MainScreen.setSatisfaction` / `InputTab` の一括変更 / `RowActionMenu` の複製。「`transactionToInput` から作っているか」を検査するだけでも、上記4件のうち3件は防げました。
-3. **React Testing Library の導入**（ここで初めて依存を足す）
-   操作を伴うもの（スワイプ・長押し・複数選択・分割の入力）はここまで来ないと書けません。
+1. **`renderToStaticMarkup` による描画テスト**（依存追加なし）
+   `SharePage`（共有ページの符号と残高の整合）・`HistoryTxRow`・`QuarantineSheet`・`PartnerTab`・`InputTab`・`ReportTab`（月合計が実質支出であること）・`AssetsTab`（純資産の符号と、負債では増減の良し悪しが逆になること）・`SatisfactionSortSheet`・`report/` のタグ系カード。
+2. **payload を組み立てている箇所**
+   `src/components/writeBackPayload.test.ts`。`MainScreen` / `InputTab` は Supabase と起動処理を抱えていて画面から動かせないので、ソースを読んで「組み立て関数（`withSatisfaction` / `withCategory` / `duplicateInput` / `restoreInput`）を通しているか」「`partner_paid:` などを手書きしていないか」を見張っています。土台の `transactionToInput` が写す列の一覧も、そこで固定しています。
+3. **React Testing Library**（`@testing-library/react` / `user-event` / `jsdom` を devDependency に追加）
+   `TransactionForm` / `HistoryTab` / `PartnerTab` の `*.interaction.test.tsx`。**環境はファイル先頭の `// @vitest-environment jsdom` でファイル単位に切り替えています**（グローバルに変えると既存の描画テストとストアの挙動に影響が出るため）。
+
+上の4件の不具合は、すべて**わざと入れ直して落ちることを確かめてあります**（「店のチップを押すとテンキーが閉じる」も同様）。
+
+### まだ手が届いていないところ
+
+- **ストア（`useSyncExternalStore` 系）** — 購読・通知・localStorage の往復は未検証のまま
+- **CSS** — 見た目の回帰を検出する手段は無いまま（`.selected` / `.is-on` / `.on` の命名統一を保留している理由もこれ）
+- **資産の入力シート・レシートの連続撮影・繰り返し入力の設定** — 画面のテストが無い
 
 ### 判断の目安
 
-`src/lib` の純関数は**大胆に触ってよい**状態です。ストア・コンポーネント・CSS は、**1つずつ、目視確認とセットで**進めてください。
+`src/lib` の純関数は**大胆に触ってよい**状態です。上に挙げたテストのある画面も、**落ちたテストを読めば何を壊したか分かる**状態になりました。ストア・CSS と、テストの無い画面は、**1つずつ、目視確認とセットで**進めてください。
 
 ---
 
