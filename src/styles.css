@@ -499,6 +499,53 @@ textarea:focus {
   color: var(--accent);
 }
 
+/* ---------- ％と税込にする(機能043 の続き) ----------
+   ＋ − × ＝ の段には足さない。1段に7つ並べると 320px 幅で1キーが
+   40px を切って押し間違えるので、割合まわりだけを下の段に分けている。
+   段を分けても金額欄のすぐ下にあるので、「打った直後に1タップ」は変わらない。 */
+
+.percent-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 税込だけ(電卓の無い金額欄)は2列 */
+.percent-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* ％キーは1文字なので狭く、税込は文字数があるので広く取る。
+   320px 幅でも ％ が48px、税込が96px を下回らない */
+.percent-row.has-percent {
+  grid-template-columns: minmax(48px, 0.7fr) minmax(0, 1.65fr) minmax(0, 1.65fr);
+}
+
+/* 「税込 +10%」は7文字。16px(操作要素の下限)を保ったまま1行に収める */
+.tax-key {
+  font-size: 16px;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+/* 押しても何も起きない状態(空欄・0円・演算子が無いときの ％)は、押す前に見せる */
+.calc-key:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 押した結果の説明(例: 1,000 → 税込 1,100(10%))。
+   高さを常に確保して、押すたびに下の項目が跳ねないようにする */
+.tax-notice {
+  min-height: 16px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- 日付クイック選択 ---------- */
 
 /* 均等3分割グリッド: 320px幅でもチップがあふれない */
