@@ -104,6 +104,14 @@ export function withTag(txs: readonly Transaction[], tag: string): Transaction[]
   return txs.filter((t) => tagsOf(t).includes(tag))
 }
 
+/** 渡したタグが**すべて**付いた取引だけを取り出す。(純粋関数。AND 条件) */
+export function withTags(txs: readonly Transaction[], tags: readonly string[]): Transaction[] {
+  return txs.filter((t) => {
+    const own = tagsOf(t)
+    return tags.every((tag) => own.includes(tag))
+  })
+}
+
 /** タグが1つも付いていない取引だけを取り出す。(純粋関数) */
 export function withoutTags(txs: readonly Transaction[]): Transaction[] {
   return txs.filter((t) => tagsOf(t).length === 0)
@@ -232,7 +240,21 @@ export function tagEvents(
   labelOf: (id: string | null) => string,
   gapDays: number = EVENT_GAP_DAYS
 ): TagEvent[] {
-  const tagged = withTag(txs, tag)
+  return eventsOf(withTag(txs, tag), tag, labelOf, gapDays)
+}
+
+/**
+ * すでに絞り込んだ取引を「回」ごとに束ねる。(純粋関数)
+ * tagEvents(1つのタグ)と、共起タグで2つに絞った場合(selectionEvents)で
+ * **まったく同じ切り方**を使うために切り出してある。切り方が2つあると、
+ * 「#旅行」で見た回と「#旅行 × #2026和歌山」で見た回の境目がずれる。
+ */
+function eventsOf(
+  tagged: readonly Transaction[],
+  tag: string,
+  labelOf: (id: string | null) => string,
+  gapDays: number
+): TagEvent[] {
   // 日付だけで束ねる。金額が0の行(彼女が全額出した分)も「その日そこにいた」印
   // として境目の判断には使う — 抜くと1回の旅行が割れてしまうため
   const dates = [...new Set(tagged.map((t) => t.date))].sort()
@@ -273,6 +295,237 @@ export function tagSpan(
   labelOf: (id: string | null) => string
 ): TagEvent | null {
   return tagEvents(txs, tag, labelOf, Number.POSITIVE_INFINITY)[0] ?? null
+}
+
+// ============================================================
+// 共起タグのドリルダウン(「#旅行」の中の「#2026和歌山」)
+//
+// ---- なぜ階層タグ(親子関係)にしなかったか ----
+// 「旅行タグの下に 2026和歌山 をぶら下げたい」という要望に対して、
+// tags 列に親子を持たせる案は **採らなかった**。理由は3つ:
+//
+//   1. **入力が増える。** 入力は「カテゴリ → 金額」の最短5タップまで詰めてある。
+//      階層を宣言する形にすると、記録のたびに「親を選ぶ → 子を選ぶ」が挟まる。
+//      いまの形なら、旅行モードを1回押すときに行き先を1度打つだけで済む。
+//   2. **データの形が変わる。** タグは transactions.tags(text[])の文字列配列で、
+//      親子を持たせるには別テーブルか命名規則(「旅行/2026和歌山」など)が要る。
+//      するとタグを読むところ **すべて**(履歴の絞り込み・検索・CSV・共有・
+//      レポート)に階層の概念が漏れる。マイグレーション未実行の環境が現に
+//      想定されている以上、tags 列の形を変える判断は割に合わない。
+//   3. **2階層で止まる保証がない。** 次は「1日目」「往路」が欲しくなる。
+//      階層は一度作ると深さの上限を決める根拠が無くなる。
+//
+// 代わりに **「いま選んでいるタグと一緒に付いているタグ」** を出す。
+// `旅行` と `2026和歌山` をフラットに2つ付けるだけで、レポートが勝手に
+// 内側を見せる。宣言が要らないので `デート × 2026誕生日`、`出張 × 大阪` にも
+// 同じ仕組みがそのまま効く。掘れるのは **1段だけ**(親 → 内側)で止める —
+// 何段でも掘れるようにすると、上の 3. と同じ問題を画面側で作ることになる。
+// ============================================================
+
+/**
+ * トップのタグ一覧に出さない「内側のタグ」を決める。(純粋関数)
+ *
+ * 判定はただ1つ: **そのタグが付いた記録が、1件残らず「そのタグより広いタグ」と
+ * 一緒に付いているか。** いつも誰かの内側にしか現れないタグは、単独では
+ * 意味を持たない行き先タグとみなして、トップの一覧から外す。
+ *
+ * 「広い」は次の順で決める:
+ *   1. **特別タグ(reportTagSettings の 旅行・デート・出張…)は決して内側にしない。**
+ *      同じ数だけ付いていても、どちらが親かを決められる唯一の手がかりがこれ。
+ *      1回目の旅行では `旅行` と `2026和歌山` が同じ35件になり、件数だけでは
+ *      親子が決まらない ——「特別な支出」として利用者が自分で選んでいるタグを
+ *      親とみなすのがいちばん素直で、**新しい宣言を1つも増やさない**。
+ *   2. それ以外は **件数が多い方が親**(旅行は何度も、行き先は1回)。
+ *      同数のときはどちらも隠さない(strictly greater で比べている) —
+ *      僅差で一覧からタグが出たり消えたりする方が、二重計上が少し見えるより困る。
+ *
+ * 数えるのは**全期間**で、選んでいる月ではない。タグが親か子かは記録全体の
+ * 性質であって、見ている月によって入れ替わってよいものではないため
+ * (月を送るたびに一覧からタグが消えると、壊れているように見える)。
+ *
+ * 1件でも単独で出てくるタグ(= 旅行タグを付け忘れた回があるとき)は
+ * 隠さない。どの親からも辿れないタグを隠すと、その金額が一覧から消えてしまう。
+ */
+export function innerTagSet(
+  txs: readonly Transaction[],
+  specialTags: readonly string[]
+): Set<string> {
+  const counts = new Map<string, number>()
+  for (const t of txs) {
+    for (const tag of new Set(tagsOf(t))) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+  }
+  const special = new Set(specialTags)
+  // 「全部の記録で親がいた」ものだけを残したいので、候補から引いていく
+  const inner = new Set([...counts.keys()].filter((tag) => !special.has(tag)))
+  for (const t of txs) {
+    const tags = [...new Set(tagsOf(t))]
+    for (const tag of tags) {
+      if (!inner.has(tag)) continue
+      const own = counts.get(tag) ?? 0
+      const hasParent = tags.some(
+        (other) => other !== tag && (special.has(other) || (counts.get(other) ?? 0) > own)
+      )
+      if (!hasParent) inner.delete(tag)
+    }
+  }
+  return inner
+}
+
+export interface TagOutline {
+  /** トップに出すタグ(「タグなし」を含む・金額順) */
+  top: TagRankItem[]
+  /** トップには出さず、親を選んだときだけ出すタグ(金額順) */
+  inner: TagRankItem[]
+  /** 期間の総支出。既存の totalOwn とまったく同じ数字 */
+  total: number
+  /** top を足した数。複数タグの分だけ total より大きくなる */
+  topTotal: number
+  /** top のあいだで二重に数えられた金額。0 なら重なりなし */
+  overlap: number
+  /** top のタグが2つ以上付いている支出の件数 */
+  multiTopCount: number
+}
+
+/**
+ * タグ一覧を「トップに出すもの / 内側にしまうもの」に分ける。(純粋関数)
+ *
+ * 行き先タグをトップに並べないのは、**二重計上が目に見えて増えるから**。
+ * タグ別集計は1件に複数タグが付いていれば両方に満額で数える(按分すると
+ * 「旅行でいくら使ったか」が答えられなくなる)ので、`旅行` と `2026和歌山` を
+ * 並べると同じ金額が必ず2度出る。既存の注記(「合計が総額より多い理由」)は
+ * そのために書いてあるが、行き先タグが増えるたびに重なりが膨らむと、
+ * 注記そのものが「いつも出ている読み飛ばす文」になってしまう。
+ *
+ * 内側のタグは消えるのではなく、親を選んだときに出る(coTagBreakdown)。
+ */
+export function tagOutline(
+  txs: readonly Transaction[],
+  r: DateRange,
+  specialTags: readonly string[]
+): TagOutline {
+  const breakdown = tagBreakdown(txs, r)
+  const inner = innerTagSet(txs, specialTags)
+  const top = breakdown.items.filter((i) => i.tag === null || !inner.has(i.tag))
+  const topTotal = top.reduce((s, i) => s + i.total, 0)
+  const multiTopCount = ownExpenses(txs, r).filter(
+    (t) => new Set(tagsOf(t).filter((tag) => !inner.has(tag))).size >= 2
+  ).length
+
+  return {
+    top,
+    inner: breakdown.items.filter((i) => i.tag !== null && inner.has(i.tag)),
+    total: breakdown.total,
+    topTotal,
+    // 内側を外した分だけ、既存の overlap より必ず小さくなる(下限は 0)
+    overlap: Math.max(topTotal - breakdown.total, 0),
+    multiTopCount,
+  }
+}
+
+export interface CoTagBreakdown {
+  /** 選んでいるタグ */
+  parent: string
+  /** 一緒に付いているタグ(多い順)。親そのものは含まない */
+  items: TagRankItem[]
+  /** 親タグの期間内合計(tagBreakdown の親の行と同じ数字) */
+  total: number
+  /** 親タグしか付いていない支出の合計 */
+  soloTotal: number
+  soloCount: number
+}
+
+/**
+ * そのタグと**一緒に付いている**タグの集計。(純粋関数)
+ *
+ * 期間を渡すのは、トップの一覧と同じ期間で数えるため。ただし押した先の
+ * 「回ごと」は期間を無視する(旅行は月をまたぐ)ので、そこは selectionEvents。
+ */
+export function coTagBreakdown(
+  txs: readonly Transaction[],
+  r: DateRange,
+  parent: string
+): CoTagBreakdown {
+  const tagged = withTag(txs, parent)
+  const solo = tagged.filter((t) => tagsOf(t).length === 1)
+  return {
+    parent,
+    items: rankByKeys(
+      tagged,
+      r,
+      (t) => tagsOf(t).filter((tag) => tag !== parent),
+      (key) => key
+    ).map(toTagItem),
+    total: totalOwn(tagged, r),
+    soloTotal: totalOwn(solo, r),
+    soloCount: ownExpenses(solo, r).length,
+  }
+}
+
+/**
+ * レポートで選んでいるタグ。**1段だけ**掘れる。
+ * tag = null は「タグなし」を選んでいる状態(既存の挙動)。
+ */
+export interface TagSelection {
+  tag: string | null
+  /** 一緒に付いているタグのうち、さらに選んだもの。null = 掘っていない */
+  co: string | null
+}
+
+/** 選択に含まれる実タグ(親 → 内側の順)。(純粋関数) */
+export function selectionTags(sel: TagSelection): string[] {
+  const out: string[] = []
+  if (sel.tag !== null) out.push(sel.tag)
+  if (sel.co !== null && sel.co !== sel.tag) out.push(sel.co)
+  return out
+}
+
+/** 画面と Discord に出す呼び名。(純粋関数) */
+export function selectionLabel(sel: TagSelection): string {
+  const tags = selectionTags(sel)
+  if (tags.length === 0) return NO_TAG_LABEL
+  return tags.map((t) => `#${t}`).join(' › ')
+}
+
+/** 選択に当てはまる取引。(純粋関数。2つ選んでいれば AND) */
+export function selectionTxs(txs: readonly Transaction[], sel: TagSelection): Transaction[] {
+  if (sel.tag === null) return withoutTags(txs)
+  return withTags(txs, selectionTags(sel))
+}
+
+/** 選択の中のカテゴリ内訳。(純粋関数) */
+export function selectionCategoryBreakdown(
+  txs: readonly Transaction[],
+  r: DateRange,
+  sel: TagSelection,
+  labelOf: (id: string | null) => string
+): RankItem[] {
+  return rankByCategory(selectionTxs(txs, sel), r, labelOf)
+}
+
+/**
+ * 選択の「回ごと」。(純粋関数)
+ *
+ * 行き先タグを選んでいるときも、**切り方は1つのタグのときとまったく同じ**
+ * (記録が EVENT_GAP_DAYS より長く空いたら別の回)。行き先タグを付けていない
+ * 過去の旅行は、この切り方でしか個別に見られないので、両方を残してある。
+ */
+export function selectionEvents(
+  txs: readonly Transaction[],
+  sel: TagSelection,
+  labelOf: (id: string | null) => string,
+  gapDays: number = EVENT_GAP_DAYS
+): TagEvent[] {
+  if (sel.tag === null) return []
+  return eventsOf(selectionTxs(txs, sel), sel.co ?? sel.tag, labelOf, gapDays)
+}
+
+/** 選択の全期間をまとめた1つ。(純粋関数。1件も無ければ null) */
+export function selectionSpan(
+  txs: readonly Transaction[],
+  sel: TagSelection,
+  labelOf: (id: string | null) => string
+): TagEvent | null {
+  return selectionEvents(txs, sel, labelOf, Number.POSITIVE_INFINITY)[0] ?? null
 }
 
 /**
