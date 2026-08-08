@@ -3,12 +3,15 @@ import useBodyScrollLock from '../hooks/useBodyScrollLock'
 import { todayISO } from '../lib/format'
 import { useSpecialTags } from '../lib/reportTagSettings'
 import { normalizeTag } from '../lib/tags'
+import type { Transaction } from '../lib/types'
 import {
   endTripMode,
+  placeTagOptions,
   startTripMode,
   tripBadgeText,
   tripReminderText,
   tripTagOptions,
+  tripTagsText,
   useTripMode,
 } from '../lib/tripMode'
 import { useTxFeature } from '../lib/txExtensions'
@@ -27,26 +30,41 @@ import '../styles.css'
 // オフのときの見た目は、主線(カテゴリ → お店 → 金額 → …)の **外側** に
 // ある1行のボタンだけ。押さなければ入力の操作は1タップも変わらない。
 // 開始も「押す → タグを選ぶ」の2タップで終わる。
+//
+// ---- 行き先の名前(2026和歌山)---- ★
+// 開始のシートに「行き先」の欄を足したが、**任意** で、空のままなら
+// これまでとまったく同じ1タグだけが付く。ここに1度打つだけで、以降の記録には
+// 「旅行」と「2026和歌山」の**2つが自動で付く**(入力のたびに選ばせない)。
+// 階層タグにしなかった理由は reportTags.ts の共起タグの節を参照。
 // ============================================================
 
 /** 開始時にタグを選ぶシート。チップを押した時点で始まる(確定ボタンを挟まない) */
-function TripStartSheet({ onClose }: { onClose: () => void }) {
+function TripStartSheet({
+  transactions,
+  onClose,
+}: {
+  transactions: readonly Transaction[]
+  onClose: () => void
+}) {
   const specialTags = useSpecialTags()
   const options = tripTagOptions(specialTags)
   const [draft, setDraft] = useState('')
+  // 行き先(任意)。ここに入れた分だけタグが1つ増える
+  const [place, setPlace] = useState('')
 
   useBodyScrollLock()
 
   const start = (tag: string) => {
     // 空になる文字列では始まらない(startTripMode が false を返す)。
     // その場合はシートを開いたままにして、打ち直せるようにする
-    if (startTripMode(tag)) onClose()
+    if (startTripMode(tag, place)) onClose()
   }
 
   const drafted = normalizeTag(draft)
   // 選んだタグがレポートの「特別な支出」に入っていないと、せっかく付けても
   // 普段の支出と一緒に数えられてしまう。始める前に一言だけ断っておく
   const draftIsSpecial = drafted !== null && specialTags.includes(drafted)
+  const placeTag = normalizeTag(place)
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -63,6 +81,52 @@ function TripStartSheet({ onClose }: { onClose: () => void }) {
           <strong>自動では終わりません</strong> — 帰ったら「終わる」を押してください
         </p>
 
+        {/* 行き先はタグの選択より先に置く。あとに置くと、チップを押した時点で
+            始まってしまい「行き先を入れる場所があった」ことに気づけない。
+            空のままチップを押せば、これまでどおり2タップで始まる */}
+        <label className="field">
+          <span>行き先の名前(任意)</span>
+          <input
+            type="text"
+            aria-label="行き先の名前"
+            placeholder="例: 2026和歌山"
+            value={place}
+            autoComplete="off"
+            onChange={(e) => setPlace(e.target.value)}
+          />
+        </label>
+        <p className="muted trip-place-note">
+          入れると、記録に <strong>#{options[0] ?? '旅行'}</strong> と一緒に
+          <strong>#{placeTag ?? '2026和歌山'}</strong>{' '}
+          も自動で付きます。レポートで旅行を選ぶと、この行き先ごとに分けて見られます
+          (空のままなら、これまでどおり1つだけ付きます)
+        </p>
+
+        {/* 過去に使った行き先を1タップで。打ち直さずに済むほうが、
+            同じ旅行に別々の綴りのタグが付く事故を防げる */}
+        {options.map((tag) => {
+          const past = placeTagOptions(transactions, tag)
+          if (past.length === 0) return null
+          return (
+            <div className="field" key={`past-${tag}`}>
+              <span>前に使った行き先(#{tag})</span>
+              <div className="trip-tag-options" role="group" aria-label={`${tag}の行き先の候補`}>
+                {past.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    className={`trip-tag-option${placeTag === p ? ' is-on' : ''}`}
+                    aria-pressed={placeTag === p}
+                    onClick={() => setPlace(p)}
+                  >
+                    #{p}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+
         <div className="field">
           <span>どのタグを付けますか</span>
           <div className="trip-tag-options" role="group" aria-label="旅行モードのタグの候補">
@@ -74,6 +138,7 @@ function TripStartSheet({ onClose }: { onClose: () => void }) {
                 onClick={() => start(tag)}
               >
                 #{tag}
+                {placeTag !== null && <span className="trip-tag-option-place"> #{placeTag}</span>}
               </button>
             ))}
           </div>
@@ -110,14 +175,21 @@ function TripStartSheet({ onClose }: { onClose: () => void }) {
           disabled={drafted === null}
           onClick={() => start(draft)}
         >
-          {drafted === null ? 'このタグで始める' : `#${drafted} で始める`}
+          {drafted === null
+            ? 'このタグで始める'
+            : `#${drafted}${placeTag !== null ? ` #${placeTag}` : ''} で始める`}
         </button>
       </div>
     </div>
   )
 }
 
-export default function TripModeCard() {
+export default function TripModeCard({
+  transactions = [],
+}: {
+  /** 行き先の候補を出すための全記録。渡さなくても動く(候補が出ないだけ) */
+  transactions?: readonly Transaction[]
+}) {
   const mode = useTripMode()
   const [picking, setPicking] = useState(false)
   // tags 列が無い環境ではタグ自体が保存されないので、導線ごと出さない
@@ -158,7 +230,7 @@ export default function TripModeCard() {
             </button>
           </div>
           <p className="trip-banner-note">
-            これから記録する支出に、自動で <strong>#{mode.tag}</strong> が付きます
+            これから記録する支出に、自動で <strong>{tripTagsText(mode)}</strong> が付きます
             (1件ずつ外すこともできます)
           </p>
           {/* 長引いたときだけ声をかける。勝手に解除はしない —
@@ -167,7 +239,9 @@ export default function TripModeCard() {
         </div>
       )}
 
-      {picking && <TripStartSheet onClose={() => setPicking(false)} />}
+      {picking && (
+        <TripStartSheet transactions={transactions} onClose={() => setPicking(false)} />
+      )}
     </>
   )
 }

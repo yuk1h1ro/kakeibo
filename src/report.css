@@ -666,3 +666,76 @@ button.rp-event-btn {
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
 }
+
+/* ---- 共起タグのドリルダウン(#旅行 の中の #2026和歌山)----
+   内側のチップは、上のタグ一覧と同じ .rp-tag-chip を使う(押す場所の見た目が
+   変わると「別のもの」に見えるため)。金額を右に添えるぶんだけ広げる */
+.rp-co-lead {
+  margin-top: 12px;
+  line-height: 1.7;
+}
+
+.rp-co-chips {
+  /* 下のカテゴリ内訳とくっつくと「どこまでが内側の選択肢か」が読めないので、
+     チップの塊として上下に余白を持たせる */
+  margin: 8px 0 16px;
+}
+
+.rp-co-amount {
+  margin-left: 8px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+/* 「← #旅行 全体に戻る」。1段しか掘らないので、戻り先は必ず1つ */
+button.rp-co-back {
+  margin: 4px 0 10px;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+/* 回ごとの行に足したボタン(タグを付ける / 彼女に送る)。
+   iPhone の幅で3つを横に並べると潰れるので、2段目に回して等分する */
+.rp-event-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rp-event-actions .rp-event-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: normal;
+}
+
+/* まとめてタグを付ける前の確認。押した瞬間に35件が変わることのないよう、
+   件数を出したこの塊を必ず挟む */
+.rp-bulk-confirm {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-btn);
+  background: var(--accent-soft);
+}
+
+.rp-bulk-confirm-text {
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.rp-bulk-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.rp-bulk-actions button {
+  flex: 1;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.rp-bulk-done {
+  margin-top: 12px;
+  line-height: 1.7;
+}

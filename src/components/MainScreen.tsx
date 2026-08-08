@@ -248,7 +248,13 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
           <HistoryTab store={store} onEdit={setEditing} onStartInput={startInputOn} />
         )}
         {activeTab === 'report' && (
-          <ReportTab transactions={store.transactions} onSetSatisfaction={setSatisfaction} />
+          <ReportTab
+            transactions={store.transactions}
+            onSetSatisfaction={setSatisfaction}
+            /* 「回ごと」から過去の旅行にまとめてタグを付ける。
+               書き込みは必ずオフラインキュー経由(updateMany)にする */
+            onBulkUpdate={(updates) => void store.updateMany(updates)}
+          />
         )}
         {activeTab === 'partner' && (
           <PartnerTab store={store} supabase={supabase} onEdit={setEditing} />

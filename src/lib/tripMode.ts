@@ -38,12 +38,26 @@ import { useSyncExternalStore } from 'react'
 import { DEFAULT_SPECIAL_TAGS } from './reportTagSettings'
 import { todayISO } from './format'
 import { normalizeTag, sanitizeTags } from './tags'
+import { tagsOf, type Transaction } from './types'
 
 const STORAGE_KEY = 'kakeibo.tripMode'
 
 export interface TripMode {
   /** これ以降の入力に自動で付けるタグ(正規化済み) */
   tag: string
+  /**
+   * 行き先の名前(「2026和歌山」など。正規化済み)。任意で、null なら従来どおり
+   * tag 1つだけが付く。
+   *
+   * ---- なぜ tag と place を **フラットに2つ** 付けるのか ----
+   * 「旅行タグの下に 2026和歌山 をぶら下げたい」に対して、階層タグ(親子関係)は
+   * 作らなかった(理由は reportTags.ts の共起タグの節に詳しく書いてある)。
+   * ここで持つのは階層ではなく **同時に付ける2つのタグ** で、保存される形は
+   * tags: ['旅行', '2026和歌山'] という、これまでとまったく同じ文字列の配列。
+   * レポート側が「一緒に付いているタグ」を見て内側を出すので、
+   * 列も入力の形も1つも増えない。
+   */
+  place?: string | null
   /** 開始した日 'YYYY-MM-DD'。経過日数の表示と「切り忘れ」の気づきに使う */
   startedOn: string
 }
@@ -78,16 +92,29 @@ export function parseTripMode(raw: string | null): TripMode | null {
     return null
   }
   if (typeof parsed !== 'object' || parsed === null) return null
-  const o = parsed as { tag?: unknown; startedOn?: unknown }
+  const o = parsed as { tag?: unknown; place?: unknown; startedOn?: unknown }
   if (typeof o.tag !== 'string' || typeof o.startedOn !== 'string') return null
   const tag = normalizeTag(o.tag)
   if (tag === null || !DATE_RE.test(o.startedOn)) return null
-  return { tag, startedOn: o.startedOn }
+  // 行き先は任意。読めない値・タグと同じ値は「無し」に倒す
+  // (壊れた保存値のせいで意図しないタグが記録に混ざり続けないように)
+  const place = typeof o.place === 'string' ? normalizeTag(o.place) : null
+  return place === null || place === tag
+    ? { tag, startedOn: o.startedOn }
+    : { tag, place, startedOn: o.startedOn }
 }
 
-/** 保存する形にする。(純粋関数) */
+/**
+ * 保存する形にする。(純粋関数)
+ * 行き先が無いときは place を書かない。この機能より前の保存値とまったく同じ形になり、
+ * 古い版のアプリで開いても従来どおり読める。
+ */
 export function serializeTripMode(mode: TripMode): string {
-  return JSON.stringify({ tag: mode.tag, startedOn: mode.startedOn })
+  return JSON.stringify(
+    mode.place
+      ? { tag: mode.tag, place: mode.place, startedOn: mode.startedOn }
+      : { tag: mode.tag, startedOn: mode.startedOn }
+  )
 }
 
 /**
@@ -95,10 +122,18 @@ export function serializeTripMode(mode: TripMode): string {
  * タグの正規化は入力欄(tags.ts)とまったく同じ規則を通すので、
  * 「#旅行」と「旅行」は同じタグになる。空になるものでは始められない。
  */
-export function beginTripMode(tagInput: string, today: string): TripMode | null {
+export function beginTripMode(
+  tagInput: string,
+  today: string,
+  placeInput = ''
+): TripMode | null {
   const tag = normalizeTag(tagInput)
   if (tag === null) return null
-  return { tag, startedOn: today }
+  const place = normalizeTag(placeInput)
+  // 行き先に同じ文字を打ったときは1つにする(sanitizeTags が落とすのと同じ結果)
+  return place === null || place === tag
+    ? { tag, startedOn: today }
+    : { tag, place, startedOn: today }
 }
 
 // ---------- 純粋関数(表示と判断) ----------
@@ -123,9 +158,25 @@ export function isTripOverdue(mode: TripMode, today: string): boolean {
   return tripDayCount(mode, today) >= TRIP_REMINDER_DAYS
 }
 
-/** オンの間ずっと出す短い表示。「何が付くか」と「何日目か」だけ。(純粋関数) */
+/** この記録に付くタグ(表示にも保存にも使う並び)。(純粋関数) */
+export function tripModeTags(mode: TripMode): string[] {
+  return mode.place ? [mode.tag, mode.place] : [mode.tag]
+}
+
+/** 「#旅行 #2026和歌山」。(純粋関数。帯にも入力欄の上にも同じ文字を出す) */
+export function tripTagsText(mode: TripMode): string {
+  return tripModeTags(mode)
+    .map((t) => `#${t}`)
+    .join(' ')
+}
+
+/**
+ * オンの間ずっと出す短い表示。「何が付くか」と「何日目か」だけ。(純粋関数)
+ * 行き先を入れているときは**2つとも**出す。付くタグと画面の表示が
+ * 食い違わないことが、このモードでいちばん大事なところ。
+ */
 export function tripBadgeText(mode: TripMode, today: string): string {
-  return `#${mode.tag} ・ ${tripDayCount(mode, today)}日目`
+  return `${tripTagsText(mode)} ・ ${tripDayCount(mode, today)}日目`
 }
 
 /**
@@ -148,10 +199,23 @@ export function tripAutoTag(
   mode: TripMode | null,
   opts: { taggingAvailable: boolean; skippedForThisEntry: boolean }
 ): string | null {
-  if (mode === null) return null
-  if (!opts.taggingAvailable) return null
-  if (opts.skippedForThisEntry) return null
-  return mode.tag
+  return tripAutoTags(mode, opts)[0] ?? null
+}
+
+/**
+ * この1件に実際に付ける自動タグ(行き先を含む)。(純粋関数)
+ * オフのとき・タグ列が無い環境・この1件だけ外したときは空配列。
+ * 「この1件だけ外す」は行き先ごと外す — 旅行中に自分用のものを買った1件に、
+ * 行き先だけ残しても意味がない。
+ */
+export function tripAutoTags(
+  mode: TripMode | null,
+  opts: { taggingAvailable: boolean; skippedForThisEntry: boolean }
+): string[] {
+  if (mode === null) return []
+  if (!opts.taggingAvailable) return []
+  if (opts.skippedForThisEntry) return []
+  return tripModeTags(mode)
 }
 
 /**
@@ -163,7 +227,41 @@ export function tripAutoTag(
  * 重複は sanitizeTags が落とすので、手で「旅行」と打っていても二重にならない。
  */
 export function mergeTripTag(manual: readonly string[], autoTag: string | null): string[] {
-  return sanitizeTags(autoTag === null ? manual : [autoTag, ...manual])
+  return mergeTripTags(manual, autoTag === null ? [] : [autoTag])
+}
+
+/** 手で付けたタグと自動タグ(旅行 + 行き先)を合わせる。(純粋関数) */
+export function mergeTripTags(manual: readonly string[], autoTags: readonly string[]): string[] {
+  return sanitizeTags([...autoTags, ...manual])
+}
+
+/**
+ * 行き先タグの候補。(純粋関数)
+ *
+ * そのタグと一緒に使ったことのあるタグを、**最近使った順**に並べる。
+ * 件数順にしないのは、行き先は普通1回しか使わないから — 並びが件数だと
+ * 何年も前の1回と先週の1回が同じ重みになる。打ち直さずに済むための候補なので、
+ * 直近のものが上にあるのがいちばん役に立つ。
+ */
+export function placeTagOptions(
+  txs: readonly Transaction[],
+  tag: string,
+  limit = 8
+): string[] {
+  const lastUsed = new Map<string, string>()
+  for (const t of txs) {
+    const tags = tagsOf(t)
+    if (!tags.includes(tag)) continue
+    for (const other of tags) {
+      if (other === tag) continue
+      const prev = lastUsed.get(other)
+      if (prev === undefined || prev < t.date) lastUsed.set(other, t.date)
+    }
+  }
+  return [...lastUsed.entries()]
+    .sort((a, b) => (a[1] !== b[1] ? (a[1] < b[1] ? 1 : -1) : a[0] < b[0] ? -1 : 1))
+    .slice(0, limit)
+    .map(([place]) => place)
 }
 
 /**
@@ -221,8 +319,8 @@ function commit(next: TripMode | null): void {
  * 開始日は「今日」— 過去に遡って付け直すことはしない(モードは
  * 「これ以降の入力」だけを変える。すでに保存された記録には触れない)。
  */
-export function startTripMode(tagInput: string): boolean {
-  const next = beginTripMode(tagInput, todayISO())
+export function startTripMode(tagInput: string, placeInput = ''): boolean {
+  const next = beginTripMode(tagInput, todayISO(), placeInput)
   if (next === null) return false
   commit(next)
   return true
