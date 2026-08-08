@@ -4,13 +4,18 @@ import {
   beginTripMode,
   isTripOverdue,
   mergeTripTag,
+  mergeTripTags,
   parseTripMode,
+  placeTagOptions,
   serializeTripMode,
   tripAutoTag,
+  tripAutoTags,
   tripBadgeText,
   tripDayCount,
+  tripModeTags,
   tripReminderText,
   tripTagOptions,
+  tripTagsText,
   type TripMode,
 } from './tripMode'
 import { DEFAULT_SPECIAL_TAGS } from './reportTagSettings'
@@ -169,5 +174,124 @@ describe('tripTagOptions', () => {
 
   it('重複と「#」は入力欄と同じ規則でならす', () => {
     expect(tripTagOptions(['#旅行', '旅行', ' デート '])).toEqual(['旅行', 'デート'])
+  })
+})
+
+// ============================================================
+// 行き先タグ(「旅行」と「2026和歌山」の2つを自動で付ける)
+//
+// 階層タグは作らない。保存されるのは tags: ['旅行','2026和歌山'] という
+// これまでとまったく同じ文字列の配列で、レポート側が共起を見て内側を出す。
+// ここで確かめるのは:
+//   ・入れなければ従来どおり1つだけ(オフのときの手数が増えない)
+//   ・入れたら2つとも付き、画面の表示と保存内容が必ず一致する
+// ============================================================
+
+describe('行き先タグ', () => {
+  const on = { taggingAvailable: true, skippedForThisEntry: false }
+
+  it('入れなければ従来どおり1つだけ付く', () => {
+    const m = beginTripMode('旅行', '2026-08-06')
+    expect(m?.place).toBeUndefined()
+    expect(tripModeTags(m!)).toEqual(['旅行'])
+    expect(tripAutoTags(m!, on)).toEqual(['旅行'])
+  })
+
+  it('入れたら「旅行」と「2026和歌山」の2つが付く', () => {
+    const m = beginTripMode('旅行', '2026-08-06', ' #2026和歌山 ')
+    expect(m).toEqual({ tag: '旅行', place: '2026和歌山', startedOn: '2026-08-06' })
+    expect(tripAutoTags(m!, on)).toEqual(['旅行', '2026和歌山'])
+  })
+
+  it('行き先が空になる文字列なら、これまでと同じ1つだけ', () => {
+    expect(beginTripMode('旅行', '2026-08-06', '   ')?.place).toBeUndefined()
+    expect(beginTripMode('旅行', '2026-08-06', '#')?.place).toBeUndefined()
+  })
+
+  it('タグと同じ行き先を打っても二重にならない', () => {
+    const m = beginTripMode('旅行', '2026-08-06', '旅行')
+    expect(tripModeTags(m!)).toEqual(['旅行'])
+  })
+
+  it('行き先だけでは始められない(付ける先のタグが要る)', () => {
+    expect(beginTripMode('', '2026-08-06', '2026和歌山')).toBeNull()
+  })
+
+  it('帯には2つとも出る(付くタグと表示が食い違わない)', () => {
+    const m = beginTripMode('旅行', '2026-08-01', '2026和歌山')!
+    expect(tripTagsText(m)).toBe('#旅行 #2026和歌山')
+    expect(tripBadgeText(m, '2026-08-03')).toBe('#旅行 #2026和歌山 ・ 3日目')
+  })
+
+  it('この1件だけ外すときは、行き先ごと外す', () => {
+    const m = beginTripMode('旅行', '2026-08-06', '2026和歌山')!
+    expect(tripAutoTags(m, { ...on, skippedForThisEntry: true })).toEqual([])
+    expect(tripAutoTags(m, { ...on, taggingAvailable: false })).toEqual([])
+  })
+
+  it('保存した値をそのまま読み戻せる(古い保存値も読める)', () => {
+    const m = beginTripMode('旅行', '2026-08-06', '2026和歌山')!
+    expect(parseTripMode(serializeTripMode(m))).toEqual(m)
+    // 行き先が無いときの保存の形は、この機能より前とまったく同じ
+    expect(serializeTripMode(beginTripMode('旅行', '2026-08-06')!)).toBe(
+      '{"tag":"旅行","startedOn":"2026-08-06"}'
+    )
+    // 壊れた行き先は無視して、タグだけで動かす
+    expect(parseTripMode('{"tag":"旅行","place":123,"startedOn":"2026-08-01"}')).toEqual({
+      tag: '旅行',
+      startedOn: '2026-08-01',
+    })
+    expect(parseTripMode('{"tag":"旅行","place":"#","startedOn":"2026-08-01"}')?.place).toBeUndefined()
+  })
+
+  it('手で付けたタグと合わせても、自動の2つが先頭に残る(上限で落ちない)', () => {
+    const merged = mergeTripTags(['a', 'b', 'c', 'd', 'e'], ['旅行', '2026和歌山'])
+    expect(merged).toHaveLength(5)
+    expect(merged.slice(0, 2)).toEqual(['旅行', '2026和歌山'])
+  })
+
+  it('手で同じタグを打っていても二重にならない', () => {
+    expect(mergeTripTags(['2026和歌山'], ['旅行', '2026和歌山'])).toEqual(['旅行', '2026和歌山'])
+  })
+})
+
+describe('placeTagOptions', () => {
+  const tx = (date: string, tags: string[]) => ({
+    id: `${date}-${tags.join('')}`,
+    date,
+    type: 'expense' as const,
+    amount: 100,
+    category: null,
+    memo: '',
+    store: '',
+    partner_amount: 0,
+    created_at: `${date}T00:00:00.000Z`,
+    tags,
+  })
+
+  it('その旅行タグと一緒に使ったタグを、最近使った順に出す', () => {
+    const txs = [
+      tx('2025-05-01', ['旅行', '2025北海道']),
+      tx('2026-08-06', ['旅行', '2026和歌山']),
+      tx('2026-01-02', ['旅行', '2026正月']),
+    ]
+    expect(placeTagOptions(txs, '旅行')).toEqual(['2026和歌山', '2026正月', '2025北海道'])
+  })
+
+  it('別のタグの行き先は混ざらない', () => {
+    const txs = [tx('2026-08-06', ['出張', '大阪']), tx('2026-08-07', ['旅行', '2026和歌山'])]
+    expect(placeTagOptions(txs, '旅行')).toEqual(['2026和歌山'])
+  })
+
+  it('一緒に使ったタグが無ければ空(候補を出さない)', () => {
+    expect(placeTagOptions([tx('2026-08-06', ['旅行'])], '旅行')).toEqual([])
+    expect(placeTagOptions([], '旅行')).toEqual([])
+  })
+
+  it('多すぎるときは新しいものから打ち切る', () => {
+    const txs = Array.from({ length: 12 }, (_, i) =>
+      tx(`2026-08-${String(i + 1).padStart(2, '0')}`, ['旅行', `place${i}`])
+    )
+    expect(placeTagOptions(txs, '旅行', 3)).toEqual(['place11', 'place10', 'place9'])
   })
 })

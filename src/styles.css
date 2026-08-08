@@ -2242,3 +2242,22 @@ body.keypad-open .modal-sheet {
   font-size: 16px;
   cursor: pointer;
 }
+
+/* 旅行モードの開始シート:行き先の説明と、候補チップの選択中の見た目 */
+.trip-place-note {
+  margin: -4px 0 12px;
+  line-height: 1.7;
+}
+
+.trip-tag-option.is-on {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+/* 行き先を入れているとき、候補チップに「#旅行 #2026和歌山」と2つとも出す。
+   押すと何が付くのかが、押す前に分かるようにするため */
+.trip-tag-option-place {
+  opacity: 0.75;
+}

@@ -132,3 +132,76 @@ describe('解除し忘れへの備え', () => {
     expect(button('終わる')).toBeTruthy()
   })
 })
+
+// ============================================================
+// 行き先の名前(2026和歌山)
+//
+// 見るのは2つ:
+//   ・入れなければ何も変わらない(オフのときの手数が1タップも増えない)
+//   ・入れたら2つのタグが付き、帯にも2つとも出る
+// ============================================================
+
+const txWithPlace = (date: string, tags: string[]) => ({
+  id: `${date}-${tags.join('')}`,
+  date,
+  type: 'expense' as const,
+  amount: 1000,
+  category: null,
+  memo: '',
+  store: '',
+  partner_amount: 0,
+  created_at: `${date}T00:00:00.000Z`,
+  tags,
+})
+
+describe('行き先の名前', () => {
+  it('入れなければ、これまでどおり2タップで1つだけ付く', async () => {
+    const user = userEvent.setup()
+    render(<TripModeCard />)
+    await user.click(button(/旅行・デート中にする/))
+    await user.click(button('#旅行'))
+
+    expect(getTripMode()?.tag).toBe('旅行')
+    expect(getTripMode()?.place).toBeUndefined()
+    expect(screen.getByText('#旅行 ・ 1日目')).toBeTruthy()
+  })
+
+  it('行き先を入れてからタグを押すと、2つとも付く', async () => {
+    const user = userEvent.setup()
+    render(<TripModeCard />)
+    await user.click(button(/旅行・デート中にする/))
+    await user.type(screen.getByLabelText('行き先の名前'), '2026和歌山')
+    await user.click(button('#旅行 #2026和歌山'))
+
+    expect(getTripMode()).toMatchObject({ tag: '旅行', place: '2026和歌山' })
+    // 帯には付くタグが2つとも出る(保存される中身と画面が食い違わない)
+    expect(screen.getByText('#旅行 #2026和歌山 ・ 1日目')).toBeTruthy()
+    // 保存ボタンの上の説明にも同じ2つが出る(帯と説明で食い違わない)
+    expect(screen.getAllByText('#旅行 #2026和歌山').length).toBeGreaterThan(0)
+  })
+
+  it('過去に使った行き先は1タップで選べる(打ち直さずに済む)', async () => {
+    const user = userEvent.setup()
+    render(
+      <TripModeCard
+        transactions={[
+          txWithPlace('2025-05-01', ['旅行', '2025北海道']),
+          txWithPlace('2026-08-06', ['旅行', '2026和歌山']),
+        ]}
+      />
+    )
+    await user.click(button(/旅行・デート中にする/))
+    // 最近使った順に出る
+    await user.click(button('#2026和歌山'))
+    await user.click(button('#旅行 #2026和歌山'))
+
+    expect(getTripMode()).toMatchObject({ tag: '旅行', place: '2026和歌山' })
+  })
+
+  it('候補が無いときは候補の欄ごと出さない', async () => {
+    const user = userEvent.setup()
+    render(<TripModeCard />)
+    await user.click(button(/旅行・デート中にする/))
+    expect(screen.queryByText(/前に使った行き先/)).toBeNull()
+  })
+})

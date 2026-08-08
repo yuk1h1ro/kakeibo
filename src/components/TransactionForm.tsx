@@ -33,7 +33,7 @@ import { partnerPaid, satisfactionOf, tagsOf } from '../lib/types'
 import { useTxFeature } from '../lib/txExtensions'
 import { settlementImpact } from '../lib/partnerSettlement'
 import { collectTags, parseTagInput, sanitizeTags, MAX_TAGS_PER_TX } from '../lib/tags'
-import { mergeTripTag, tripAutoTag, useTripMode } from '../lib/tripMode'
+import { mergeTripTags, tripAutoTags, tripTagsText, useTripMode } from '../lib/tripMode'
 import {
   buildSplitInputs,
   carryPartnerAmount,
@@ -199,7 +199,8 @@ export default function TransactionForm({
   // 「旅行中でも、コンビニで買う自分用のもの」のための1件だけの取り消し。
   // 保存するたびに false へ戻す(1件ごとの判断を次に持ち越さない)
   const [tripTagSkipped, setTripTagSkipped] = useState(false)
-  const tripTag = tripAutoTag(initial !== undefined || !isExpense ? null : tripMode, {
+  // 行き先を入れて始めた旅行では、ここが ['旅行', '2026和歌山'] の2つになる
+  const tripTags = tripAutoTags(initial !== undefined || !isExpense ? null : tripMode, {
     taggingAvailable,
     skippedForThisEntry: tripTagSkipped,
   })
@@ -620,7 +621,7 @@ export default function TransactionForm({
     try {
       // 打ちかけのタグ(確定していない文字列)も取りこぼさずに拾い、
       // 旅行モードのタグを足す(オフのときは tripTag が null なので何も変わらない)
-      const finalTags = mergeTripTag([...tags, ...parseTagInput(tagDraft)], tripTag)
+      const finalTags = mergeTripTags([...tags, ...parseTagInput(tagDraft)], tripTags)
       const payload: TransactionInput = {
         date,
         type,
@@ -1349,25 +1350,28 @@ export default function TransactionForm({
           自分用のものを買うことはあり、そのために毎回モードを切る運用は続かない。
           オフのときは何も描かないので、入力の手数は1タップも増えない */}
       {tripRowVisible && tripMode !== null && (
-        <div className={`trip-tag-row${tripTag === null ? ' is-off' : ''}`} aria-live="polite">
+        <div
+          className={`trip-tag-row${tripTags.length === 0 ? ' is-off' : ''}`}
+          aria-live="polite"
+        >
           <span className="trip-tag-row-text">
-            {tripTag !== null ? (
+            {tripTags.length > 0 ? (
               <>
-                この記録に <strong>#{tripMode.tag}</strong> が自動で付きます
+                この記録に <strong>{tripTagsText(tripMode)}</strong> が自動で付きます
               </>
             ) : (
               <>
-                この記録には <strong>#{tripMode.tag}</strong> を付けません
+                この記録には <strong>{tripTagsText(tripMode)}</strong> を付けません
               </>
             )}
           </span>
           <button
             type="button"
             className="trip-tag-row-btn"
-            aria-pressed={tripTag === null}
+            aria-pressed={tripTags.length === 0}
             onClick={() => setTripTagSkipped(!tripTagSkipped)}
           >
-            {tripTag !== null ? 'この1件だけ外す' : 'やっぱり付ける'}
+            {tripTags.length > 0 ? 'この1件だけ外す' : 'やっぱり付ける'}
           </button>
         </div>
       )}

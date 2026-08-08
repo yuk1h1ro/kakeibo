@@ -213,7 +213,8 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
       {/* 旅行モード。オンの間は普段と違うタグが自動で付くので、
           アプリを開いて最初に目に入る位置に置く(解除し忘れが最大の失敗)。
           オフのときは1行のボタンなので、入力の操作は1タップも変わらない */}
-      <TripModeCard />
+      {/* 行き先の候補(過去に使った行き先タグ)を出すために全記録を渡す */}
+      <TripModeCard transactions={store.transactions} />
 
       {/* 機能011: 金額は絶対値で出し、預かり中か立て替え中かは言葉で伝える */}
       <div className="card balance-card">
