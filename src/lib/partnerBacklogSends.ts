@@ -249,6 +249,60 @@ export interface BacklogRunResult {
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
+export interface SequentialSendOptions extends BacklogRunOptions {
+  /**
+   * 1通送れるたびに呼ばれる(await される)。
+   * 「どこまで送ったか」を残す仕事はここに渡す — 送信そのものの手順
+   * (間隔・再試行・止めどころ)と、何を覚えるかを分けておくため。
+   */
+  onSent?: (index: number, sent: number) => void | Promise<void>
+}
+
+/**
+ * 用意した文面を1通ずつ Discord へ送る。
+ *
+ * ・**逐次**送る。まとめて Promise.all に流すと Discord のレート制限に当たり、
+ *   429 が返って途中の通だけが落ちる(いちばん気付きにくい壊れ方)。
+ * ・失敗したら**そこで止める**。以降の通を送ると、届いた分と届かない分が
+ *   飛び飛びになり、彼女の画面で履歴が虫食いになる。
+ * ・止まった位置(sentMessages)を返すので、呼び出し側は「残りだけ送り直す」ができる。
+ *
+ * 履歴のまとめ送信(runBacklogSend)と旅行1回ぶんのまとめ(TripSummarySheet)が
+ * 共有する。2,000文字での分割・間隔・再試行・途中失敗からの再開を
+ * 二度実装しないための切り出し。
+ */
+export async function sendMessagesInSequence(
+  messages: readonly { text: string }[],
+  options: SequentialSendOptions = {}
+): Promise<{ sentMessages: number; failure: DiscordFailure | null }> {
+  const send = options.send ?? sendDiscordMessageWithResult
+  const sleep = options.sleep ?? defaultSleep
+  const interval = options.intervalMs ?? BACKLOG_SEND_INTERVAL_MS
+
+  let sentMessages = 0
+  for (let i = 0; i < messages.length; i++) {
+    // 1通目の前には待たない(押してすぐ1通目が飛ぶ方が、動いている感じが伝わる)
+    if (i > 0) await sleep(interval)
+
+    let result = await send(messages[i].text)
+    let attempt = 1
+    while (!result.ok) {
+      const delay = backlogRetryDelay(result.failure, attempt)
+      if (delay === null) break
+      await sleep(delay)
+      result = await send(messages[i].text)
+      attempt += 1
+    }
+    if (!result.ok) return { sentMessages, failure: result.failure }
+
+    sentMessages += 1
+    // 送れた分は必ず残してから次へ進む(ここで画面を閉じられても続きから再開できる)
+    await options.onSent?.(i, sentMessages)
+    options.onProgress?.(sentMessages, messages.length)
+  }
+  return { sentMessages, failure: null }
+}
+
 /**
  * まとめ送信を実行する。
  *
@@ -265,49 +319,32 @@ export async function runBacklogSend(
   previous: BacklogSendState,
   options: BacklogRunOptions = {}
 ): Promise<BacklogRunResult> {
-  const send = options.send ?? sendDiscordMessageWithResult
-  const sleep = options.sleep ?? defaultSleep
-  const interval = options.intervalMs ?? BACKLOG_SEND_INTERVAL_MS
-
   let state = previous
-  let sentMessages = 0
   let sentEntries = 0
-  let failure: DiscordFailure | null = null
 
-  for (let i = 0; i < messages.length; i++) {
-    // 1通目の前には待たない(押してすぐ1通目が飛ぶ方が、動いている感じが伝わる)
-    if (i > 0) await sleep(interval)
+  const outcome = await sendMessagesInSequence(messages, {
+    ...options,
+    onSent: async (i, sent) => {
+      const last = messages[i].lastEntry
+      sentEntries = messages[i].entriesThrough
+      state = {
+        // カーソルは進んでいる方だけを採る(古い期間を指定して送り直しても巻き戻さない)
+        cursor: last ? newerCursor(state.cursor, entryCursor(last)) : state.cursor,
+        lastSentAt: new Date().toISOString(),
+        // 累計は「前回まで + この回で送れたぶん」。この回の途中経過から作るので、
+        // 失敗して抜けたときも、送れた分だけが足された状態で残る
+        sentEntries: previous.sentEntries + sentEntries,
+        sentMessages: previous.sentMessages + sent,
+      }
+      await saveBacklogState(supabase, state)
+    },
+  })
 
-    let result = await send(messages[i].text)
-    let attempt = 1
-    while (!result.ok) {
-      const delay = backlogRetryDelay(result.failure, attempt)
-      if (delay === null) break
-      await sleep(delay)
-      result = await send(messages[i].text)
-      attempt += 1
-    }
-    if (!result.ok) {
-      failure = result.failure
-      break
-    }
-
-    sentMessages += 1
-    const last = messages[i].lastEntry
-    sentEntries = messages[i].entriesThrough
-    state = {
-      // カーソルは進んでいる方だけを採る(古い期間を指定して送り直しても巻き戻さない)
-      cursor: last ? newerCursor(state.cursor, entryCursor(last)) : state.cursor,
-      lastSentAt: new Date().toISOString(),
-      // 累計は「前回まで + この回で送れたぶん」。この回の途中経過から作るので、
-      // 失敗して抜けたときも、送れた分だけが足された状態で残る
-      sentEntries: previous.sentEntries + sentEntries,
-      sentMessages: previous.sentMessages + sentMessages,
-    }
-    // 送れた分は必ず残してから次へ進む(ここで画面を閉じられても続きから再開できる)
-    await saveBacklogState(supabase, state)
-    options.onProgress?.(sentMessages, messages.length)
+  return {
+    sentMessages: outcome.sentMessages,
+    totalMessages: messages.length,
+    sentEntries,
+    failure: outcome.failure,
+    state,
   }
-
-  return { sentMessages, totalMessages: messages.length, sentEntries, failure, state }
 }
