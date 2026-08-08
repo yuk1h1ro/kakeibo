@@ -34,6 +34,7 @@ import {
   pendingSatisfactionTargets,
   useSatisfactionAvailable,
 } from '../lib/satisfaction'
+import type { TransactionInput } from '../hooks/useTransactions'
 import { useSwipeNav } from '../hooks/useSwipeNav'
 import CategoryBars from './charts/CategoryBars'
 import MonthlyTrend from './charts/MonthlyTrend'
@@ -64,9 +65,18 @@ interface ReportTabProps {
   transactions: Transaction[]
   /** 感情スタンプの付け直し(機能143)。列が無い環境では呼ばれない */
   onSetSatisfaction: (t: Transaction, value: Satisfaction) => Promise<void>
+  /**
+   * 「回ごと」から、過去の旅行にまとめて行き先タグを付ける / 外す。
+   * オフラインキュー経由の updateMany を渡す(渡さないとその導線が出ないだけ)
+   */
+  onBulkUpdate?: (updates: { id: string; input: TransactionInput }[]) => void
 }
 
-export default function ReportTab({ transactions, onSetSatisfaction }: ReportTabProps) {
+export default function ReportTab({
+  transactions,
+  onSetSatisfaction,
+  onBulkUpdate,
+}: ReportTabProps) {
   const today = todayISO()
   const currentMonth = monthKey(today)
 
@@ -424,6 +434,7 @@ export default function ReportTab({ transactions, onSetSatisfaction }: ReportTab
                   range={range}
                   periodLabel={periodLabel}
                   onPickRange={pickRange}
+                  onBulkUpdate={onBulkUpdate}
                 />
               )}
 
