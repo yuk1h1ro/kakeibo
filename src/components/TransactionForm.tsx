@@ -10,12 +10,14 @@ import {
   pressDigits,
   pressEquals,
   pressOperator,
+  pressPercent,
   resolveForSubmit,
   type CalcOp,
   type CalcState,
 } from '../lib/calc'
 import { useKeypadEnabled } from '../lib/keypadSettings'
 import AmountKeypad from './AmountKeypad'
+import AmountTaxKeys from './AmountTaxKeys'
 import AmountTextInput from './AmountTextInput'
 import { normalizeAmountInput } from '../lib/amountFormat'
 import { SATISFACTION_OPTIONS, useSatisfactionAvailable } from '../lib/satisfaction'
@@ -367,12 +369,15 @@ export default function TransactionForm({
       if (!(target instanceof HTMLElement)) return
       // 「保存して続ける」は次の1件をそのまま打つためのボタンなので、閉じない。
       // お店のチップも同じ — 押すとその場で金額へ進む(=パッドを開く)ので、
-      // 開けたのと同じタップで閉じてしまわないように除外する
+      // 開けたのと同じタップで閉じてしまわないように除外する。
+      // ％・税込のボタンは金額欄そのものへの操作なので、押しても閉じない
+      // (閉じると押した直後に画面が跳ねて、出したばかりの結果が読めない)
       if (
         target === amountRef.current ||
         target.closest('.keypad-dock') ||
         target.closest('.save-continue') ||
-        target.closest('.store-chip')
+        target.closest('.store-chip') ||
+        target.closest('.percent-block')
       ) {
         return
       }
@@ -489,6 +494,18 @@ export default function TransactionForm({
 
   const runEquals = () => {
     const next = pressEquals(calcState)
+    setAmount(next.input)
+    setCalc({ pendingValue: next.pendingValue, pendingOp: next.pendingOp })
+  }
+
+  // ％キーと「税込にする」も同じ状態機械を通す(挙動を1本に保つため)
+  const runPercent = () => {
+    const next = pressPercent(calcState)
+    setAmount(next.input)
+    setCalc({ pendingValue: next.pendingValue, pendingOp: next.pendingOp })
+  }
+
+  const applyCalcState = (next: CalcState) => {
     setAmount(next.input)
     setCalc({ pendingValue: next.pendingValue, pendingOp: next.pendingOp })
   }
@@ -916,6 +933,17 @@ export default function TransactionForm({
               </button>
             </div>
           )}
+          {/* ％と税込は、テンキーを開いている間も畳まない。
+              テンキー側に同じボタンを重ねると押した結果の表示が2か所に分かれるので、
+              ここ1か所に置いて、OSキーボードでも自前テンキーでも同じ場所を押させる。
+              金額欄のすぐ下なので、パッドを開いていても画面から外れない */}
+          <AmountTaxKeys
+            state={calcState}
+            onApply={applyCalcState}
+            onPercent={runPercent}
+            /* 保留中の演算子が無いと ％ は何も起きないので、押す前にそう見せる */
+            percentDisabled={calc.pendingOp === null}
+          />
         </div>
       </div>
 
@@ -993,6 +1021,13 @@ export default function TransactionForm({
                   value={partnerAmount}
                   onChange={setPartnerAmount}
                 />
+                {/* ここもレシートから読み取った値段を打つ場所なので、税込を同じ形で置く。
+                    電卓(＋ − ×)はこの欄には無いので ％ は出さない */}
+                <AmountTaxKeys
+                  state={{ input: partnerAmount, pendingValue: null, pendingOp: null }}
+                  onApply={(next) => setPartnerAmount(next.input)}
+                  fieldLabel="彼女の負担分"
+                />
               </div>
               <div className="quick-row">
                 <button
@@ -1048,6 +1083,11 @@ export default function TransactionForm({
                   placeholder="0"
                   value={partnerPaidInput}
                   onChange={setPartnerPaidInput}
+                />
+                <AmountTaxKeys
+                  state={{ input: partnerPaidInput, pendingValue: null, pendingOp: null }}
+                  onApply={(next) => setPartnerPaidInput(next.input)}
+                  fieldLabel="彼女が払った額"
                 />
               </div>
               {!partnerPaidValid && partnerPaidInput !== '' && (

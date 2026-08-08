@@ -146,3 +146,144 @@ export function pressBackspace(state: CalcState): CalcState {
   if (state.input === '') return state
   return { ...state, input: state.input.slice(0, -1) }
 }
+
+/* ------------------------------------------------------------
+   パーセント計算と消費税 (機能043 の続き)
+
+   要望は「小数点は要らない、%計算(とくに消費税)ができればいい」だった。
+   なので小数点キーは足していない。金額は今までどおり円単位の整数のまま
+   (DB に小数が入る余地を作らない)で、割合の計算だけを整数の世界で完結させる。
+   ------------------------------------------------------------ */
+
+/**
+ * 金額として持てる範囲か。
+ *
+ * 9桁(MAX_AMOUNT_DIGITS)を超える値を入力欄に入れてしまうと、次に1文字でも
+ * 編集した瞬間に normalizeAmountInput が末尾を黙って切り落として別の金額になる。
+ * 「押したら金額が壊れた」を作らないため、範囲外になる計算は実行しない。
+ */
+function fitsAmount(n: number): boolean {
+  return Number.isSafeInteger(n) && Math.abs(n) < 10 ** MAX_AMOUNT_DIGITS
+}
+
+/**
+ * base の percent% を、円未満を切り捨てた整数で返す。計算できないときは null。(純粋関数)
+ *
+ * `base * percent / 100` と書くと 33.3 のような二進数で表せない値を経由するので、
+ * 割り切れない額のたびに丸めの向きを疑うことになる。ここでは剰余を先に引いてから
+ * 100 で割る — すべて整数どうしの演算なので誤差がそもそも入らない。
+ *
+ * JS の % は符号を残すので、この式はマイナスでも 0 に向かって切り捨てる
+ * (-333 の10% は -34 ではなく -33)。金額の「切り捨て」は絶対値を削る意味で
+ * 使うので、符号によって丸めの向きが変わらないほうが説明しやすい。
+ */
+export function percentOf(base: number, percent: number): number | null {
+  if (!Number.isInteger(base) || !Number.isInteger(percent)) return null
+  const product = base * percent
+  if (!Number.isSafeInteger(product)) return null
+  return (product - (product % 100)) / 100
+}
+
+/**
+ * ％キーを押したときの遷移。電卓の一般的な挙動に合わせる。
+ *
+ *   1000 ＋ 10 ％ → 1100   (1000 の 10% を足す)
+ *   1000 − 10 ％ →  900   (1000 の 10% を引く)
+ *   1000 × 10 ％ →  100   (1000 の 10%)
+ *
+ * ＋ と − は「直前の値の割合を足し引きする」、× は「直前の値の割合そのもの」。
+ * どちらも取り出す割合は同じ percentOf(直前の値, 打った数)で、＝ と同じく
+ * その場で確定させる(押した結果がすぐ金額欄に出るほうが、税込ボタンと揃う)。
+ *
+ * 演算子が保留されていないときは **何もしない**。
+ * よくある電卓は「打った数を1/100にする」(1000 ％ → 10)が、この家計簿は
+ * 円未満を持たないので 10 という別の金額になって画面に残ってしまい、
+ * 打ち間違いと見分けが付かない。何の割合なのかが決まっていない以上、
+ * 黙って金額を書き換えないほうが安全なので、押しても無反応にしている
+ * (税込にしたいだけなら、下の税込ボタンが1タップで済む)。
+ */
+export function pressPercent(state: CalcState): CalcState {
+  const { pendingValue, pendingOp } = state
+  if (pendingOp === null || pendingValue === null) return state
+  const entered = parseAmountInput(state.input)
+  if (entered === null) return state
+  const portion = percentOf(pendingValue, entered)
+  if (portion === null) return state
+  // × のときだけ「割合そのもの」。＋ − は割合を足し引きする
+  const result = pendingOp === '×' ? portion : applyOp(pendingValue, pendingOp, portion)
+  if (!fitsAmount(result)) return state
+  return { input: String(result), pendingValue: null, pendingOp: null }
+}
+
+/* ---------- 税込にする ---------- */
+
+/**
+ * 消費税率。日本の消費税は標準10%と軽減8%(持ち帰りの飲食料品など)の2本立てなので、
+ * どちらも1タップで押せる位置に出す。並び順はそのまま画面のボタンの並び。
+ */
+export const TAX_RATES = [10, 8] as const
+export type TaxRate = (typeof TAX_RATES)[number]
+
+/**
+ * 税抜き金額に消費税を足した税込金額。円未満は切り捨て。計算できないときは null。(純粋関数)
+ *
+ * 切り捨てにしたのは、レジの端数処理として最も一般的だから。
+ * 設定で切り上げ・四捨五入を選べるようにはしない — 選べるようにした瞬間、
+ * 使うたびに「今どの設定だったか」を思い出す必要が生まれるうえ、
+ * ずれるのはたかだか1円で、それは金額欄を直接打ち直せば済む。
+ */
+export function withTax(base: number, rate: TaxRate): number | null {
+  const tax = percentOf(base, rate)
+  if (tax === null) return null
+  const total = base + tax
+  return fitsAmount(total) ? total : null
+}
+
+/** 税込ボタンを押した結果。押す前の金額も返すのは、画面に「何が起きたか」を出すため */
+export interface TaxApplied {
+  /** 押したあとの電卓の状態 */
+  state: CalcState
+  /** 押す前の金額(税抜き) */
+  before: number
+  /** 押したあとの金額(税込) */
+  after: number
+  rate: TaxRate
+  /** 円未満を切り捨てたか(切り捨てが起きたときだけ画面にもそう書く) */
+  truncated: boolean
+}
+
+/**
+ * 「税込にする」を押したときの遷移。押せないときは null(= ボタンを無効にする合図)。
+ *
+ * 保留中の計算があれば先に確定させる(＝の押し忘れ対策。980 ＋ 200 のあとに
+ * 押したら 1180 の税込になる)。0円・マイナスには税を掛けない — 掛けても
+ * 結果が変わらない/保存できない金額のままで、押した意味が伝わらないため。
+ */
+export function pressTax(state: CalcState, rate: TaxRate): TaxApplied | null {
+  const resolved = pressEquals(state)
+  const before = parseAmountInput(resolved.input)
+  if (before === null || before <= 0) return null
+  const after = withTax(before, rate)
+  if (after === null) return null
+  return {
+    state: { input: String(after), pendingValue: null, pendingOp: null },
+    before,
+    after,
+    rate,
+    truncated: (before * rate) % 100 !== 0,
+  }
+}
+
+/**
+ * 税込にした結果の説明文。(純粋関数)
+ *
+ * 黙って数字だけが変わると、打ち間違いと区別が付かない。
+ * 「1,000 → 税込 1,100」と押す前の額を並べて出し、端数を落としたときだけ
+ * その旨も添える(落ちていないときに毎回書くと、注意書きが読み飛ばされる)。
+ */
+export function taxNoticeText(applied: TaxApplied): string {
+  const before = applied.before.toLocaleString('ja-JP')
+  const after = applied.after.toLocaleString('ja-JP')
+  const note = applied.truncated ? '・円未満切り捨て' : ''
+  return `${before} → 税込 ${after}(${applied.rate}%${note})`
+}

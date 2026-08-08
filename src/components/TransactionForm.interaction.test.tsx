@@ -618,6 +618,157 @@ describe('金額欄の簡易電卓', () => {
 })
 
 // ============================================================
+// ％と「税込にする」(機能043 の続き)
+//
+// 要望は「小数点は要らない、%(とくに消費税)が計算できればいい」。
+// ここでは **打った金額が税込になって、そのまま整数で保存されるか** を見る。
+// 端数の切り捨てや境界そのものは calc.test.ts(純粋関数)側で押さえてある。
+// ============================================================
+describe('税込にする', () => {
+  const amountLabel = '支払い金額(円)'
+
+  it('打った直後に1タップで税込になり、その額が保存される', async () => {
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, amountLabel, '1000')
+    await user.click(button('税込にする(10%)'))
+
+    // 桁区切り(機能050)と喧嘩しないこと
+    expect(field(amountLabel).value).toBe('1,100')
+    await user.click(saveButton())
+    expect(submitted[0].amount).toBe(1100)
+    expect(Number.isInteger(submitted[0].amount)).toBe(true)
+  })
+
+  it('軽減税率(8%)も同じ1タップ', async () => {
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, amountLabel, '1000')
+    await user.click(button('税込にする(8%)'))
+    expect(field(amountLabel).value).toBe('1,080')
+    await user.click(saveButton())
+    expect(submitted[0].amount).toBe(1080)
+  })
+
+  it('押した結果が文字でも出る(黙って数字が変わらない)', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, amountLabel, '333')
+    await user.click(button('税込にする(10%)'))
+    // 端数を切り捨てたときは、そう書く
+    expect(screen.getByText('333 → 税込 366(10%・円未満切り捨て)')).toBeTruthy()
+  })
+
+  it('金額を打ち直すと、前に押した結果の説明は消える', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, amountLabel, '1000')
+    await user.click(button('税込にする(10%)'))
+    expect(screen.queryByText(/税込 1,100/)).not.toBeNull()
+
+    await typeAmount(user, amountLabel, '500')
+    expect(screen.queryByText(/税込 1,100/)).toBeNull()
+  })
+
+  it('金額が無いうちは押せない', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    expect((button('税込にする(10%)') as HTMLButtonElement).disabled).toBe(true)
+    await typeAmount(user, amountLabel, '100')
+    expect((button('税込にする(10%)') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('計算の途中で押すと、先に計算を確定してから税込にする', async () => {
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, amountLabel, '980')
+    await user.click(button('足す'))
+    await typeAmount(user, amountLabel, '200')
+    await user.click(button('税込にする(10%)'))
+    expect(field(amountLabel).value).toBe('1,298')
+    await user.click(saveButton())
+    expect(submitted[0].amount).toBe(1298)
+  })
+
+  it('彼女の負担分でも同じように税込にできる', async () => {
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, amountLabel, '2200')
+    await user.click(button('彼女の分もまとめて払った'))
+    await typeAmount(user, '彼女の負担分', '1000')
+    await user.click(button('彼女の負担分を税込にする(10%)'))
+    expect(field('彼女の負担分').value).toBe('1,100')
+    await user.click(saveButton())
+    expect(submitted[0].partner_amount).toBe(1100)
+  })
+
+  it('テンキーを開いたまま押しても、パッドは閉じない', async () => {
+    setKeypadPreference('on')
+    const { user } = setup()
+    await user.click(button(/食費/))
+    await user.click(field(amountLabel))
+    expect(screen.queryByRole('group', { name: '金額入力のテンキー' })).not.toBeNull()
+
+    // 自前テンキーで打ってから税込にする(OSキーボードと同じ場所を押す)
+    await user.click(within(screen.getByRole('group', { name: '金額入力のテンキー' })).getByRole('button', { name: '1' }))
+    await user.click(within(screen.getByRole('group', { name: '金額入力のテンキー' })).getByRole('button', { name: '00' }))
+    await user.click(within(screen.getByRole('group', { name: '金額入力のテンキー' })).getByRole('button', { name: '0' }))
+    expect(field(amountLabel).value).toBe('1,000')
+
+    await user.click(button('税込にする(10%)'))
+    expect(field(amountLabel).value).toBe('1,100')
+    expect(screen.queryByRole('group', { name: '金額入力のテンキー' })).not.toBeNull()
+  })
+})
+
+describe('％キー', () => {
+  const amountLabel = '支払い金額(円)'
+
+  it('1000 ＋ 10 ％ で 1100 になる', async () => {
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, amountLabel, '1000')
+    await user.click(button('足す'))
+    await typeAmount(user, amountLabel, '10')
+    await user.click(button('パーセント'))
+    expect(field(amountLabel).value).toBe('1,100')
+    await user.click(saveButton())
+    expect(submitted[0].amount).toBe(1100)
+  })
+
+  it('1000 × 10 ％ で 100(割合そのもの)', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, amountLabel, '1000')
+    await user.click(button('掛ける'))
+    await typeAmount(user, amountLabel, '10')
+    await user.click(button('パーセント'))
+    expect(field(amountLabel).value).toBe('100')
+  })
+
+  it('演算子を押していないうちは ％ を押せない', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, amountLabel, '1000')
+    expect((button('パーセント') as HTMLButtonElement).disabled).toBe(true)
+    await user.click(button('足す'))
+    expect((button('パーセント') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('C を押すと ％ の途中経過ごと消える', async () => {
+    // テンキーを開くと C が2つ(バーとパッド)になるので、ここでは OS キーボード側で見る
+    setKeypadPreference('off')
+    const { user } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, amountLabel, '1000')
+    await user.click(button('足す'))
+    await user.click(button('金額をクリア'))
+    expect(field(amountLabel).value).toBe('')
+    expect((button('パーセント') as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+// ============================================================
 // お店のチップとテンキー (機能052 + 新しい入力の並び)
 //
 // 実際に起きた不具合:
