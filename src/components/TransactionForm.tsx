@@ -1002,12 +1002,18 @@ export default function TransactionForm({
           「分割をやめる」を押せば、入れた値のまま元の欄に戻る */}
       {isExpense && !splitting && (
         <div className="form-col">
+          {/* 「まとめて払った」ではなく「二人で使った」。
+              下に「支払った人」(機能018)があり、彼女が全額払った回も記録できる。
+              名前が「払った」だと、そのときオンにするのが日本語として変になる。
+              このトグルが言いたいのは「誰が払ったか」ではなく
+              「この支出に彼女の分が入っているか」なので、出来事の側を書く。
+              おごった回もオンにして負担分を 0 にできる(0 は有効な値) */}
           <button
             type="button"
             className={`partner-toggle ${withPartner ? 'on' : ''}`}
             onClick={() => setWithPartner(!withPartner)}
           >
-            <span>彼女の分もまとめて払った</span>
+            <span>二人で使った</span>
             <span className="toggle-check">{withPartner ? '✓' : ''}</span>
           </button>
           {withPartner && (
