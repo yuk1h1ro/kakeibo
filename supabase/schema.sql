@@ -939,13 +939,43 @@ alter table public.transactions
 -- 手動調整だけは「ズレを直す」ものなので符号つき(マイナスもあり得る)。
 -- ただし 0 は残高が動かない = 履歴に残す意味が無いので禁止したままにします。
 -- 支出・預かり・返金は従来どおり正の整数のみ。
+--
+-- おごり・値引き (migration-favor.sql) を実行済みの環境では、**支払い 0円 の支出**
+-- (全額おごり・割引券で無料)も通す形になっている。この SQL をあとから実行し直した
+-- ときに、その条件を巻き戻して 0円 の記録を締め出さないよう、
+-- favor_amount 列があるかどうかで付け直す制約を変える。
+--
+-- (巻き戻すと、すでに 0円 の記録がある人はこの文そのものが
+--  「is violated by some row」で失敗し、制約が外れたままになる。
+--  順番に依存しない形にしておくほうが安全)
 -- ------------------------------------------------------------
 alter table public.transactions
   drop constraint if exists transactions_amount_check;
 
-alter table public.transactions
-  add constraint transactions_amount_check
-  check (case when type = 'partner_adjust' then amount <> 0 else amount > 0 end);
+do $do$
+begin
+  if exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public'
+       and table_name = 'transactions'
+       and column_name = 'favor_amount'
+  ) then
+    alter table public.transactions
+      add constraint transactions_amount_check
+      check (
+        case
+          when type = 'partner_adjust' then amount <> 0
+          when type = 'expense' then amount > 0 or favor_amount > 0
+          else amount > 0
+        end
+      );
+  else
+    alter table public.transactions
+      add constraint transactions_amount_check
+      check (case when type = 'partner_adjust' then amount <> 0 else amount > 0 end);
+  end if;
+end
+$do$;
 
 -- ------------------------------------------------------------
 -- 3. 彼女の負担分の制約を「支出のときだけ」に限る
@@ -1315,6 +1345,87 @@ comment on column public.transactions.split_group is
 create index if not exists idx_transactions_split_group
   on public.transactions (split_group)
   where split_group is not null;
+
+-- ============================================================
+-- おごり・値引き (favors.ts)
+--
+-- 既存プロジェクトへの追加は supabase/migration-favor.sql を実行する。
+-- 内容は同じもので、どちらも複数回実行して安全。
+--
+-- 「実際に払った額より本来の値段が高かった」回を記録するための3列と、
+-- **支払い 0円 の支出**(全額おごり・割引券で無料)を通すための金額の制約。
+--
+-- ---- 要点 ----
+--  * amount は「実際に自分の財布から出た額」のまま。浮いた分は足さない
+--    (払っていないお金が支出の合計・カテゴリ別・ペース・予算に乗らないように)。
+--  * それでも記録するのは、**誰に・いつ・いくらぶんご馳走になったか** が
+--    残っていないと、お礼もお返しもできないから。
+--  * 支出の行にだけ付く。預かり・返金・調整に「おごり」は無い。
+--  * 共有ページ(彼女が見る画面)には出さない。第三者にご馳走になった記録は
+--    彼女の残高と関係がないため、RPC は変更していない。
+-- ============================================================
+
+alter table public.transactions
+  add column if not exists favor_amount integer not null default 0;
+
+comment on column public.transactions.favor_amount is
+  'おごり・値引きで浮いた額(円)。0 = 無し。本来の値段は amount + favor_amount。'
+  '自分の支出(amount)には含めない。';
+
+alter table public.transactions
+  add column if not exists favor_kind text;
+
+comment on column public.transactions.favor_kind is
+  '浮いた理由。treat = 誰かにおごってもらった / discount = 割引・クーポン・ポイント。'
+  'null = おごりも値引きも無い(favor_amount = 0 と必ず一致する)。';
+
+alter table public.transactions
+  add column if not exists favor_from text not null default '';
+
+comment on column public.transactions.favor_from is
+  'おごってくれた人の名前。treat のときだけ入る(値引きには相手がいない)。';
+
+-- 3つの列が矛盾しないようにする。
+-- null は比較の結果も null になり、CHECK は null を通してしまうので、
+-- null を取り得る favor_kind は必ず coalesce を通してから比べること。
+alter table public.transactions
+  drop constraint if exists transactions_favor_check;
+
+alter table public.transactions
+  add constraint transactions_favor_check
+  check (
+    favor_amount >= 0
+    and coalesce(favor_kind, '') in ('', 'treat', 'discount')
+    -- 額と理由は必ずセット(片方だけの行を作らせない)
+    and (favor_amount > 0) = (coalesce(favor_kind, '') <> '')
+    -- 相手の名前が入るのは「おごり」のときだけ
+    and (favor_from = '' or coalesce(favor_kind, '') = 'treat')
+    and char_length(favor_from) <= 20
+    -- 預かり・返金・調整には付かない
+    and (type = 'expense' or (favor_amount = 0 and favor_kind is null and favor_from = ''))
+  );
+
+-- 支払い 0円 の支出を通す。**理由(favor_amount)が入っているときだけ** —
+-- 理由の無い 0円 は打ち間違いと区別が付かないため。
+-- 上の「2. 金額の制約をゆるめる」で作った制約を、ここで置き換えている
+-- (この節はそれより後ろに置くこと)。
+alter table public.transactions
+  drop constraint if exists transactions_amount_check;
+
+alter table public.transactions
+  add constraint transactions_amount_check
+  check (
+    case
+      when type = 'partner_adjust' then amount <> 0
+      when type = 'expense' then amount > 0 or favor_amount > 0
+      else amount > 0
+    end
+  );
+
+-- 「誰にご馳走になったか」で引くための索引(値引きの行は入れない)
+create index if not exists idx_transactions_favor_from
+  on public.transactions (favor_from)
+  where favor_from <> '';
 
 -- ============================================================
 -- Discord の Webhook URL を端末間で同期する

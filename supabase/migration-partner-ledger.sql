@@ -41,13 +41,43 @@ alter table public.transactions
 -- 手動調整だけは「ズレを直す」ものなので符号つき(マイナスもあり得る)。
 -- ただし 0 は残高が動かない = 履歴に残す意味が無いので禁止したままにします。
 -- 支出・預かり・返金は従来どおり正の整数のみ。
+--
+-- おごり・値引き (migration-favor.sql) を実行済みの環境では、**支払い 0円 の支出**
+-- (全額おごり・割引券で無料)も通す形になっている。この SQL をあとから実行し直した
+-- ときに、その条件を巻き戻して 0円 の記録を締め出さないよう、
+-- favor_amount 列があるかどうかで付け直す制約を変える。
+--
+-- (巻き戻すと、すでに 0円 の記録がある人はこの文そのものが
+--  「is violated by some row」で失敗し、制約が外れたままになる。
+--  順番に依存しない形にしておくほうが安全)
 -- ------------------------------------------------------------
 alter table public.transactions
   drop constraint if exists transactions_amount_check;
 
-alter table public.transactions
-  add constraint transactions_amount_check
-  check (case when type = 'partner_adjust' then amount <> 0 else amount > 0 end);
+do $do$
+begin
+  if exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public'
+       and table_name = 'transactions'
+       and column_name = 'favor_amount'
+  ) then
+    alter table public.transactions
+      add constraint transactions_amount_check
+      check (
+        case
+          when type = 'partner_adjust' then amount <> 0
+          when type = 'expense' then amount > 0 or favor_amount > 0
+          else amount > 0
+        end
+      );
+  else
+    alter table public.transactions
+      add constraint transactions_amount_check
+      check (case when type = 'partner_adjust' then amount <> 0 else amount > 0 end);
+  end if;
+end
+$do$;
 
 -- ------------------------------------------------------------
 -- 3. 彼女の負担分の制約を「支出のときだけ」に限る
