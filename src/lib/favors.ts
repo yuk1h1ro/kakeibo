@@ -29,7 +29,7 @@
 
 import type { Transaction } from './types'
 import { yenPlain } from './format'
-import { inRange, type DateRange } from './report'
+import { inRange, type DateRange, type RankItem } from './report'
 
 /**
  * 浮いた理由。
@@ -266,6 +266,39 @@ export function favorSummary(txs: readonly Transaction[], r: DateRange): FavorSu
     total: treatTotal + discountTotal,
     people,
   }
+}
+
+/**
+ * おごり(または値引き)の、カテゴリ別の内訳。(純粋関数)
+ *
+ * 記録そのものには入力のときからカテゴリが付いている(支出なので必須)。
+ * ただし **レポートのカテゴリ別支出には出てこない** — あちらは自分が払った額を
+ * 数えるので、全額おごってもらった回は 0円 として扱われるため(それが正しい)。
+ * 「何をご馳走になったか」はここでしか見られないので、この関数で別に出す。
+ *
+ * 金額は **浮いた額** を足す。払った額ではない。
+ * 並びは 額 → 件数 → キーで必ず決まる(report.ts のランキングと同じ作法)。
+ * 表示名の解決は呼び出し側に任せる(カテゴリ設定を持つ層に依存させないため)。
+ */
+export function favorCategoryBreakdown(
+  txs: readonly Transaction[],
+  r: DateRange,
+  kind: FavorKind,
+  labelOf: (id: string | null) => string
+): RankItem[] {
+  const acc = new Map<string, RankItem>()
+  for (const { tx, favor } of favorTransactions(txs, r)) {
+    if (favor.kind !== kind) continue
+    const key = tx.category ?? ''
+    const item = acc.get(key) ?? { key, label: labelOf(tx.category), total: 0, count: 0 }
+    item.total += favor.amount
+    item.count += 1
+    acc.set(key, item)
+  }
+  return [...acc.values()].sort(
+    (a, b) =>
+      b.total - a.total || b.count - a.count || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+  )
 }
 
 /**

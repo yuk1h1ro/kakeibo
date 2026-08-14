@@ -68,6 +68,21 @@ describe('FavorCard', () => {
     expect(html).toContain('¥500')
   })
 
+  it('何をご馳走になったかをカテゴリで出す(レポートのカテゴリ別支出には出てこないため)', () => {
+    const html = render([
+      treated({ category: 'food', favor_amount: 3200 }),
+      treated({ category: 'fun', favor_amount: 1500 }),
+    ])
+    expect(html).toContain('何をご馳走になったか')
+    expect(html).toContain('¥3,200')
+    expect(html).toContain('¥1,500')
+  })
+
+  it('カテゴリが1種類しかないときは内訳を出さない(同じ数字を2回並べない)', () => {
+    const html = render([treated({ category: 'food', favor_amount: 3200 })])
+    expect(html).not.toContain('何をご馳走になったか')
+  })
+
   it('ここの額が支出ではないことを必ず書く(上の合計と足せてしまわないように)', () => {
     expect(render([treated()])).toContain('支出の合計には入っていません')
   })

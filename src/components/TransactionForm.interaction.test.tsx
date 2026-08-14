@@ -213,10 +213,19 @@ describe('おごり・値引き', () => {
 
     expect(submitted[0]).toMatchObject({
       amount: 0,
+      // ¥0 の回でもカテゴリは付く(何をご馳走になったかが残る)
+      category: 'food',
       favor_amount: 3200,
       favor_kind: 'treat',
       favor_from: '田中',
     })
+  })
+
+  it('カテゴリを選ばないと、おごりでも保存できない(何をご馳走になったかを残すため)', async () => {
+    const { user } = setup()
+    await chooseFavor(user, /おごってもらった/)
+    await typeAmount(user, 'おごってもらった額(円)', '3200')
+    expect(saveButton().disabled).toBe(true)
   })
 
   it('浮いた額は支払い金額に足されない(支出の合計に嘘を乗せない)', async () => {

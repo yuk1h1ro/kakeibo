@@ -4,6 +4,7 @@ import {
   buildFavor,
   favorAmount,
   favorBadgeText,
+  favorCategoryBreakdown,
   favorColumns,
   favorNoticeText,
   favorOf,
@@ -238,6 +239,49 @@ describe('favorSummary', () => {
     const s = favorSummary(txs, range)
     expect(s.people).toEqual([{ name: '', count: 2, total: 1000, lastDate: '2026-08-03' }])
     expect(s.discountCount).toBe(0)
+  })
+})
+
+describe('favorCategoryBreakdown', () => {
+  const range = { start: '2026-08-01', end: '2026-08-31' }
+  const labelOf = (id: string | null) =>
+    id === 'food' ? '食費' : id === 'fun' ? '娯楽' : id === null ? '未分類' : id
+
+  it('浮いた額をカテゴリごとに足す(払った額ではない)', () => {
+    const txs = [
+      treated({ id: 'a', category: 'food', amount: 0, favor_amount: 3200 }),
+      treated({ id: 'b', category: 'food', amount: 1000, favor_amount: 800 }),
+      treated({ id: 'c', category: 'fun', favor_amount: 1500 }),
+    ]
+    expect(favorCategoryBreakdown(txs, range, 'treat', labelOf)).toEqual([
+      { key: 'food', label: '食費', total: 4000, count: 2 },
+      { key: 'fun', label: '娯楽', total: 1500, count: 1 },
+    ])
+  })
+
+  it('おごりと値引きは混ぜない', () => {
+    const txs = [
+      treated({ id: 'a', category: 'food', favor_amount: 1000 }),
+      tx({ id: 'b', category: 'food', favor_amount: 500, favor_kind: 'discount' }),
+    ]
+    expect(favorCategoryBreakdown(txs, range, 'treat', labelOf)).toEqual([
+      { key: 'food', label: '食費', total: 1000, count: 1 },
+    ])
+    expect(favorCategoryBreakdown(txs, range, 'discount', labelOf)).toEqual([
+      { key: 'food', label: '食費', total: 500, count: 1 },
+    ])
+  })
+
+  it('カテゴリが無い記録も1つに束ねて出す(黙って落とさない)', () => {
+    const txs = [treated({ id: 'a', category: null, favor_amount: 900 })]
+    expect(favorCategoryBreakdown(txs, range, 'treat', labelOf)).toEqual([
+      { key: '', label: '未分類', total: 900, count: 1 },
+    ])
+  })
+
+  it('期間の外は数えない', () => {
+    const txs = [treated({ id: 'a', date: '2026-07-31', category: 'food' })]
+    expect(favorCategoryBreakdown(txs, range, 'treat', labelOf)).toEqual([])
   })
 })
 
