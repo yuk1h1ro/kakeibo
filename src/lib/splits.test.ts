@@ -96,6 +96,19 @@ describe('buildSplitInputs', () => {
     expect(rows.map((r) => r.partner_amount)).toEqual([800, 400])
   })
 
+  it('おごり・値引きは必ず「無し」にする(写すと内訳の数だけ浮いた額が増える)', () => {
+    const withFavor = buildSplitInputs(
+      { ...base, favor_amount: 500, favor_kind: 'discount', favor_from: '' },
+      parts,
+      'group-1'
+    )
+    for (const r of withFavor) {
+      expect(r.favor_amount).toBe(0)
+      expect(r.favor_kind).toBeNull()
+      expect(r.favor_from).toBe('')
+    }
+  })
+
   it('同じ束ねIDが入り、日付・お店・メモ・タグは全部の行に写る', () => {
     for (const r of rows) {
       expect(r.split_group).toBe('group-1')
@@ -210,6 +223,13 @@ describe('splitPositions / splitSiblings', () => {
 })
 
 describe('carryPartnerAmount / splitCarryNotice(上段の入力を捨てない)', () => {
+  it('おごり・値引きが外れることも、その場で知らせる', () => {
+    const notice = splitCarryNotice(0, false, true)
+    expect(notice).toContain('おごり・値引き')
+    // 付けていなければ、要らない注意は増やさない
+    expect(splitCarryNotice(0, false, false)).toBeNull()
+  })
+
   it('上段の彼女の負担分を先頭の内訳から順に引き継ぐ', () => {
     const parts = carryPartnerAmount(evenSplit(5000, 2, 'food'), 1200)
     expect(parts.map((p) => p.partnerAmount)).toEqual([1200, 0])

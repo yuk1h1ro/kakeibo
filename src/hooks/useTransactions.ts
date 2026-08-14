@@ -41,6 +41,7 @@ import {
 import { partnerBalance } from '../lib/partnerBalance'
 import {
   initTxExtensions,
+  isFavorAmountRejection,
   isLedgerTypeRejection,
   isTxFeatureAvailable,
   markTxFeatureUnavailable,
@@ -53,6 +54,7 @@ import {
   type ServerErrorLike,
 } from '../lib/serverErrors'
 import {
+  favorRejectionGuidance,
   formatGuidance,
   guidanceForServerError,
   isOnlineNow,
@@ -92,6 +94,11 @@ export interface TransactionInput {
   tags?: string[]
   // 分割した会計の束ねID (機能096)
   split_group?: string | null
+  // おごり・値引き (favors.ts)。3つで1組(額・理由・相手)。
+  // amount には足さない — 払っていないお金を支出の集計に混ぜないため
+  favor_amount?: number
+  favor_kind?: string | null
+  favor_from?: string
   // 作成日時。ふだんは送らず DB の now() に任せるが、**元に戻す**ときだけは
   // 元の値を写す (機能159)。写さないと復元した瞬間が created_at になり、
   // 同じ日の中での並び順が変わり、レポートの「時間帯別」も復元時刻に付け替わる。
@@ -383,11 +390,23 @@ export function useTransactions(supabase: SupabaseClient) {
               markTxFeatureUnavailable('tagging')
               continue
             }
+            // おごり・値引き(favors.ts)の3列も同じ扱い。落ちても
+            // 「誰にご馳走になったか」が付かないだけで、金額と日付は必ず残る。
+            // ただし全額おごりの 0円 は、列を落としても金額の制約に弾かれる —
+            // それは下の isFavorAmountRejection が見分けて案内する
+            if (isTxFeatureAvailable('favor') && op.payload?.favor_amount !== undefined) {
+              markTxFeatureUnavailable('favor')
+              continue
+            }
           }
           // ここから先は「サーバーに届いたうえで断られた」失敗。
           // 直せる失敗(migration 未実行)か、直しようのない拒否(制約違反)かで
           // 扱いを変えるが、**どちらでも op を捨てない** のは共通の約束。
-          const ledgerRejected = isLedgerTypeRejection(err, op.payload?.type)
+          // 支払い 0円 の記録が金額の制約に弾かれた = migration-favor.sql 未実行。
+          // 種別の拒否より先に見る(こちらは支出、あちらは返金・調整なので重ならないが、
+          // 判定の順番を固定しておくほうが後から読んで迷わない)
+          const favorRejected = isFavorAmountRejection(err, op.payload)
+          const ledgerRejected = !favorRejected && isLedgerTypeRejection(err, op.payload?.type)
           if (ledgerRejected) {
             // 返金・調整の種別が DB のチェック制約に無い = migration 未実行。
             // 導線を閉じて、これ以上同じ失敗を増やさない
@@ -397,12 +416,16 @@ export function useTransactions(supabase: SupabaseClient) {
             ? // どの SQL を実行すればよいかは、code / details / hint が残っている
               // ここでしか分からない。決め打ちの文言ではなく、必ず err から引く
               guidanceForServerError(err, isOnlineNow())
-            : ledgerRejected
-              ? ledgerRejectionGuidance(err)
-              : syncRejectedGuidance(err, isOnlineNow())
+            : favorRejected
+              ? // 制約名 (transactions_amount_check) だけでは「調整のマイナス」と
+                // 区別が付かないので、中身まで見たここでファイル名を決める
+                favorRejectionGuidance(err)
+              : ledgerRejected
+                ? ledgerRejectionGuidance(err)
+                : syncRejectedGuidance(err, isOnlineNow())
           // 送り直せば通る見込みがあるのは migration 系だけ。
           // それ以外(制約違反など)は何度送っても同じなので、すぐ隔離する
-          const retryable = isSchemaError(err) || ledgerRejected
+          const retryable = isSchemaError(err) || ledgerRejected || favorRejected
           const attempts = recordSyncFailure(op.opId)
           if (!retryable || reachedAttemptLimit(attempts)) {
             // 同じ op が何度も断られると、その後ろの記録がすべて送れなくなる。

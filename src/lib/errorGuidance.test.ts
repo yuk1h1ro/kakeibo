@@ -6,12 +6,24 @@ import {
   formatGuidance,
   guidanceForMessage,
   guidanceForServerError,
+  favorRejectionGuidance,
   ledgerRejectionGuidance,
   migrationTargetFor,
   syncRejectedGuidance,
 } from './errorGuidance'
 
 describe('migrationTargetFor', () => {
+  it('おごり・値引きの列が無いエラーからも、実行すべきSQLを名指しできる', () => {
+    expect(migrationTargetFor("Could not find the 'favor_amount' column of 'transactions'")).toEqual({
+      what: '取引の「おごり・値引き」列',
+      file: 'migration-favor.sql',
+    })
+    expect(migrationTargetFor('column transactions.favor_from does not exist')).toEqual({
+      what: '取引の「おごってくれた人」列',
+      file: 'migration-favor.sql',
+    })
+  })
+
   it('列が無いエラーから、実行すべきSQLを名指しできる', () => {
     expect(migrationTargetFor('column transactions.store does not exist')).toEqual({
       what: '取引の「お店」列',
@@ -249,6 +261,20 @@ describe('ledgerRejectionGuidance', () => {
     expect(g.kind).toBe('migration')
     expect(g.actions.join(' ')).toContain('supabase/migration-partner-ledger.sql')
     expect(g.actions.join(' ')).toContain('記録は端末に残っています')
+  })
+})
+
+describe('favorRejectionGuidance', () => {
+  it('支払い 0円 を保存できないときは、実行すべきSQLと記録が残ることを伝える', () => {
+    const g = favorRejectionGuidance({
+      message: 'new row violates check constraint "transactions_amount_check"',
+      code: '23514',
+    })
+    expect(g.kind).toBe('migration')
+    expect(g.actions.join(' ')).toContain('supabase/migration-favor.sql')
+    expect(g.actions.join(' ')).toContain('記録は端末に残っています')
+    // 「あとから ledger を実行し直すと制約が上書きされる」道も案内に含める
+    expect(g.actions.join(' ')).toContain('migration-partner-ledger.sql')
   })
 })
 

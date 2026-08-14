@@ -107,6 +107,10 @@ export function validateSplit(parts: readonly SplitPart[], total: number): Split
  * 日付・お店・メモ・タグ・気分は元の1件のものを全部の行に写す
  * (履歴でどの行を開いても「何の買い物だったか」が分かるように)。
  * 支払った人の指定(partner_paid)は分割では使わないので必ず 0 にする。
+ *
+ * おごり・値引き (favors.ts) も同じく必ず「無し」にする。写すと **内訳の数だけ
+ * 浮いた額が増える**(2つに分ければ 500円の割引が 1,000円 になる)。
+ * 画面側は分割中に導線を出さないが、ここでも落としておく — 組み立ての最後の砦。
  */
 export function buildSplitInputs(
   base: TransactionInput,
@@ -120,6 +124,9 @@ export function buildSplitInputs(
     category: p.category,
     partner_amount: p.partnerAmount,
     partner_paid: 0,
+    favor_amount: 0,
+    favor_kind: null,
+    favor_from: '',
     split_group: groupId,
   }))
 }
@@ -152,7 +159,11 @@ export function carryPartnerAmount(
  * 入れた値が黙って消えるのがいちばん困るので、消えた/移したことをその場に出す。
  * 金額は ¥ 付きで書く(目隠し 機能169 が画面側で伏せられるように)。
  */
-export function splitCarryNotice(carriedPartnerAmount: number, payerWasPartner: boolean): string | null {
+export function splitCarryNotice(
+  carriedPartnerAmount: number,
+  payerWasPartner: boolean,
+  favorWasSet = false
+): string | null {
   const carried =
     carriedPartnerAmount > 0
       ? `上段の「彼女の負担分」${yenPlain(carriedPartnerAmount)} は内訳に振り分けました。内訳ごとに直せます。`
@@ -160,7 +171,13 @@ export function splitCarryNotice(carriedPartnerAmount: number, payerWasPartner: 
   const payer = payerWasPartner
     ? '「支払った人」は分割では使えないため、自分が全額払った扱いで保存されます(必要なら分割をやめてから入力してください)。'
     : ''
-  const text = `${carried}${payer}`
+  // おごり・値引き (favors.ts) も分割では使えない。浮いた額を内訳のどれに
+  // 割り当てるかは決めようがなく、按分すれば1円がどこかに寄る。
+  // 「誰にご馳走になったか」が黙って消えるのがいちばん困るので、その場に出す
+  const favor = favorWasSet
+    ? '「おごり・値引き」は分割では使えないため、外れます(必要なら分割をやめてから入力してください)。'
+    : ''
+  const text = `${carried}${payer}${favor}`
   return text === '' ? null : text
 }
 

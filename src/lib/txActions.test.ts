@@ -60,6 +60,22 @@ describe('transactionToInput', () => {
     expect(input.split_group).toBe('g1')
   })
 
+  it('おごり・値引きは3つまとめて写す(1つでも欠けると保存できない行になる)', () => {
+    const input = transactionToInput(
+      tx({ amount: 0, favor_amount: 3200, favor_kind: 'treat', favor_from: '田中' })
+    )
+    expect(input.favor_amount).toBe(3200)
+    expect(input.favor_kind).toBe('treat')
+    expect(input.favor_from).toBe('田中')
+  })
+
+  it('おごりが付いていない記録には favor のキーを足さない(列が無いDBでも通す)', () => {
+    const input = transactionToInput(tx())
+    expect('favor_amount' in input).toBe(false)
+    expect('favor_kind' in input).toBe(false)
+    expect('favor_from' in input).toBe(false)
+  })
+
   it('書き換えでは created_at を送らない(仮置きの時刻で本物を上書きしない)', () => {
     expect('created_at' in transactionToInput(tx())).toBe(false)
     expect('created_at' in withCategory(tx(), 'daily')).toBe(false)
@@ -83,6 +99,16 @@ describe('duplicateInput (機能149)', () => {
 
   it('作成日時は引き継がない(複製はいま作った別の記録)', () => {
     expect('created_at' in duplicateInput(tx(), '2026-08-04')).toBe(false)
+  })
+
+  it('おごりは引き継ぐ(¥0 の記録を「理由の無い ¥0」にして保存不能にしないため)', () => {
+    const input = duplicateInput(
+      tx({ amount: 0, favor_amount: 3200, favor_kind: 'treat', favor_from: '田中' }),
+      '2026-08-04'
+    )
+    expect(input.amount).toBe(0)
+    expect(input.favor_amount).toBe(3200)
+    expect(input.favor_kind).toBe('treat')
   })
 })
 
