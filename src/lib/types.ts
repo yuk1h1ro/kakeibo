@@ -57,6 +57,12 @@ export interface Transaction {
   // 1件を複数カテゴリに分割したときの束ねID (機能096)。
   // 分割は「1行 = 1カテゴリ」の独立した行として保存し、この列だけで束ねる。
   split_group?: string | null
+  // おごり・値引き (favors.ts)。「実際に払った額より本来の値段が高かった」回。
+  // 列が無い環境では undefined。**amount には一切足さない** —
+  // 払っていないお金を支出の集計に混ぜないため(本来の値段は amount + favor_amount)。
+  favor_amount?: number | null
+  favor_kind?: string | null // 'treat'(おごり) / 'discount'(値引き) / null
+  favor_from?: string | null // おごってくれた人。おごりのときだけ入る
 }
 
 /** 彼女が実際に払った額。列が無い/未設定は 0(= 自分が全額払った) */
@@ -91,6 +97,10 @@ export function satisfactionOf(t: Transaction): Satisfaction | null {
  * *誰がいくら消費したか* であって、財布から出た現金の動きではないため。
  * 立て替えの向きは預かり残高(partnerBalance.ts)だけが引き受ける。
  * 預かり・返金・調整は支出ではないので 0。
+ *
+ * おごり・値引き (favors.ts) でも変わらない。浮いた分は払っていないお金なので、
+ * ここに足すと支出の合計・ペース・予算のすべてに嘘が乗る。
+ * 全額おごってもらった回は amount が 0 で、この関数も 0 を返す(それが正しい)。
  */
 export function ownAmount(t: Transaction): number {
   return t.type === 'expense' ? t.amount - t.partner_amount : 0

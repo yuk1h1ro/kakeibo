@@ -5,6 +5,11 @@
 //                → supabase/migration-partner-ledger.sql
 //   tagging    … tags 列 + split_group 列
 //                → supabase/migration-tags-splits.sql
+//   favor      … favor_amount / favor_kind / favor_from 列(おごり・値引き)
+//                → supabase/migration-favor.sql
+//                この SQL は amount > 0 の制約もゆるめる(全額おごりの 0円 を
+//                保存するため)ので、列が無い環境では 0円 で保存させないこと。
+//                導線を出すかどうかの判断は、その一点でも効いている。
 //
 // 過去に「マイグレーション未実行が原因で入力が失われた」事故があるので、
 // ここは二重に守る:
@@ -21,13 +26,13 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { isSchemaError, type ServerErrorLike } from './serverErrors'
 import { isPartnerLedgerType, type TransactionType } from './types'
 
-export type TxFeature = 'settlement' | 'tagging'
+export type TxFeature = 'settlement' | 'tagging' | 'favor'
 
 const STORAGE_KEY = 'kakeibo.txExtensions'
 
 // 既定は「使える」。初回は必ず起動直後の probe が答えを上書きするし、
 // 使えないと決めつけると、通信できないときに機能が消えてしまうため。
-const state: Record<TxFeature, boolean> = { settlement: true, tagging: true }
+const state: Record<TxFeature, boolean> = { settlement: true, tagging: true, favor: true }
 
 function loadCache(): void {
   try {
@@ -38,6 +43,7 @@ function loadCache(): void {
     const o = parsed as Partial<Record<TxFeature, unknown>>
     if (typeof o.settlement === 'boolean') state.settlement = o.settlement
     if (typeof o.tagging === 'boolean') state.tagging = o.tagging
+    if (typeof o.favor === 'boolean') state.favor = o.favor
   } catch {
     // 壊れたキャッシュは無視(既定に戻るだけ)
   }
@@ -112,6 +118,7 @@ export async function initTxExtensions(supabase: SupabaseClient): Promise<void> 
   await Promise.all([
     probe(supabase, 'settlement', 'partner_paid'),
     probe(supabase, 'tagging', 'tags, split_group'),
+    probe(supabase, 'favor', 'favor_amount, favor_kind, favor_from'),
   ])
 }
 
@@ -122,6 +129,9 @@ interface ExtendedPayload {
   partner_paid?: number | null
   tags?: string[] | null
   split_group?: string | null
+  favor_amount?: number | null
+  favor_kind?: string | null
+  favor_from?: string | null
 }
 
 /**
@@ -133,6 +143,9 @@ interface ExtendedPayload {
  *   partner_paid が落ちれば「自分が全額払った」扱い、
  *   split_group が落ちれば分割の束ねだけが消えて金額とカテゴリは正しいまま、
  *   tags が落ちればタグだけが付かない。
+ *   favor_* が落ちれば「誰にご馳走になったか」だけが付かない
+ *   (この場合、そもそも画面がおごりの導線を出さないので値は入っていない。
+ *    列が無いと分かる前に入力してしまった1件のための保険)。
  */
 export function stripUnavailableColumns<T extends ExtendedPayload>(payload: T): Partial<T> {
   const out: Partial<T> = { ...payload }
@@ -140,6 +153,11 @@ export function stripUnavailableColumns<T extends ExtendedPayload>(payload: T): 
   if (!state.tagging) {
     delete out.tags
     delete out.split_group
+  }
+  if (!state.favor) {
+    delete out.favor_amount
+    delete out.favor_kind
+    delete out.favor_from
   }
   return out
 }
@@ -158,6 +176,30 @@ export function isLedgerTypeRejection(
 ): boolean {
   if (type === undefined || type === 'expense' || type === 'partner_deposit') return false
   if (!isPartnerLedgerType(type)) return false
+  if (err.code === '23514') return true
+  return /violates check constraint|check constraint/i.test(err.message)
+}
+
+/**
+ * 「支払い 0円 の記録が、金額の制約に弾かれた」か。(純粋関数)
+ *
+ * 全額おごり・割引券で無料の回は amount が 0 になる。これを通すのは
+ * migration-favor.sql が付け直す transactions_amount_check だけなので、
+ * 未実行(または後から migration-partner-ledger.sql を実行し直して上書きされた)
+ * サーバーでは 23514 で返ってくる。
+ *
+ * 制約名だけでは「調整のマイナス金額」と区別が付かない — どちらも
+ * transactions_amount_check。**保存しようとした中身を知っているのはここだけ** なので、
+ * 支出で金額が 0 のときに限って、この形だと判断する。
+ * 見分けを誤って普通の拒否として扱うと op が捨てられ、記録が消える。
+ */
+export function isFavorAmountRejection(
+  err: ServerErrorLike,
+  payload: { type?: TransactionType; amount?: number } | undefined
+): boolean {
+  if (!payload) return false
+  if (payload.type !== undefined && payload.type !== 'expense') return false
+  if (payload.amount !== 0) return false
   if (err.code === '23514') return true
   return /violates check constraint|check constraint/i.test(err.message)
 }

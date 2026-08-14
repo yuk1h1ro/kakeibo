@@ -81,7 +81,7 @@ describe('既存の記録を書き戻す経路は、送る内容を組み立て�
     // どれか1つを書き忘れて残高・通知・内訳が静かに壊れる形になっている。
     // (新しい1件を作るフォーム — TransactionForm — は別の話なので、
     //  この一覧には入れていない)
-    for (const key of ['partner_paid:', 'split_group:', 'satisfaction:']) {
+    for (const key of ['partner_paid:', 'split_group:', 'satisfaction:', 'favor_amount:']) {
       expect(source, `${name} に手書きの ${key} がある`).not.toContain(key)
     }
   })
@@ -96,7 +96,7 @@ describe('既存の記録を書き戻す経路は、送る内容を組み立て�
 // **Transaction の列と、写される列の対応** をここで固定する。
 // ============================================================
 describe('書き戻しの土台が写す項目', () => {
-  it('その記録が持っている事実(誰が払ったか・タグ・分割・自動生成・気分)を1つも落とさない', async () => {
+  it('その記録が持っている事実(誰が払ったか・タグ・分割・自動生成・気分・おごり)を1つも落とさない', async () => {
     const { transactionToInput } = await import('../lib/txActions')
     const input = transactionToInput({
       id: 't1',
@@ -112,6 +112,9 @@ describe('書き戻しの土台が写す項目', () => {
       split_group: 'g1',
       source: 'recurring',
       satisfaction: 'good',
+      favor_amount: 1200,
+      favor_kind: 'treat',
+      favor_from: '田中',
       created_at: '2026-08-03T01:00:00.000Z',
     })
     expect(input).toMatchObject({
@@ -127,6 +130,11 @@ describe('書き戻しの土台が写す項目', () => {
       split_group: 'g1',
       source: 'recurring',
       satisfaction: 'good',
+      // おごりは3つで1組。1つでも落ちると、¥0 の記録が保存できなくなるか、
+      // 「誰にご馳走になったか」が消える
+      favor_amount: 1200,
+      favor_kind: 'treat',
+      favor_from: '田中',
     })
     // created_at だけは写さない — 書き換えで送ると、楽観表示の仮の時刻で
     // サーバーの本物を上書きしてしまう(入れ直す restoreInput だけが写す)

@@ -328,6 +328,10 @@ describe('transactionsCsv', () => {
       satisfaction: 'good',
       split_group: 'g,1',
       source: 'recurring',
+      // おごってくれた人の名前にもカンマが入り得る(「山田, 部長」のような書き方)
+      favor_amount: 1200,
+      favor_kind: 'treat',
+      favor_from: '田中,部長',
     })
     const rows = parseCsv(transactionsCsv([nasty], labelOf))
     expect(rows).toHaveLength(2)
@@ -342,6 +346,9 @@ describe('transactionsCsv', () => {
       '2500',
       '5000',
       '満足',
+      '1200',
+      'おごり',
+      '田中,部長',
       '繰り返し入力',
       '2026-08-03T01:00:00.000Z',
       'g,1',

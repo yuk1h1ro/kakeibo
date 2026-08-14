@@ -62,6 +62,32 @@ describe('diffTransaction', () => {
     expect(changes[0]).toEqual({ label: 'メモ', from: 'おにぎり', to: '(なし)' })
   })
 
+  it('おごり・値引きは1行にまとめ、相手の名前まで残す', () => {
+    const changes = diffTransaction(
+      tx({ amount: 0, favor_amount: 3200, favor_kind: 'treat', favor_from: '田中' }),
+      input({ amount: 0, favor_amount: 3200, favor_kind: 'treat', favor_from: '佐藤' }),
+      labelOf
+    )
+    expect(changes).toEqual([
+      { label: 'おごり・値引き', from: '田中さんのおごり ¥3,200', to: '佐藤さんのおごり ¥3,200' },
+    ])
+  })
+
+  it('おごりを外したことも履歴に残る', () => {
+    const changes = diffTransaction(
+      tx({ favor_amount: 500, favor_kind: 'discount', favor_from: '' }),
+      input({ favor_amount: 0, favor_kind: null, favor_from: '' }),
+      labelOf
+    )
+    expect(changes).toEqual([{ label: 'おごり・値引き', from: '割引 ¥500', to: '(なし)' }])
+  })
+
+  it('おごりが無いまま更新しても、余計な差分を作らない', () => {
+    expect(
+      diffTransaction(tx(), input({ favor_amount: 0, favor_kind: null, favor_from: '' }), labelOf)
+    ).toEqual([])
+  })
+
   it('複数項目の変更をすべて拾う', () => {
     const changes = diffTransaction(
       tx(),

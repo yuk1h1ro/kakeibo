@@ -19,6 +19,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { TransactionInput } from '../hooks/useTransactions'
 import type { Transaction } from './types'
 import { partnerPaid, tagsOf } from './types'
+import { favorOf } from './favors'
 import { formatDate, yenPlain } from './format'
 import { isSchemaError } from './serverErrors'
 
@@ -132,7 +133,31 @@ export function diffTransaction(
   if (after.split_group !== undefined) {
     push('分割', splitGroupText(before.split_group), splitGroupText(after.split_group))
   }
+  // おごり・値引き (favors.ts)。3列まとめて1行の差分にする —
+  // 「額」「理由」「相手」が別々の行で出ると、¥0 の記録に何が起きたのかが読み取れない。
+  // 相手の名前が変わったこと(書き間違いの直し)も、この1行で追える
+  if (after.favor_amount !== undefined) {
+    push('おごり・値引き', favorText(before), favorText(after))
+  }
   return out
+}
+
+/**
+ * おごり・値引きを表示用の1行にする。(純粋関数)
+ * 相手の名前まで出す。「誰にご馳走になったか」を書き換えたことが
+ * 履歴に残らないと、この機能の記録としての値打ちが半分になる。
+ */
+function favorText(t: {
+  favor_amount?: number | null
+  favor_kind?: string | null
+  favor_from?: string | null
+}): string {
+  const favor = favorOf({ ...t, type: 'expense' })
+  if (favor === null) return '(なし)'
+  if (favor.kind === 'discount') return `割引 ${yenPlain(favor.amount)}`
+  return favor.from === ''
+    ? `おごり ${yenPlain(favor.amount)}`
+    : `${favor.from}さんのおごり ${yenPlain(favor.amount)}`
 }
 
 /** タグの一覧を表示用の1行にする。並び順の違いは差分にしない。(純粋関数) */

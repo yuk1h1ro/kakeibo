@@ -739,3 +739,73 @@ button.rp-co-back {
   margin-top: 12px;
   line-height: 1.7;
 }
+
+/* ---------- おごり・値引きの振り返り (favors.ts) ---------- */
+
+.favor-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.favor-lead {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.favor-strong {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 人ごとの1行。名前を主役にして、回数と最後の日はその下に小さく添える。
+   金額は右端に揃える(他のランキングと同じ読み方ができるように) */
+.favor-people {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.favor-person {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 2px 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-btn);
+  background: var(--fill);
+}
+
+.favor-person-name {
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.favor-person-sub {
+  grid-column: 1;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.favor-person-amount {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: center;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.favor-discount {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* 「何をご馳走になったか」の見出し。人ごとの一覧との切れ目が分かればよいので小さく */
+.favor-sub-head {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+}

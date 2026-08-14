@@ -31,6 +31,7 @@ import {
   type Transaction,
   type TransactionType,
 } from './types'
+import { favorOf, type FavorKind } from './favors'
 
 // ---------- RFC 4180 ----------
 
@@ -90,6 +91,9 @@ export const CSV_HEADERS = [
   '彼女の負担分',
   '彼女が払った額',
   '気分',
+  'おごり・値引き額',
+  'おごり・値引きの別',
+  'おごってくれた人',
   '記録元',
   '記録日時',
   '分割ID',
@@ -108,6 +112,14 @@ const SATISFACTION_LABELS: Record<Satisfaction, string> = {
   good: '満足',
   neutral: '普通',
   regret: '後悔',
+}
+
+// おごり・値引き (favors.ts)。金額(amount)には入っていない額なので、
+// 列を分けて出す。ここを落とすと「誰にご馳走になったか」がバックアップから
+// 消え、書き戻しても復元できない
+const FAVOR_LABELS: Record<FavorKind, string> = {
+  treat: 'おごり',
+  discount: '割引',
 }
 
 /**
@@ -167,6 +179,7 @@ export function transactionToCsvRow(
 ): string[] {
   const category = toText(t.category)
   const satisfaction = satisfactionOf(t)
+  const favor = favorOf(t)
   return [
     toText(t.date),
     typeLabel(t.type),
@@ -180,6 +193,9 @@ export function transactionToCsvRow(
     toNumberText(t.partner_amount),
     toNumberText(partnerPaid(t)),
     satisfaction ? SATISFACTION_LABELS[satisfaction] : '',
+    favor ? toNumberText(favor.amount) : '',
+    favor ? FAVOR_LABELS[favor.kind] : '',
+    favor ? favor.from : '',
     sourceLabel(t.source),
     toText(t.created_at),
     toText(t.split_group),

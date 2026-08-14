@@ -73,6 +73,10 @@ const MIGRATION_BY_COLUMN: [name: string, file: string, what: string][] = [
   ['partner_paid', 'migration-partner-ledger.sql', '取引の「彼女が払った額」列'],
   ['tags', 'migration-tags-splits.sql', '取引の「タグ」列'],
   ['split_group', 'migration-tags-splits.sql', '取引の「分割の束ね」列'],
+  //   favor_amount / favor_kind / favor_from … migration-favor.sql の「1. 列を足す」
+  ['favor_amount', 'migration-favor.sql', '取引の「おごり・値引き」列'],
+  ['favor_kind', 'migration-favor.sql', '取引の「おごり・値引きの別」列'],
+  ['favor_from', 'migration-favor.sql', '取引の「おごってくれた人」列'],
 ]
 
 /**
@@ -261,6 +265,33 @@ function migrationGuidance(target: MigrationTarget, detail: string | null): Guid
  * 別に持っている。呼び出し側 (useTransactions) は保存しようとした種別まで見て
  * この形だと判断しているので、ここでは原因を言い切ってよい。
  */
+/**
+ * 「支払い 0円 の記録を、このサーバーがまだ受け付けない」ときの案内。(純粋関数)
+ *
+ * 全額おごってもらった回・割引券で無料になった回は amount が 0 になる。
+ * これを通すのは supabase/migration-favor.sql が付け直す transactions_amount_check
+ * だけなので、未実行なら 23514 で弾かれる。
+ *
+ * 制約名だけでは「調整のマイナス金額(ledger)」と見分けが付かない
+ * (どちらも transactions_amount_check)。どちらなのかは **保存しようとした中身**
+ * を知っている呼び出し側 (useTransactions) にしか分からないので、
+ * そこで見分けてからこの関数を呼ぶ。
+ */
+export function favorRejectionGuidance(err: ServerErrorLike): Guidance {
+  const detail = err.message.trim() === '' ? null : err.message.trim()
+  return {
+    kind: 'migration',
+    summary:
+      '支払い 0円 の記録(全額おごり・割引券で無料)を、いまの Supabase がまだ受け付けられません(マイグレーション未実行)。',
+    actions: [
+      'Supabase の SQL Editor で supabase/migration-favor.sql の中身を貼り付けて実行してください(何回実行しても安全です)。',
+      'すでに実行済みの場合は、そのあとで migration-partner-ledger.sql を実行し直していないか確かめてください(金額の制約が上書きされます。migration-favor.sql をもう一度実行すれば直ります)。',
+      '実行が済めば、入力した記録はそのまま自動で同期されます(記録は端末に残っています)。',
+    ],
+    detail,
+  }
+}
+
 export function ledgerRejectionGuidance(err: ServerErrorLike): Guidance {
   const detail = err.message.trim() === '' ? null : err.message.trim()
   return {

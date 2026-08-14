@@ -179,6 +179,136 @@ describe('入力フォームが保存する内容', () => {
 })
 
 // ============================================================
+// おごり・値引き (favors.ts)。
+//
+// 守りたいのは3つ:
+//   ・**全額おごってもらった回(支払い 0円)を保存できること**。
+//     ここが通らないと、ご馳走になった事実そのものが記録に残せない
+//     (この機能を入れるまでは、金額 > 0 が絶対条件だった)
+//   ・浮いた額を amount に混ぜないこと(支出の合計に嘘が乗る)
+//   ・理由の無い 0円 はこれまでどおり弾くこと
+// ============================================================
+describe('おごり・値引き', () => {
+  /** 開いている「詳細」の中で、おごり(または割引)を押す */
+  async function pickFavor(user: User, name: RegExp) {
+    const kinds = within(screen.getByRole('group', { name: 'おごり・値引き' }))
+    await user.click(kinds.getByRole('button', { name }))
+  }
+
+  /** 「詳細」を開いて、おごり(または割引)を選ぶ */
+  async function chooseFavor(user: User, name: RegExp) {
+    await openOptions(user)
+    await pickFavor(user, name)
+  }
+
+  it('全額おごってもらった回は、支払い 0円 のまま保存できる', async () => {
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    // 金額欄には何も打たない(自分は1円も払っていない)
+    await chooseFavor(user, /おごってもらった/)
+    await typeAmount(user, 'おごってもらった額(円)', '3200')
+    await user.type(field('おごってくれた人'), '田中')
+    expect(saveButton().disabled).toBe(false)
+    await user.click(saveButton())
+
+    expect(submitted[0]).toMatchObject({
+      amount: 0,
+      // ¥0 の回でもカテゴリは付く(何をご馳走になったかが残る)
+      category: 'food',
+      favor_amount: 3200,
+      favor_kind: 'treat',
+      favor_from: '田中',
+    })
+  })
+
+  it('カテゴリを選ばないと、おごりでも保存できない(何をご馳走になったかを残すため)', async () => {
+    const { user } = setup()
+    await chooseFavor(user, /おごってもらった/)
+    await typeAmount(user, 'おごってもらった額(円)', '3200')
+    expect(saveButton().disabled).toBe(true)
+  })
+
+  it('浮いた額は支払い金額に足されない(支出の合計に嘘を乗せない)', async () => {
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '1000')
+    await chooseFavor(user, /おごってもらった/)
+    await typeAmount(user, 'おごってもらった額(円)', '2200')
+    await user.click(saveButton())
+
+    expect(submitted[0].amount).toBe(1000)
+    expect(submitted[0].favor_amount).toBe(2200)
+  })
+
+  it('割引には相手の名前を聞かない(相手のいない好意なので)', async () => {
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '2500')
+    await chooseFavor(user, /割引・ポイント/)
+    await typeAmount(user, '安くなった額(円)', '500')
+    expect(screen.queryByLabelText('おごってくれた人')).toBeNull()
+    await user.click(saveButton())
+
+    expect(submitted[0]).toMatchObject({
+      amount: 2500,
+      favor_amount: 500,
+      favor_kind: 'discount',
+      favor_from: '',
+    })
+  })
+
+  it('理由の無い 0円 は、これまでどおり保存できない', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    // 種類だけ選んで額を入れない = おごりとして成立していない
+    await chooseFavor(user, /おごってもらった/)
+    expect(saveButton().disabled).toBe(true)
+  })
+
+  it('もう一度押すと外れ、外したら 0円 では保存できなくなる', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    await chooseFavor(user, /おごってもらった/)
+    await typeAmount(user, 'おごってもらった額(円)', '3200')
+    expect(saveButton().disabled).toBe(false)
+
+    // 「詳細」は開いたまま、同じチップをもう一度押す
+    await pickFavor(user, /おごってもらった/)
+    expect(saveButton().disabled).toBe(true)
+  })
+
+  it('保存したあと、次の1件に前のおごりが残らない', async () => {
+    // 残ると、覚えのない「田中さんのおごり」が静かに増えていく
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await chooseFavor(user, /おごってもらった/)
+    await typeAmount(user, 'おごってもらった額(円)', '3200')
+    await user.type(field('おごってくれた人'), '田中')
+    await user.click(saveButton())
+
+    await typeAmount(user, '支払い金額(円)', '800')
+    await user.click(saveButton())
+
+    expect(submitted).toHaveLength(2)
+    expect(submitted[1]).toMatchObject({
+      amount: 800,
+      favor_amount: 0,
+      favor_kind: null,
+      favor_from: '',
+    })
+  })
+
+  it('付けていない記録は「無し」を明示して送る(編集で外したときに前の値を残さない)', async () => {
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '1000')
+    await user.click(saveButton())
+
+    expect(submitted[0]).toMatchObject({ favor_amount: 0, favor_kind: null, favor_from: '' })
+  })
+})
+
+// ============================================================
 // 旅行モード。
 //
 // 守りたいのは「保存される内容」— 画面の見た目より、**tags に何が入るか**。

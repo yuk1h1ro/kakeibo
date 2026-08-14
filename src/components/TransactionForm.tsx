@@ -21,6 +21,16 @@ import AmountTaxKeys from './AmountTaxKeys'
 import AmountTextInput from './AmountTextInput'
 import { normalizeAmountInput } from '../lib/amountFormat'
 import { SATISFACTION_OPTIONS, useSatisfactionAvailable } from '../lib/satisfaction'
+import {
+  FAVOR_OPTIONS,
+  MAX_FAVOR_FROM_LENGTH,
+  buildFavor,
+  favorColumns,
+  favorNoticeText,
+  favorOf,
+  treatFromOptions,
+  type FavorKind,
+} from '../lib/favors'
 import { matchStoreSuggestions, useStoreCategories } from '../lib/storeCategories'
 import {
   buildStoreIndex,
@@ -187,6 +197,19 @@ export default function TransactionForm({
   // 機能088: タグ
   const [tags, setTags] = useState<string[]>(() => (initial ? tagsOf(initial) : []))
   const [tagDraft, setTagDraft] = useState('')
+
+  // ---- おごり・値引き (favors.ts) ----
+  // 「実際に払った額より本来の値段が高かった」回。列が無い環境では導線ごと出さない。
+  // 既定は「無し」= これまでどおりの記録なので、触らなければ手数は1タップも増えない。
+  const favorAvailable = useTxFeature('favor')
+  const [favorKind, setFavorKind] = useState<FavorKind | null>(
+    () => (initial ? (favorOf(initial)?.kind ?? null) : null)
+  )
+  const [favorAmountInput, setFavorAmountInput] = useState(() => {
+    const f = initial ? favorOf(initial) : null
+    return f ? String(f.amount) : ''
+  })
+  const [favorFrom, setFavorFrom] = useState(() => (initial ? (favorOf(initial)?.from ?? '') : ''))
 
   // ---- 旅行モード (tripMode.ts) ----
   // オンの間、これから作る支出に自動でタグを付ける。
@@ -404,6 +427,9 @@ export default function TransactionForm({
     setPartnerPaidInput('')
     setTags([])
     setTagDraft('')
+    setFavorKind(null)
+    setFavorAmountInput('')
+    setFavorFrom('')
     setSplitParts(null)
     setSplitNotice(null)
     setTripTagSkipped(false)
@@ -446,6 +472,22 @@ export default function TransactionForm({
 
   // 機能096: 分割中か。編集シート(onSubmitSplit 無し)では分割しない
   const splitting = splitParts !== null
+
+  /**
+   * この記録に付くおごり・値引き。付いていなければ null。
+   *
+   * 分割中は必ず null にする — 浮いた額を内訳のどれに割り当てるかは決めようがなく、
+   * 按分すれば1円がどこかに寄る。開いたときに外れることは、その場に出す
+   * (splitNotice。黙って捨てない)。
+   */
+  const favor =
+    isExpense && favorAvailable && !splitting
+      ? buildFavor(favorKind, Number(favorAmountInput || 0), favorFrom)
+      : null
+
+  // おごってくれた人の候補。過去の記録から、最近ご馳走になった順に出す
+  // (毎回打ち直させると「田中 / 田中さん」と揺れて、人ごとの集計が割れてしまう)
+  const treatOptions = treatFromOptions(knownTransactions ?? [])
   const splitValidation = splitting ? validateSplit(splitParts, amountNum) : null
 
   // 機能088: 打ちかけの文字列をタグとして確定する(Enter と、欄から離れたとき)
@@ -472,7 +514,7 @@ export default function TransactionForm({
   const openSplit = () => {
     const carried = withPartner && partnerNum > 0 ? Math.min(partnerNum, amountNum) : 0
     setSplitParts(carryPartnerAmount(evenSplit(amountNum, 2, category), carried))
-    setSplitNotice(splitCarryNotice(carried, payer !== 'me'))
+    setSplitNotice(splitCarryNotice(carried, payer !== 'me', favor !== null))
   }
 
   const closeSplit = () => {
@@ -569,9 +611,20 @@ export default function TransactionForm({
     payer === 'me' ||
     (Number.isInteger(partnerPaidNum) && partnerPaidNum > 0 && partnerPaidNum <= amountNum)
 
+  /**
+   * 支払い 0円 を保存してよいか。
+   *
+   * 「全額おごってもらった」「割引券で無料になった」回は、自分が財布から出した額が
+   * 0円 になる。これまでは金額 > 0 が絶対条件で、**そういう回は記録そのものが
+   * 残せなかった**。おごり・値引きが入っているときだけ 0円 を通す。
+   * 理由の無い 0円 は打ち間違いと区別が付かないので、これまでどおり弾く
+   * (DB 側の transactions_amount_check もまったく同じ判断をする)。
+   */
+  const zeroAllowed = isExpense && favor !== null
+
   const valid =
     Number.isInteger(amountNum) &&
-    amountNum > 0 &&
+    (amountNum > 0 || (zeroAllowed && amountNum === 0)) &&
     (!isExpense || !withPartner || (Number.isInteger(partnerNum) && partnerNum >= 0 && partnerNum <= amountNum)) &&
     partnerPaidValid &&
     // 分割中は内訳が完全に揃っていることが保存の条件。
@@ -595,6 +648,15 @@ export default function TransactionForm({
     satisfaction !== null
       ? (SATISFACTION_OPTIONS.find((o) => o.value === satisfaction)?.label ?? '')
       : '',
+    // おごりは畳んだままでも必ず見えるようにする。相手の名前が入っている記録を
+    // 「気分もタグも付いていない普通の1件」に見せてしまうと、書いた意味が薄れる
+    favor === null
+      ? ''
+      : favor.kind === 'treat'
+        ? favor.from === ''
+          ? 'おごり'
+          : `${favor.from}さんのおごり`
+        : '割引',
     tags.length > 0 ? tags.map((t) => `#${t}`).join(' ') : '',
     splitting ? '分割中' : '',
   ]
@@ -634,6 +696,9 @@ export default function TransactionForm({
         ...(isExpense && satisfactionAvailable ? { satisfaction } : {}),
         ...(isExpense && settlementAvailable ? { partner_paid: partnerPaidNum } : {}),
         ...(taggingAvailable ? { tags: finalTags } : {}),
+        // おごり・値引き。付いていないときも「無し」を明示的に送る —
+        // 編集で外したときにキーごと消すと、サーバー側に前の値が残ってしまう
+        ...(isExpense && favorAvailable ? favorColumns(favor) : {}),
       }
 
       // 機能096: 分割は「カテゴリごとの独立した記録」としてまとめて保存する。
@@ -659,6 +724,11 @@ export default function TransactionForm({
         setPartnerPaidInput('')
         setTags([])
         setTagDraft('')
+        // おごり・値引きも1件ごとの事実。次の記録に持ち越すと、
+        // 覚えのない「◯◯さんのおごり」が静かに増えていく
+        setFavorKind(null)
+        setFavorAmountInput('')
+        setFavorFrom('')
         setSplitParts(null)
         setSplitNotice(null)
         // 「この1件だけ旅行タグを外す」も1件ごとの判断。次の記録には持ち越さない
@@ -1137,12 +1207,12 @@ export default function TransactionForm({
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
       </div>
 
-      {/* 気分(219)・タグ(088)・分割(096)。
+      {/* 気分(219)・おごり(favors.ts)・タグ(088)・分割(096)。
           毎回は触らないので主線には割り込ませず、日付の下・保存の直前に畳んで置く。
-          ここだけ折りたたみにしているのは、この3つを常時出すと主線の5段が
+          ここだけ折りたたみにしているのは、これらを常時出すと主線の5段が
           画面2つ分に伸びて「上から下へ指を動かすだけ」で終わらなくなるため。
           畳んだままでも中身は右側の要約に出る */}
-      {((isExpense && satisfactionAvailable) || taggingAvailable) && (
+      {((isExpense && satisfactionAvailable) || taggingAvailable || (isExpense && favorAvailable)) && (
         <div className="detail-block">
           <button
             type="button"
@@ -1151,9 +1221,15 @@ export default function TransactionForm({
             onClick={() => setOptionsOpen(!optionsOpen)}
           >
             <span className="detail-toggle-label">
-              {isExpense && satisfactionAvailable ? '気分' : ''}
-              {isExpense && satisfactionAvailable && taggingAvailable ? '・' : ''}
-              {taggingAvailable ? `タグ${isExpense && onSubmitSplit ? '・分割' : ''}` : ''}
+              {[
+                isExpense && satisfactionAvailable ? '気分' : '',
+                // おごりは見出しにも出す。畳まれていることが分からないと、
+                // 「ご馳走になった回をどこに書けばいいのか」が最後まで見つからない
+                isExpense && favorAvailable ? 'おごり' : '',
+                taggingAvailable ? `タグ${isExpense && onSubmitSplit ? '・分割' : ''}` : '',
+              ]
+                .filter((s) => s !== '')
+                .join('・')}
             </span>
             <span className="detail-toggle-summary">{optionSummary}</span>
             <span className="detail-toggle-caret" aria-hidden="true">
@@ -1183,6 +1259,113 @@ export default function TransactionForm({
                       </button>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* おごり・値引き (favors.ts)。
+                  「割引券で無料になった」「ご馳走になった」回を、支出を膨らませずに残す。
+                  既定は選ばれていない状態なので、開いても何も押さなければ従来どおり。
+                  分割中は出さない(浮いた額を内訳に割り振れないため。splits.ts) */}
+              {isExpense && favorAvailable && !splitting && (
+                <div className="field favor-field">
+                  <span>おごり・値引き(任意)</span>
+                  <div className="favor-kinds" role="group" aria-label="おごり・値引き">
+                    {FAVOR_OPTIONS.map((o) => (
+                      <button
+                        key={o.kind}
+                        type="button"
+                        className={`favor-chip${favorKind === o.kind ? ' selected' : ''}`}
+                        aria-pressed={favorKind === o.kind}
+                        onClick={() => {
+                          // もう一度押すと「無し」に戻る(気分スタンプと同じ操作感)。
+                          // 外したときに額と相手も消すのは、選び直したときに
+                          // 前の相手の名前が残っていると事実が入れ替わるため
+                          if (favorKind === o.kind) {
+                            setFavorKind(null)
+                            setFavorAmountInput('')
+                            setFavorFrom('')
+                            return
+                          }
+                          setFavorKind(o.kind)
+                          if (o.kind === 'discount') setFavorFrom('')
+                        }}
+                      >
+                        <span className="favor-chip-emoji" aria-hidden="true">
+                          {o.emoji}
+                        </span>
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {favorKind !== null && (
+                    <>
+                      <div className="field">
+                        <span>
+                          {FAVOR_OPTIONS.find((o) => o.kind === favorKind)?.amountLabel}
+                        </span>
+                        <AmountTextInput
+                          ariaLabel={FAVOR_OPTIONS.find((o) => o.kind === favorKind)?.amountLabel ?? ''}
+                          inputMode="numeric"
+                          placeholder="0"
+                          value={favorAmountInput}
+                          onChange={setFavorAmountInput}
+                        />
+                        {/* レシートの値引き額をそのまま打つ場所なので、
+                            ここにも税込ボタンを置く(電卓はこの欄に無いので ％ は出ない) */}
+                        <AmountTaxKeys
+                          state={{ input: favorAmountInput, pendingValue: null, pendingOp: null }}
+                          onApply={(next) => setFavorAmountInput(next.input)}
+                          fieldLabel="おごり・値引き額"
+                        />
+                      </div>
+
+                      {/* おごってくれた人。**この欄がこの機能の本体**。
+                          誰にご馳走になったかが残っていないと、お礼もお返しもできない。
+                          値引き(相手のいない好意)のときは出さない */}
+                      {favorKind === 'treat' && (
+                        <div className="field">
+                          <span>おごってくれた人(任意・{MAX_FAVOR_FROM_LENGTH}文字まで)</span>
+                          <input
+                            type="text"
+                            aria-label="おごってくれた人"
+                            placeholder="例: 田中さん / 部長 / 父"
+                            value={favorFrom}
+                            autoComplete="off"
+                            maxLength={MAX_FAVOR_FROM_LENGTH}
+                            onChange={(e) => setFavorFrom(e.target.value)}
+                          />
+                          {treatOptions.length > 0 && (
+                            <div className="tag-chips">
+                              {treatOptions.map((name) => (
+                                <button
+                                  key={name}
+                                  type="button"
+                                  className={`tag-chip${favorFrom === name ? ' is-on' : ''}`}
+                                  onClick={() => setFavorFrom(favorFrom === name ? '' : name)}
+                                >
+                                  {name}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* 「本来いくらで、自分はいくら払うのか」を保存する前に読めるようにする。
+                          目隠し (機能169) 中は金額を伏せる */}
+                      {favor !== null && (
+                        <p className="favor-notice" aria-live="polite">
+                          {maskAmountsIn(favorNoticeText(favor, amountNum > 0 ? amountNum : 0))}
+                        </p>
+                      )}
+                      {favor === null && (
+                        <p className="muted">
+                          金額を入れると、この記録に付きます(1円以上)
+                        </p>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
 

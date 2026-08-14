@@ -37,6 +37,16 @@ export function transactionToInput(t: Transaction): TransactionInput {
   if (t.partner_paid !== undefined && t.partner_paid !== null) input.partner_paid = t.partner_paid
   if (t.tags !== undefined && t.tags !== null) input.tags = t.tags
   if (t.split_group !== undefined) input.split_group = t.split_group
+  // おごり・値引き (favors.ts)。**3つで1組**なので、写すときも必ず3つ一緒に運ぶ。
+  // 額だけ残って理由が消えると DB の制約に弾かれるし、相手の名前だけ落ちると
+  // 「誰にご馳走になったか」という、この記録でいちばん値打ちのある部分が消える。
+  // 全額おごりの回は amount が 0 なので、写し損ねると 0円 の理由不明な行になり、
+  // 保存そのものができなくなる(そうなると編集も取り消しも通らない)。
+  if (t.favor_amount !== undefined && t.favor_amount !== null) {
+    input.favor_amount = t.favor_amount
+    input.favor_kind = t.favor_kind ?? null
+    input.favor_from = t.favor_from ?? ''
+  }
   // created_at はここでは写さない。書き換え(一括編集・気分の付け直し)で送ると、
   // 楽観表示のために仮置きした時刻でサーバーの本物を上書きしてしまうため。
   // 「同じ行を入れ直す」restoreInput だけが写す。
@@ -50,6 +60,11 @@ export function transactionToInput(t: Transaction): TransactionInput {
  * 「この前と同じものをまた買った」ときなので、日付は今日にする。
  * 気分(satisfaction)は引き継がない — 今回の買い物をどう感じたかはこれから決まるため。
  * 自動生成の印も引き継がない — 手で複製した記録は手入力扱いが正しい。
+ *
+ * おごり・値引き (favors.ts) は **引き継ぐ**。気分と同じく「その回の事実」ではあるが、
+ * 全額おごりの記録は amount が 0 で、ここで理由だけ落とすと
+ * 「理由の無い 0円」= DB が受け付けない行になり、複製した瞬間に同期が止まる。
+ * 今回は自分で払ったのなら、複製したあとに外せばよい(外すのは1タップ)。
  */
 export function duplicateInput(t: Transaction, todayIso: string): TransactionInput {
   const input = transactionToInput(t)
