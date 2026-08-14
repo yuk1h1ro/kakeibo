@@ -42,6 +42,7 @@ import SatisfactionSortSheet from './SatisfactionSortSheet'
 import { splitSiblings } from '../lib/splits'
 import VerticalBars from './charts/VerticalBars'
 import EverydayCard from './report/EverydayCard'
+import FavorCard from './report/FavorCard'
 import FixedCostCard from './report/FixedCostCard'
 import GranularityCard from './report/GranularityCard'
 import HeatmapCard from './report/HeatmapCard'
@@ -95,6 +96,8 @@ export default function ReportTab({
   const [showSortSheet, setShowSortSheet] = useState(false)
   // タグ (機能088)。tags 列が無い環境ではタグ関係のカードごと出さない
   const taggingAvailable = useTxFeature('tagging')
+  // おごり・値引き (favors.ts)。列が無い環境ではカードごと出さない
+  const favorAvailable = useTxFeature('favor')
 
   const swipeRef = useRef<HTMLDivElement>(null)
 
@@ -496,6 +499,13 @@ export default function ReportTab({
               期間に記録が無いときも出す */}
           <FixedCostCard />
           <RecurringSuggestCard transactions={transactions} today={today} />
+
+          {/* おごり・値引き (favors.ts)。ここに出るのは払っていないお金なので、
+              支出のカードと並べず、振り返りの並びに置く。
+              この期間に1件も無ければカード自体が描かれない */}
+          {favorAvailable && (
+            <FavorCard transactions={transactions} range={range} periodLabel={periodLabel} />
+          )}
 
           {/* 219 + 143: 感情スタンプの振り返り。既存のカードには手を触れず末尾に足す。
               曜日は date から正確に出せるが、時間帯は出さない
