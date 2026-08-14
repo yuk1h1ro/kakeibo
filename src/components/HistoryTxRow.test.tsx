@@ -93,6 +93,42 @@ describe('履歴の行に出る金額と符号', () => {
   })
 })
 
+describe('おごり・値引きの行', () => {
+  it('全額おごってもらった回は ¥0。符号は付けない(出ていったお金は無いので)', () => {
+    const html = render(
+      tx({ amount: 0, favor_amount: 3200, favor_kind: 'treat', favor_from: '田中' })
+    )
+    expect(amountText(html)).toBe('¥0')
+  })
+
+  it('相手の名前を行に出す(一覧を眺めるだけで「誰に」が目に入ること)', () => {
+    const html = render(
+      tx({ amount: 0, favor_amount: 3200, favor_kind: 'treat', favor_from: '田中' })
+    )
+    expect(html).toContain('田中さんのおごり ¥3,200')
+  })
+
+  it('一部だけおごってもらった回は、自分が払った額をこれまでどおり出す', () => {
+    const html = render(
+      tx({ amount: 1000, favor_amount: 2200, favor_kind: 'treat', favor_from: '田中' })
+    )
+    expect(amountText(html)).toBe('-¥1,000')
+    expect(html).toContain('田中さんのおごり ¥2,200')
+  })
+
+  it('値引きは金額だけ添える(相手がいないので名前は出さない)', () => {
+    const html = render(tx({ amount: 2500, favor_amount: 500, favor_kind: 'discount' }))
+    expect(html).toContain('¥500 割引')
+  })
+
+  it('付いていない記録の見え方は今までと変わらない', () => {
+    const html = render(tx({ amount: 1000 }))
+    expect(amountText(html)).toBe('-¥1,000')
+    expect(html).not.toContain('おごり')
+    expect(html).not.toContain('割引')
+  })
+})
+
 describe('履歴の行の添え書き', () => {
   it('彼女の負担分があるときは「うち彼女分」を書く', () => {
     expect(render(tx({ partner_amount: 400 }))).toContain('うち彼女分 ¥400')

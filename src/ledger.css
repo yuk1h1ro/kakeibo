@@ -310,3 +310,56 @@
   border-left: 3px solid var(--accent);
   color: var(--text-secondary);
 }
+
+/* ---------- おごり・値引き (favors.ts) ---------- */
+
+.favor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 2つしかない選択肢なので、気分スタンプ(3列)ではなく2列で並べる */
+.favor-kinds {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.favor-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 8px 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  cursor: pointer;
+}
+
+.favor-chip .favor-chip-emoji {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.favor-chip.selected {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* 「本来いくらで、自分はいくら払うのか」の確認。
+   失敗ではないので、分割の注意書き (.split-notice) と同じ見え方にそろえる */
+.favor-notice {
+  font-size: 13px;
+  line-height: 1.6;
+  padding-left: 10px;
+  border-left: 3px solid var(--accent);
+  color: var(--text-secondary);
+}
