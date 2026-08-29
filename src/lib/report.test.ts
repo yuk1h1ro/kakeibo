@@ -10,6 +10,8 @@ import {
   lastYearMonth,
   monthRange,
   normalizeRange,
+  partnerBalanceImpact,
+  partnerImpactNote,
   rangeDays,
   rankByCategory,
   rankByStore,
@@ -113,6 +115,63 @@ describe('totalOwn / totalPartner', () => {
     ]
     expect(totalOwn(txs, r)).toBe(2500)
     expect(totalPartner(txs, r)).toBe(1000)
+  })
+})
+
+describe('partnerBalanceImpact — この期間の支出が預かり残高に与えた影響', () => {
+  const r = monthRange('2026-08')
+  // 副題の文言まで含めて確かめる。金額の整形は画面側(目隠しを通した yen)の仕事なので、
+  // テストでは素の表記を渡す
+  const note = (impact: number) => partnerImpactNote(impact, (n) => `¥${n.toLocaleString('ja-JP')}`)
+
+  it('データ0件なら0で、残高は動いていないと言う', () => {
+    expect(partnerBalanceImpact([], r)).toBe(0)
+    expect(note(0)).toBe('預かり残高への影響はありません')
+  })
+
+  it('自分が全額払った回は、彼女の負担分だけ残高から引かれる', () => {
+    const txs = [tx({ amount: 3000, partner_amount: 1000 })] // partner_paid 無し = 自分が全額
+    expect(partnerBalanceImpact(txs, r)).toBe(-1000)
+    expect(note(-1000)).toBe('預かり残高から ¥1,000 を差し引いています')
+  })
+
+  it('彼女が払った回は残高が増える(「差引」と書いたら嘘になる回)', () => {
+    // これが直した不具合そのもの。3,000円を彼女が払い、彼女の負担は1,000円なので
+    // 差し引かれるどころか 2,000円 こちらが借りている
+    const txs = [tx({ amount: 3000, partner_amount: 1000, partner_paid: 3000 })]
+    expect(partnerBalanceImpact(txs, r)).toBe(2000)
+    expect(note(2000)).toBe('彼女が多く払っており、預かり残高は ¥2,000 増えています')
+    expect(note(2000)).not.toContain('差し引い')
+  })
+
+  it('分けて払って過不足がなければ影響なし', () => {
+    const txs = [tx({ amount: 3000, partner_amount: 1000, partner_paid: 1000 })]
+    expect(partnerBalanceImpact(txs, r)).toBe(0)
+    expect(note(0)).toBe('預かり残高への影響はありません')
+  })
+
+  it('期間内の支出を足し合わせ、打ち消し合えば0になる', () => {
+    const txs = [
+      tx({ amount: 3000, partner_amount: 1000 }), // −1000
+      tx({ amount: 3000, partner_amount: 1000, partner_paid: 3000 }), // +2000
+      tx({ amount: 2000, partner_amount: 1000, partner_paid: 0 }), // −1000
+    ]
+    expect(partnerBalanceImpact(txs, r)).toBe(0)
+  })
+
+  it('預かり・返金・調整は含めない(この期間の支出の話であって、預け入れは別の出来事)', () => {
+    const txs = [
+      tx({ amount: 3000, partner_amount: 1000 }), // −1000
+      tx({ type: 'partner_deposit', amount: 30000, partner_amount: 0 }),
+      tx({ type: 'partner_refund', amount: 5000, partner_amount: 0 }),
+      tx({ type: 'partner_adjust', amount: -700, partner_amount: 0 }),
+    ]
+    expect(partnerBalanceImpact(txs, r)).toBe(-1000)
+  })
+
+  it('期間外の支出は数えない', () => {
+    const txs = [tx({ date: '2026-07-31', amount: 3000, partner_amount: 1000 })]
+    expect(partnerBalanceImpact(txs, r)).toBe(0)
   })
 })
 

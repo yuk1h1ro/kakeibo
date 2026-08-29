@@ -5,6 +5,7 @@
 
 import type { Satisfaction, Transaction } from './types'
 import { ownAmount, satisfactionOf } from './types'
+import { partnerImpact } from './partnerBalance'
 import { WEEKDAY_LABELS } from './calendar'
 
 /** 両端を含む期間 */
@@ -78,6 +79,41 @@ export function totalPartner(txs: readonly Transaction[], r: DateRange): number 
   return filterByRange(txs, r)
     .filter((t) => t.type === 'expense')
     .reduce((sum, t) => sum + t.partner_amount, 0)
+}
+
+/**
+ * 期間内の **支出だけ** が預かり残高に与えた影響の合計。
+ * プラス = 彼女が負担分より多く払っていて、預かり残高が増えた側。
+ *
+ * 式をここに書き写さず partnerImpact をそのまま通しているのは、残高の定義が
+ * 2か所に増えると片方だけ直したときに数字が食い違うため(partnerBalance.ts の
+ * 「残高を出すときは必ずあの関数を通す」に従う)。
+ *
+ * 預かり・返金・調整を混ぜないのは、この数字が答えているのが
+ * 「この期間の支出で残高がどう動いたか」だけだから。預け入れや返金は
+ * 支出とは別の出来事なので、混ぜると支出の説明として読めなくなる。
+ */
+export function partnerBalanceImpact(txs: readonly Transaction[], r: DateRange): number {
+  return filterByRange(txs, r)
+    .filter((t) => t.type === 'expense')
+    .reduce((sum, t) => sum + partnerImpact(t), 0)
+}
+
+/**
+ * 「彼女の負担分」カードの副題。(純粋関数)
+ *
+ * ここは以前「預かり残高から差引」の固定文だった。これは自分が全額払った回に
+ * しか当てはまらず、彼女が払った回(機能018)には嘘になる —
+ * 例えば 3,000円 を彼女が払って負担分が 1,000円 なら、残高は差し引かれるどころか
+ * 2,000円 増えている。固定文に戻さず、必ず実際の影響額から出し分けること。
+ *
+ * 金額の整形を引数で受けるのは、目隠し (機能169) を通した表示用の yen が
+ * localStorage を読むため。この層は画面に依存させない(rankByCategory と同じ作法)。
+ */
+export function partnerImpactNote(impact: number, formatYen: (n: number) => string): string {
+  if (impact < 0) return `預かり残高から ${formatYen(-impact)} を差し引いています`
+  if (impact > 0) return `彼女が多く払っており、預かり残高は ${formatYen(impact)} 増えています`
+  return '預かり残高への影響はありません'
 }
 
 // ---------- ランキング(カテゴリ別・お店別・1件ごと) ----------
