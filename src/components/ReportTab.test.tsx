@@ -99,20 +99,20 @@ describe('「彼女の負担分」カードの副題', () => {
   // ここが固定文だと、彼女が払った回に嘘が出る
   it('自分が全額払った回は、負担分だけ預かり残高から引かれたと出す', () => {
     const html = render([tx({ amount: 3000, partner_amount: 1000 })])
-    expect(html).toContain('預かり残高から ¥1,000 を差し引いています')
+    expect(html).toContain('預かり残高が ¥1,000 減っています')
   })
 
-  it('彼女が払った回は「差引」ではなく「増えています」と出す', () => {
+  it('彼女が払った回は「減っています」ではなく「増えています」と出す', () => {
     // 直した不具合そのもの。3,000円を彼女が払い、彼女の負担は1,000円 →
     // 残高は差し引かれるどころか 2,000円 増えている
     const html = render([tx({ amount: 3000, partner_amount: 1000, partner_paid: 3000 })])
-    expect(html).toContain('彼女が多く払っており、預かり残高は ¥2,000 増えています')
-    expect(html).not.toContain('差し引いています')
+    expect(html).toContain('預かり残高が ¥2,000 増えています')
+    expect(html).not.toContain('減っています')
   })
 
   it('過不足なく分けて払った回は、影響なしと出す', () => {
     const html = render([tx({ amount: 3000, partner_amount: 1000, partner_paid: 1000 })])
-    expect(html).toContain('預かり残高への影響はありません')
+    expect(html).toContain('預かり残高は変わりません')
   })
 
   it('預かり・返金・調整は副題の計算に混ぜない(この期間の支出の話だから)', () => {
@@ -121,7 +121,7 @@ describe('「彼女の負担分」カードの副題', () => {
       tx({ id: 'd1', type: 'partner_deposit', amount: 30000, category: null, store: '' }),
       tx({ id: 'r1', type: 'partner_refund', amount: 5000, category: null, store: '' }),
     ])
-    expect(html).toContain('預かり残高から ¥1,000 を差し引いています')
+    expect(html).toContain('預かり残高が ¥1,000 減っています')
   })
 })
 

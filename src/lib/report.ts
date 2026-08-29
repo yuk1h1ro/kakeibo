@@ -109,11 +109,17 @@ export function partnerBalanceImpact(txs: readonly Transaction[], r: DateRange):
  *
  * 金額の整形を引数で受けるのは、目隠し (機能169) を通した表示用の yen が
  * localStorage を読むため。この層は画面に依存させない(rankByCategory と同じ作法)。
+ *
+ * 3つとも「預かり残高が/は 〜」で始まる同じ形にして、末尾の
+ * 減っています / 増えています / 変わりません だけで違いが出るようにしている。
+ * iPhone 幅ではこのタイルは画面半分(文字が入るのは1行あたり11文字ほど)しかなく、
+ * 説明を足すと3行に折り返して最後の2〜3文字だけが次の行に落ちるため。
+ * 文を伸ばすときは 390px 幅で2行に収まるか見ること。
  */
 export function partnerImpactNote(impact: number, formatYen: (n: number) => string): string {
-  if (impact < 0) return `預かり残高から ${formatYen(-impact)} を差し引いています`
-  if (impact > 0) return `彼女が多く払っており、預かり残高は ${formatYen(impact)} 増えています`
-  return '預かり残高への影響はありません'
+  if (impact < 0) return `預かり残高が ${formatYen(-impact)} 減っています`
+  if (impact > 0) return `預かり残高が ${formatYen(impact)} 増えています`
+  return '預かり残高は変わりません'
 }
 
 // ---------- ランキング(カテゴリ別・お店別・1件ごと) ----------
