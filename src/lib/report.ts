@@ -6,7 +6,7 @@
 import type { Satisfaction, Transaction } from './types'
 import { ownAmount, satisfactionOf } from './types'
 import { partnerImpact } from './partnerBalance'
-import { WEEKDAY_LABELS } from './calendar'
+import { WEEKDAY_LABELS, monthEndISO } from './calendar'
 
 /** 両端を含む期間 */
 export interface DateRange {
@@ -21,9 +21,7 @@ export const NO_STORE_LABEL = '店名なし'
 
 /** 'YYYY-MM' の月キーからその月全体の期間を作る */
 export function monthRange(month: string): DateRange {
-  const [y, m] = month.split('-').map(Number)
-  const last = new Date(y, m, 0).getDate() // 翌月0日 = 当月末日(うるう年も正しく出る)
-  return { start: `${month}-01`, end: `${month}-${String(last).padStart(2, '0')}` }
+  return { start: `${month}-01`, end: monthEndISO(month) }
 }
 
 /** 開始・終了が逆でも破綻しないよう並べ替える(日付入力は自由に触れるため) */

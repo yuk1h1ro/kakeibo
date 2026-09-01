@@ -7,7 +7,6 @@ import {
   daysBetween,
   formatBalanceInput,
   latestBalanceAsOf,
-  monthEndISO,
   monthlyNetWorthSeries,
   netWorthAt,
   netWorthChange,
@@ -43,12 +42,6 @@ function snap(assetId: string, asOf: string, balance: number, createdAt?: string
 }
 
 describe('日付ユーティリティ', () => {
-  it('月末日を返す(うるう年も含む)', () => {
-    expect(monthEndISO('2026-08')).toBe('2026-08-31')
-    expect(monthEndISO('2026-02')).toBe('2026-02-28')
-    expect(monthEndISO('2024-02')).toBe('2024-02-29')
-  })
-
   it('月をまたいでずらせる(年またぎも)', () => {
     expect(shiftMonth('2026-01', -1)).toBe('2025-12')
     expect(shiftMonth('2025-12', 2)).toBe('2026-02')

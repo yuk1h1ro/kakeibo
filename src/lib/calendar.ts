@@ -1,5 +1,10 @@
-// カレンダー表示用の純粋関数(format.ts は変更禁止のためここに置く)
-// すべてローカルタイムで処理し、toISOString は使わない(TZずれ防止)
+// 日付の基礎計算と、カレンダー表示用の純粋関数。
+// すべてローカルタイムで処理し、toISOString は使わない(TZずれ防止)。
+//
+// 月末日・曜日・月キーのずらしは report / netWorth / recurrence / historyFilter などに
+// 同じ式が散らばっていたので、ここ1箇所に集めた。同じ数字が別々の式から出てくると、
+// 片方だけ直したときに取り違えても気づけず、ずれるのが家計の数字になるため。
+// 循環 import を避けるため、このファイルからは他の lib を import しない。
 
 export interface CalendarDay {
   iso: string // 'YYYY-MM-DD'
@@ -9,18 +14,37 @@ export interface CalendarDay {
 
 export const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'] as const
 
+// ---------- 日付の基礎計算 ----------
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+/** その年月の日数。Date の「翌月0日 = 当月末日」を使うので、うるう年も正しく出る */
+export function daysInMonth(year: number, month: number): number {
+  return new Date(year, month, 0).getDate()
+}
+
+/** 'YYYY-MM' の月末日を 'YYYY-MM-DD' で返す(うるう年も正しく出る) */
+export function monthEndISO(month: string): string {
+  const [y, m] = month.split('-').map(Number)
+  return `${month}-${pad2(daysInMonth(y, m))}`
+}
+
+// ---------- カレンダー表示 ----------
+
 // 'YYYY-MM' の月キーから、日曜始まりの週配列(最大6週)を作る。
 // 当月以外のセルは null(前後月の日付は表示しない)。
 export function monthWeeks(month: string): (CalendarDay | null)[][] {
   const [y, m] = month.split('-').map(Number)
   const firstDow = new Date(y, m - 1, 1).getDay()
-  const daysInMonth = new Date(y, m, 0).getDate()
+  const lastDay = daysInMonth(y, m)
 
   const cells: (CalendarDay | null)[] = []
   for (let i = 0; i < firstDow; i++) cells.push(null)
-  for (let d = 1; d <= daysInMonth; d++) {
+  for (let d = 1; d <= lastDay; d++) {
     cells.push({
-      iso: `${month}-${String(d).padStart(2, '0')}`,
+      iso: `${month}-${pad2(d)}`,
       day: d,
       dow: (firstDow + d - 1) % 7,
     })

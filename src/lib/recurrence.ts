@@ -7,6 +7,8 @@
 // すべてローカルタイムの 'YYYY-MM-DD' 文字列で扱い、toISOString は使わない。
 // ============================================================
 
+import { daysInMonth } from './calendar'
+
 export type RecurrenceKind = 'monthly' | 'weekly' | 'yearly'
 
 export interface Recurrence {
@@ -44,11 +46,6 @@ function pad2(n: number): string {
 
 function iso(y: number, m: number, d: number): string {
   return `${y}-${pad2(m)}-${pad2(d)}`
-}
-
-/** その年月の日数 (Date の「0日 = 前月末日」を使う) */
-export function daysInMonth(year: number, month: number): number {
-  return new Date(year, month, 0).getDate()
 }
 
 /** 'YYYY-MM-DD' の翌日 */

@@ -15,6 +15,7 @@
 // ============================================================
 
 import type { AssetDef, BalanceSnapshot } from './assets'
+import { monthEndISO } from './calendar'
 
 /** ある基準日時点の純資産 */
 export interface NetWorthPoint {
@@ -44,13 +45,6 @@ export interface AssetRow {
 /** 'YYYY-MM' の月キー */
 export function monthOf(iso: string): string {
   return iso.slice(0, 7)
-}
-
-/** 'YYYY-MM' の月末日を 'YYYY-MM-DD' で返す(うるう年も正しく出る) */
-export function monthEndISO(month: string): string {
-  const [y, m] = month.split('-').map(Number)
-  const last = new Date(y, m, 0).getDate() // 翌月0日 = 当月末日
-  return `${month}-${String(last).padStart(2, '0')}`
 }
 
 /** 月キーを offset ヶ月ずらす */

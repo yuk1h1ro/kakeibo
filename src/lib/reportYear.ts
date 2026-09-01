@@ -15,6 +15,7 @@ import {
   totalPartner,
 } from './report'
 import { dailyTotals } from './reportBuckets'
+import { monthEndISO } from './calendar'
 
 export interface YearMonthTotal {
   key: string // 'YYYY-MM'
@@ -66,8 +67,7 @@ export function yearSummary(
 
   const months: YearMonthTotal[] = Array.from({ length: 12 }, (_, i) => {
     const key = `${year}-${String(i + 1).padStart(2, '0')}`
-    const last = new Date(year, i + 1, 0).getDate()
-    const monthEnd = `${key}-${String(last).padStart(2, '0')}`
+    const monthEnd = monthEndISO(key)
     const start = `${key}-01`
     return {
       key,
