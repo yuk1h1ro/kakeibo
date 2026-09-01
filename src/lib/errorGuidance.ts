@@ -546,7 +546,8 @@ export function isOnlineNow(): boolean {
  * 画面はこの message をそのまま出すので、ここで案内まで作ってしまう。
  *
  * shareLinks / partnerComments も同じ式で投げているが、あちらは同じ場所で
- * tableMissing も立てるため、この関数には寄せずインラインのままにしてある。
+ * 「テーブルが無い」判定(tableAvailability)も立てるため、
+ * この関数には寄せずインラインのままにしてある。
  *
  * onSchemaError は、マイグレーション未実行のときだけ通常の案内より先に割り込むための口。
  * 資産のように「テーブルが無い」を画面の状態にも反映したい呼び出し側があるため、
