@@ -19,6 +19,8 @@ import {
   lastYearMonth,
   monthRange,
   normalizeRange,
+  partnerBalanceImpact,
+  partnerImpactNote,
   rangeDays,
   rankByCategory,
   rankByStore,
@@ -146,6 +148,7 @@ export default function ReportTab({
       isEmpty: inRangeTx.length === 0,
       total: totalOwn(transactions, range),
       partner: totalPartner(transactions, range),
+      partnerImpact: partnerBalanceImpact(transactions, range),
       categories: rankByCategory(transactions, range, categoryLabel),
       stores: rankByStore(transactions, range),
       txRank: rankByTransaction(transactions, range),
@@ -333,11 +336,23 @@ export default function ReportTab({
                     </div>
                   )}
                   <div className="annual-note">年 約{yen(annualOf(stats.total))}</div>
+                  {/* この数字が「自分の負担分」だと画面のどこにも書いていなかった。
+                      彼女の負担が実際にある期間だけ出す(一人ぶんの月に毎回出しても
+                      読む意味が無く、行が増えるだけ) */}
+                  {stats.partner !== 0 && (
+                    <div className="annual-note">
+                      彼女の負担分を除いた、あなたの負担だけの金額です
+                    </div>
+                  )}
                 </div>
                 <div className="card stat-tile">
-                  <div className="label">彼女立替分</div>
+                  {/* 「立替」だと支払ったのが自分だと決めつけることになる。
+                      partner_amount は誰が払ったかに関わらず彼女の負担分 */}
+                  <div className="label">彼女の負担分</div>
                   <div className="value">{yen(stats.partner)}</div>
-                  <div className="delta">預かり残高から差引</div>
+                  {/* 副題は固定文にしない — 彼女が払った回は残高が減るどころか増える。
+                      実際の影響額(partnerImpact の合計)から出し分ける */}
+                  <div className="delta">{partnerImpactNote(stats.partnerImpact, yen)}</div>
                 </div>
               </div>
 

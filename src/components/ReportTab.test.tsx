@@ -44,7 +44,7 @@ function render(transactions: Transaction[]): string {
   )
 }
 
-/** 上段に並ぶ2枚のカード(支出 / 彼女立替分)の金額 */
+/** 上段に並ぶ2枚のカード(支出 / 彼女の負担分)の金額 */
 function statValues(html: string): string[] {
   return [...html.matchAll(/class="value">([^<]*)</g)].map((m) => m[1])
 }
@@ -57,10 +57,12 @@ describe('レポートの支出合計', () => {
     expect(statValues(html)[0]).toBe('¥2,000')
   })
 
-  it('彼女が立て替えた分は別のカードに出す(支出から消さず、行き先を示す)', () => {
+  it('彼女の負担分は別のカードに出す(支出から消さず、行き先を示す)', () => {
     const html = render([tx({ amount: 3000, partner_amount: 1000 })])
     expect(statValues(html)[1]).toBe('¥1,000')
-    expect(html).toContain('預かり残高から差引')
+    expect(html).toContain('彼女の負担分')
+    // 「立替」は支払ったのが自分だと決めつけた言い方だった
+    expect(html).not.toContain('彼女立替分')
   })
 
   it('誰が払ったかでは実質支出が変わらない (機能018)', () => {
@@ -89,6 +91,49 @@ describe('レポートの支出合計', () => {
       tx({ id: 's2', amount: 1000, category: 'daily', split_group: 'g1' }),
     ])
     expect(statValues(split)[0]).toBe(statValues(whole)[0])
+  })
+})
+
+describe('「彼女の負担分」カードの副題', () => {
+  // 副題は残高への影響の説明なので、誰が払ったかで向きが変わる。
+  // ここが固定文だと、彼女が払った回に嘘が出る
+  it('自分が全額払った回は、負担分だけ預かり残高から引かれたと出す', () => {
+    const html = render([tx({ amount: 3000, partner_amount: 1000 })])
+    expect(html).toContain('預かり残高が ¥1,000 減っています')
+  })
+
+  it('彼女が払った回は「減っています」ではなく「増えています」と出す', () => {
+    // 直した不具合そのもの。3,000円を彼女が払い、彼女の負担は1,000円 →
+    // 残高は差し引かれるどころか 2,000円 増えている
+    const html = render([tx({ amount: 3000, partner_amount: 1000, partner_paid: 3000 })])
+    expect(html).toContain('預かり残高が ¥2,000 増えています')
+    expect(html).not.toContain('減っています')
+  })
+
+  it('過不足なく分けて払った回は、影響なしと出す', () => {
+    const html = render([tx({ amount: 3000, partner_amount: 1000, partner_paid: 1000 })])
+    expect(html).toContain('預かり残高は変わりません')
+  })
+
+  it('預かり・返金・調整は副題の計算に混ぜない(この期間の支出の話だから)', () => {
+    const html = render([
+      tx({ amount: 3000, partner_amount: 1000 }),
+      tx({ id: 'd1', type: 'partner_deposit', amount: 30000, category: null, store: '' }),
+      tx({ id: 'r1', type: 'partner_refund', amount: 5000, category: null, store: '' }),
+    ])
+    expect(html).toContain('預かり残高が ¥1,000 減っています')
+  })
+})
+
+describe('「自分の負担分」の注記', () => {
+  it('彼女の負担がある期間は、何の金額なのかを1行で書く', () => {
+    const html = render([tx({ amount: 3000, partner_amount: 1000 })])
+    expect(html).toContain('彼女の負担分を除いた、あなたの負担だけの金額です')
+  })
+
+  it('彼女の負担が無い期間には出さない(読む意味の無い行を毎月増やさない)', () => {
+    const html = render([tx({ amount: 3000 })])
+    expect(html).not.toContain('あなたの負担だけの金額です')
   })
 })
 

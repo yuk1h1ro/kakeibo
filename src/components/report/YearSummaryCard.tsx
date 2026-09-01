@@ -73,7 +73,8 @@ export default function YearSummaryCard({ transactions, month, today }: Props) {
               </span>
             </li>
             <li>
-              <span className="rp-year-stat-label">彼女立替分</span>
+              {/* 「立替」は支払者を決めつけた言い方だった(誰が払ったかによらず彼女の負担分) */}
+              <span className="rp-year-stat-label">彼女の負担分</span>
               <span className="rp-num">{yen(summary.partnerTotal)}</span>
             </li>
           </ul>
