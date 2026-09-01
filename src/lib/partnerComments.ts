@@ -11,7 +11,7 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { isSchemaError } from './serverErrors'
+import { createTableAvailability } from './tableAvailability'
 import { formatGuidance, guidanceForServerError, isOnlineNow } from './errorGuidance'
 
 /** コメント1件あたりの上限。データベース側の CHECK 制約と必ず同じ値にすること */
@@ -114,10 +114,18 @@ export function fromCommentRow(r: CommentRow): PartnerComment {
   }
 }
 
-let tableMissing = false
+// テーブルが無いと分かったら「無い」。以後コメントの導線を出さない。
+// 答えは localStorage に残るので、オフライン起動でも前回の答えが効く
+// (見分け方は tableAvailability.ts)。
+const availability = createTableAvailability('partner_share_comments')
 
 export function isCommentsUnavailable(): boolean {
-  return tableMissing
+  return availability.isMissing()
+}
+
+/** テスト用に、モジュールに残る「テーブルが無い」判定を戻す */
+export function resetPartnerCommentsForTest(): void {
+  availability.resetForTest()
 }
 
 /**
@@ -131,10 +139,10 @@ export async function fetchComments(supabase: SupabaseClient): Promise<PartnerCo
       .select(SELECT_COLUMNS)
       .order('created_at', { ascending: true })
     if (error) {
-      if (isSchemaError(error)) tableMissing = true
+      availability.noteError(error)
       return null
     }
-    tableMissing = false
+    availability.markPresent()
     return ((data ?? []) as unknown as CommentRow[]).map(fromCommentRow)
   } catch {
     return null
@@ -160,7 +168,7 @@ export async function addOwnerComment(
     .select(SELECT_COLUMNS)
     .single()
   if (error) {
-    if (isSchemaError(error)) tableMissing = true
+    availability.noteError(error)
     throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
   }
   if (!data) {
