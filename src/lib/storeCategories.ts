@@ -12,7 +12,7 @@
 import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Transaction } from './types'
-import { isSchemaError, toServerError } from './serverErrors'
+import { createTableAvailability } from './tableAvailability'
 
 export interface StoreCategory {
   /** 突き合わせ用に正規化した店名(主キー) */
@@ -148,9 +148,17 @@ function saveCache(rows: StoreCategory[]): void {
 let entries: StoreCategory[] = loadCache()
 const listeners = new Set<() => void>()
 
-// store_categories テーブルが無い(マイグレーション未実行)場合は true。
-// 学習は端末内だけで続け、サーバーへの書き込みは以後試さない。
-let tableMissing = false
+// store_categories テーブルが無い(マイグレーション未実行)場合。
+// 学習は端末内だけで続け、サーバーへの書き込みは以後試さない
+// (キャッシュは捨てない — 学習は端末内で続くほうが入力の役に立つ)。
+// 答えは localStorage に残るので、次に開いたときは通らないと分かっている
+// 書き込みを最初から試さない(見分け方は tableAvailability.ts)。
+const availability = createTableAvailability('store_categories')
+
+/** テスト用に、モジュールに残る「テーブルが無い」判定を戻す */
+export function resetStoreCategoriesForTest(): void {
+  availability.resetForTest()
+}
 
 function setEntries(rows: StoreCategory[]): void {
   entries = rows
@@ -206,9 +214,12 @@ export async function initStoreCategories(supabase: SupabaseClient): Promise<voi
       .from('store_categories')
       .select('store_key, store_name, category, updated_at')
     if (error) {
-      if (isSchemaError(error)) tableMissing = true
+      availability.noteError(error)
       return
     }
+    // 読めた = テーブルはある。前回「無い」と覚えていたなら、ここで答えを戻す
+    // (マイグレーションを実行したあと、開き直せば同期が再開する)
+    availability.markPresent()
     // オフライン中に覚えた分を消さないよう、サーバーの内容とマージする
     setEntries(mergeStoreCategories(entries, ((data ?? []) as StoreCategoryRow[]).map(fromRow)))
   } catch {
@@ -242,7 +253,7 @@ export async function rememberStoreCategory(
     ...entries.filter((e) => e.storeKey !== key),
   ])
 
-  if (tableMissing) return previous
+  if (availability.isMissing()) return previous
 
   const row = { store_key: key, store_name: storeName.trim(), category, updated_at: now }
   try {
@@ -251,19 +262,20 @@ export async function rememberStoreCategory(
         .from('store_categories')
         .update(row)
         .eq('store_key', key)
-      if (error && isSchemaError(error)) tableMissing = true
+      if (error) availability.noteError(error)
     } else {
       const { error } = await supabase.from('store_categories').insert(row)
       if (error) {
-        if (isSchemaError(error)) tableMissing = true
-        // 別端末が先に覚えていた場合(一意制約違反)は更新に切り替える
-        else if (error.code === '23505') {
+        availability.noteError(error)
+        // 別端末が先に覚えていた場合(一意制約違反)は更新に切り替える。
+        // テーブルごと無いと分かったときは、当然その更新も試さない
+        if (!availability.isMissing() && error.code === '23505') {
           await supabase.from('store_categories').update(row).eq('store_key', key)
         }
       }
     }
   } catch (e) {
-    if (isSchemaError(toServerError(e))) tableMissing = true
+    availability.noteError(e)
   }
   return previous
 }
