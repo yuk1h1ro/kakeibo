@@ -10,7 +10,7 @@ import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Transaction } from './types'
 import { categoryLabel } from './categories'
-import { isSchemaError } from './serverErrors'
+import { createTableAvailability } from './tableAvailability'
 import { throwOnServerError } from './errorGuidance'
 
 export interface TransactionTemplate {
@@ -78,9 +78,16 @@ function saveCache(rows: TransactionTemplate[]): void {
 let templates: TransactionTemplate[] = loadCache()
 const listeners = new Set<() => void>()
 
-// transaction_templates テーブルが無い(マイグレーション未実行)場合は true。
+// transaction_templates テーブルが無い(マイグレーション未実行)場合。
 // テンプレートの導線を出さないだけで、通常の入力には影響しない。
-let tableMissing = false
+// 答えは localStorage に残るので、次に開いたときは判定を待たずに導線を隠せる
+// (見分け方は tableAvailability.ts)。
+const availability = createTableAvailability('transaction_templates')
+
+/** テスト用に、モジュールに残る「テーブルが無い」判定を戻す */
+export function resetTransactionTemplatesForTest(): void {
+  availability.resetForTest()
+}
 
 function setTemplates(rows: TransactionTemplate[]): void {
   templates = [...rows].sort((a, b) => a.sortOrder - b.sortOrder)
@@ -102,7 +109,7 @@ export function useTransactionTemplates(): TransactionTemplate[] {
 }
 
 export function isTemplatesUnavailable(): boolean {
-  return tableMissing
+  return availability.isMissing()
 }
 
 // ---------- Supabase 連携 ----------
@@ -144,13 +151,13 @@ export async function initTransactionTemplates(supabase: SupabaseClient): Promis
       .select(SELECT_COLUMNS)
       .order('sort_order', { ascending: true })
     if (error) {
-      if (isSchemaError(error)) {
-        tableMissing = true
+      if (availability.noteError(error)) {
+        // テーブルが無い以上、別環境で作った控えも使わせない
         setTemplates([])
       }
       return
     }
-    tableMissing = false
+    availability.markPresent()
     setTemplates(((data ?? []) as unknown as TemplateRow[]).map(fromRow))
   } catch {
     // ネットワーク例外等 — キャッシュのまま継続
