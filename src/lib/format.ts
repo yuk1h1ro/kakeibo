@@ -5,6 +5,7 @@ import {
   maskedSignedText,
   maskedTextAmounts,
 } from './amountMask'
+import { WEEKDAY_LABELS, dayOfWeek } from './calendar'
 
 // ============================================================
 // 金額の表記
@@ -57,10 +58,8 @@ export function maskAmountsIn(text: string): string {
 
 // 'YYYY-MM-DD' → 'M月D日(曜)'
 export function formatDate(iso: string): string {
-  const [y, m, d] = iso.split('-').map(Number)
-  const day = new Date(y, m - 1, d).getDay()
-  const wd = ['日', '月', '火', '水', '木', '金', '土'][day]
-  return `${m}月${d}日(${wd})`
+  const [, m, d] = iso.split('-').map(Number)
+  return `${m}月${d}日(${WEEKDAY_LABELS[dayOfWeek(iso)]})`
 }
 
 // ローカルタイムの今日を 'YYYY-MM-DD' で返す

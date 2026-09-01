@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { daysInMonth, monthEndISO, shiftMonth } from './calendar'
+import { WEEKDAY_LABELS, dayOfWeek, daysInMonth, monthEndISO, shiftMonth } from './calendar'
 
 // 統合前は report / netWorth / historyFilter / recurrence / reportYear / calendar が
 // それぞれ月末日を出していた。各実装が持っていた境界(うるう年・28/29/30/31日・年またぎ)を
@@ -21,6 +21,32 @@ describe('daysInMonth', () => {
     expect(daysInMonth(1900, 2)).toBe(28)
     expect(daysInMonth(2000, 2)).toBe(29)
     expect(daysInMonth(2100, 2)).toBe(28)
+  })
+})
+
+describe('dayOfWeek', () => {
+  it('曜日を 0(日)〜6(土) で返す', () => {
+    expect(dayOfWeek('2026-08-04')).toBe(2) // 火
+    expect(dayOfWeek('2026-08-09')).toBe(0) // 日
+    expect(dayOfWeek('2026-08-08')).toBe(6) // 土
+  })
+
+  it('月またぎ・年またぎでも1日ずれない', () => {
+    expect(dayOfWeek('2026-01-31')).toBe(6)
+    expect(dayOfWeek('2026-02-01')).toBe(0)
+    expect(dayOfWeek('2025-12-31')).toBe(3)
+    expect(dayOfWeek('2026-01-01')).toBe(4)
+  })
+
+  it('うるう日をまたいでも1日ずれない', () => {
+    expect(dayOfWeek('2024-02-28')).toBe(3)
+    expect(dayOfWeek('2024-02-29')).toBe(4)
+    expect(dayOfWeek('2024-03-01')).toBe(5)
+  })
+
+  it('WEEKDAY_LABELS の添字としてそのまま使える', () => {
+    expect(WEEKDAY_LABELS[dayOfWeek('2026-08-04')]).toBe('火')
+    expect(WEEKDAY_LABELS[dayOfWeek('2026-08-09')]).toBe('日')
   })
 })
 

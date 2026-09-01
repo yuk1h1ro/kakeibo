@@ -3,8 +3,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import useBodyScrollLock from '../hooks/useBodyScrollLock'
 import { categoryLabel, useCategories } from '../lib/categories'
 import { formatDate, todayISO, yen } from '../lib/format'
+import { WEEKDAY_LABELS } from '../lib/calendar'
 import {
-  WEEKDAY_NAMES,
   describeRecurrence,
   nextOccurrenceOnOrAfter,
   type Recurrence,
@@ -308,7 +308,7 @@ export default function RecurringSettingsSheet({ supabase, onClose }: Props) {
                     value={draft.weekday}
                     onChange={(e) => setDraft({ ...draft, weekday: e.target.value })}
                   >
-                    {WEEKDAY_NAMES.map((w, i) => (
+                    {WEEKDAY_LABELS.map((w, i) => (
                       <option key={w} value={i}>
                         {w}曜
                       </option>

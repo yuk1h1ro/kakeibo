@@ -31,6 +31,12 @@ export function monthEndISO(month: string): string {
   return `${month}-${pad2(daysInMonth(y, m))}`
 }
 
+/** 'YYYY-MM-DD' の曜日 (0=日 〜 6=土)。WEEKDAY_LABELS の添字にそのまま使える */
+export function dayOfWeek(iso: string): number {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d).getDay()
+}
+
 /**
  * 月キーを offset ヶ月ずらす('YYYY-MM' → 'YYYY-MM')。
  * 日を1日に固定してから Date に渡すので、「1月31日の1ヶ月後」のような
@@ -48,7 +54,7 @@ export function shiftMonth(month: string, offset: number): string {
 // 当月以外のセルは null(前後月の日付は表示しない)。
 export function monthWeeks(month: string): (CalendarDay | null)[][] {
   const [y, m] = month.split('-').map(Number)
-  const firstDow = new Date(y, m - 1, 1).getDay()
+  const firstDow = dayOfWeek(`${month}-01`)
   const lastDay = daysInMonth(y, m)
 
   const cells: (CalendarDay | null)[] = []

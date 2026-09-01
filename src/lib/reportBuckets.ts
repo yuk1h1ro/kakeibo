@@ -15,7 +15,7 @@ import type { Transaction } from './types'
 import { ownAmount } from './types'
 import type { DateRange } from './report'
 import { monthRange, ownExpenses } from './report'
-import { shiftMonth } from './calendar'
+import { dayOfWeek, shiftMonth } from './calendar'
 
 export type Granularity = 'day' | 'week' | 'month' | 'year'
 
@@ -57,9 +57,7 @@ export function addDays(iso: string, n: number): string {
 
 /** その日を含む週の日曜日。アプリのカレンダーが日曜始まりなので週の区切りも揃える */
 export function startOfWeek(iso: string): string {
-  const [y, m, d] = iso.split('-').map(Number)
-  const dow = new Date(y, m - 1, d).getDay()
-  return addDays(iso, -dow)
+  return addDays(iso, -dayOfWeek(iso))
 }
 
 /** 期間内のすべての日付を昇順で返す(両端を含む)。逆順の期間は空 */
