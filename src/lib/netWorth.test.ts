@@ -12,7 +12,6 @@ import {
   netWorthChange,
   parseBalanceInput,
   recordDates,
-  shiftMonth,
 } from './netWorth'
 
 // テスト用のヘルパー。必要な項目だけ上書きする
@@ -42,11 +41,6 @@ function snap(assetId: string, asOf: string, balance: number, createdAt?: string
 }
 
 describe('日付ユーティリティ', () => {
-  it('月をまたいでずらせる(年またぎも)', () => {
-    expect(shiftMonth('2026-01', -1)).toBe('2025-12')
-    expect(shiftMonth('2025-12', 2)).toBe('2026-02')
-  })
-
   it('日数の差を返す', () => {
     expect(daysBetween('2026-07-01', '2026-08-04')).toBe(34)
     expect(daysBetween('2026-08-04', '2026-08-04')).toBe(0)

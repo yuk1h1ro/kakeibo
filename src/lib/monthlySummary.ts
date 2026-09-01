@@ -14,7 +14,8 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { formatMonth, monthKey, monthKeyOffset, yenPlain } from './format'
+import { formatMonth, monthKey, yenPlain } from './format'
+import { shiftMonth } from './calendar'
 import { getWebhookUrl, sendDiscordMessage } from './discordNotify'
 import { balanceWording, partnerImpact, type PartnerTxLike } from './partnerBalance'
 import { partnerPaid } from './types'
@@ -48,7 +49,7 @@ export function dueSummaryMonths(
   const out: string[] = []
   // i=1 が前月。古い順に並べたいので後ろから詰める
   for (let i = lookback; i >= 1; i--) {
-    const m = monthKeyOffset(current, -i)
+    const m = shiftMonth(current, -i)
     if (!sent.has(m)) out.push(m)
   }
   return out

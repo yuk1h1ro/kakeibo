@@ -31,6 +31,17 @@ export function monthEndISO(month: string): string {
   return `${month}-${pad2(daysInMonth(y, m))}`
 }
 
+/**
+ * 月キーを offset ヶ月ずらす('YYYY-MM' → 'YYYY-MM')。
+ * 日を1日に固定してから Date に渡すので、「1月31日の1ヶ月後」のような
+ * 日にちのはみ出し(3月3日に飛ぶ)は起きない。年またぎは Date に任せる。
+ */
+export function shiftMonth(month: string, offset: number): string {
+  const [y, m] = month.split('-').map(Number)
+  const d = new Date(y, m - 1 + offset, 1)
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`
+}
+
 // ---------- カレンダー表示 ----------
 
 // 'YYYY-MM' の月キーから、日曜始まりの週配列(最大6週)を作る。

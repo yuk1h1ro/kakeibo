@@ -8,8 +8,7 @@
 
 import type { Transaction } from './types'
 import { ownAmount, tagsOf } from './types'
-import { monthKeyOffset } from './format'
-import { monthEndISO } from './calendar'
+import { monthEndISO, shiftMonth } from './calendar'
 import { matchesAnyTag } from './tags'
 
 // ---------- 検索文字列の正規化 (機能145) ----------
@@ -241,7 +240,7 @@ export function periodRange(
     case 'month':
       return { from: `${month}-01`, to: monthEndISO(month) }
     case 'last3':
-      return { from: `${monthKeyOffset(month, -2)}-01`, to: monthEndISO(month) }
+      return { from: `${shiftMonth(month, -2)}-01`, to: monthEndISO(month) }
     case 'year': {
       const year = month.slice(0, 4)
       return { from: `${year}-01-01`, to: `${year}-12-31` }

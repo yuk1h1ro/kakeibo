@@ -14,7 +14,8 @@
 import type { Transaction } from './types'
 import type { DateRange } from './report'
 import { monthRange, rangeDays, totalOwn } from './report'
-import { dailyTotals, shiftMonth } from './reportBuckets'
+import { dailyTotals } from './reportBuckets'
+import { shiftMonth } from './calendar'
 
 // ---------- 026: 累積と基準線 ----------
 

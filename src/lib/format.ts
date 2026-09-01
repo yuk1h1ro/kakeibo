@@ -89,10 +89,3 @@ export function formatMonth(key: string): string {
 export function shortMonth(key: string): string {
   return `${Number(key.split('-')[1])}月`
 }
-
-// 現在月から n ヶ月前の月キー
-export function monthKeyOffset(base: string, offset: number): string {
-  const [y, m] = base.split('-').map(Number)
-  const d = new Date(y, m - 1 + offset, 1)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}

@@ -4,13 +4,13 @@ import {
   formatDate,
   formatMonth,
   monthKey,
-  monthKeyOffset,
   shortMonth,
   signedYen,
   todayISO,
   yen,
 } from '../lib/format'
 import { categoryLabel } from '../lib/categories'
+import { shiftMonth } from '../lib/calendar'
 import {
   annualFromMonthly,
   annualFromRange,
@@ -118,7 +118,7 @@ export default function ReportTab({
     // 未来の月には進めない(既存の制約)。スワイプからも同じ関数を通す
     if (offset > 0 && !canNext) return
     setNavDir(offset > 0 ? 'next' : 'prev')
-    setMonth(monthKeyOffset(month, offset))
+    setMonth(shiftMonth(month, offset))
   }
 
   const jumpTo = (target: string) => {
@@ -167,7 +167,7 @@ export default function ReportTab({
 
   // 前月比は月表示のときだけ意味を持つ
   const prevTotal = useMemo(
-    () => (mode === 'month' ? totalOwn(transactions, monthRange(monthKeyOffset(month, -1))) : 0),
+    () => (mode === 'month' ? totalOwn(transactions, monthRange(shiftMonth(month, -1))) : 0),
     [transactions, mode, month]
   )
   const delta = stats.total - prevTotal
@@ -176,7 +176,7 @@ export default function ReportTab({
   const trendData = useMemo(() => {
     if (mode !== 'month') return []
     return Array.from({ length: 6 }, (_, i) => {
-      const key = monthKeyOffset(month, i - 5)
+      const key = shiftMonth(month, i - 5)
       return {
         label: shortMonth(key),
         value: totalOwn(transactions, monthRange(key)),
