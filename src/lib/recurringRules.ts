@@ -9,8 +9,8 @@
 import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { TransactionInput } from '../hooks/useTransactions'
-import { isSchemaError, type ServerErrorLike } from './serverErrors'
-import { formatGuidance, guidanceForServerError, isOnlineNow } from './errorGuidance'
+import { isSchemaError } from './serverErrors'
+import { throwOnServerError } from './errorGuidance'
 import { pendingOccurrences, type Recurrence, type RecurrenceKind } from './recurrence'
 import { hasGeneratedMark, recordGeneratedMark } from './recurringLedger'
 
@@ -214,14 +214,6 @@ export async function initRecurringRules(supabase: SupabaseClient): Promise<void
   }
 }
 
-/**
- * サーバーのエラーを、原因と次の行動が分かる文言にして投げる (機能161)。
- * 画面はこの message をそのまま出すので、ここで案内まで作ってしまう。
- */
-function throwOn(error: ServerErrorLike | null): void {
-  if (error) throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
-}
-
 /** ルールを追加する。編集系はオンライン前提で、失敗時は throw する */
 export async function addRecurringRule(
   supabase: SupabaseClient,
@@ -232,7 +224,7 @@ export async function addRecurringRule(
     .insert(toRow(input))
     .select(SELECT_COLUMNS)
     .single()
-  throwOn(error)
+  throwOnServerError(error)
   if (!data) throw new Error('繰り返し入力を登録できませんでした。通信が不安定な可能性があります。もう一度お試しください')
   setRules([...rules, fromRow(data as unknown as RecurringRuleRow)])
 }
@@ -243,7 +235,7 @@ export async function updateRecurringRule(
   input: RecurringRuleInput
 ): Promise<void> {
   const { error } = await supabase.from('recurring_rules').update(toRow(input)).eq('id', id)
-  throwOn(error)
+  throwOnServerError(error)
   setRules(rules.map((r) => (r.id === id ? { ...r, ...input, id, lastGeneratedDate: r.lastGeneratedDate } : r)))
 }
 
@@ -254,13 +246,13 @@ export async function setRecurringRuleActive(
   active: boolean
 ): Promise<void> {
   const { error } = await supabase.from('recurring_rules').update({ active }).eq('id', id)
-  throwOn(error)
+  throwOnServerError(error)
   setRules(rules.map((r) => (r.id === id ? { ...r, active } : r)))
 }
 
 export async function deleteRecurringRule(supabase: SupabaseClient, id: string): Promise<void> {
   const { error } = await supabase.from('recurring_rules').delete().eq('id', id)
-  throwOn(error)
+  throwOnServerError(error)
   setRules(rules.filter((r) => r.id !== id))
 }
 

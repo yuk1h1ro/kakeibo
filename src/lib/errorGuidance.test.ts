@@ -10,6 +10,7 @@ import {
   ledgerRejectionGuidance,
   migrationTargetFor,
   syncRejectedGuidance,
+  throwOnServerError,
 } from './errorGuidance'
 
 describe('migrationTargetFor', () => {
@@ -352,5 +353,67 @@ describe('formatGuidance / describeUnknownError', () => {
   it('サーバーの原文(英語)はきちんと言い換える', () => {
     const line = describeUnknownError(new Error("Could not find the 'tags' column of 'transactions'"))
     expect(line).toContain('migration-tags-splits.sql')
+  })
+})
+
+describe('throwOnServerError', () => {
+  it('エラーが無ければ何も投げない', () => {
+    expect(() => throwOnServerError(null)).not.toThrow()
+    expect(() => throwOnServerError(undefined)).not.toThrow()
+  })
+
+  it('画面がそのまま出せるよう、原因と次の行動まで畳んだ文言で投げる', () => {
+    // 移す前の各 lib の throwOn と同じ式であることを、出力そのもので確かめる
+    const error = { message: 'column transactions.store does not exist', code: '42703' }
+    expect(() => throwOnServerError(error)).toThrow(
+      formatGuidance(guidanceForServerError(error, true)),
+    )
+  })
+
+  it('code の無い素の Error からも同じ案内が引ける', () => {
+    expect(() => throwOnServerError(new Error('Invalid API key'))).toThrow(/anon public/)
+  })
+
+  it('onSchemaError を渡さなければ、テーブルが無いときも通常の案内になる', () => {
+    expect(() => throwOnServerError({ message: 'relation "public.assets" does not exist' })).toThrow(
+      /migration-assets\.sql/,
+    )
+  })
+
+  it('onSchemaError は、スキーマエラーのときだけ後始末を走らせて文言を差し替える', () => {
+    const seen: string[] = []
+    expect(() =>
+      throwOnServerError({ message: 'relation "public.assets" does not exist' }, {
+        onSchemaError: () => {
+          seen.push('called')
+          return '資産のテーブルがありません'
+        },
+      }),
+    ).toThrow('資産のテーブルがありません')
+    expect(seen).toEqual(['called'])
+
+    // スキーマ以外の失敗では呼ばれず、通常の案内に落ちる
+    seen.length = 0
+    expect(() =>
+      throwOnServerError({ message: 'Invalid API key' }, {
+        onSchemaError: () => {
+          seen.push('called')
+          return 'こちらは出ないはず'
+        },
+      }),
+    ).toThrow(/anon public/)
+    expect(seen).toEqual([])
+  })
+
+  it('onSchemaError が文言を返さなければ、後始末だけして通常の案内に落ちる', () => {
+    let cleaned = false
+    expect(() =>
+      throwOnServerError({ message: 'relation "public.assets" does not exist' }, {
+        onSchemaError: () => {
+          cleaned = true
+        },
+      }),
+    ).toThrow(/migration-assets\.sql/)
+    expect(cleaned).toBe(true)
   })
 })

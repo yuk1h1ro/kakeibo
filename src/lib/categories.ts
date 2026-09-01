@@ -1,7 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { formatGuidance, guidanceForServerError, isOnlineNow } from './errorGuidance'
-import type { ServerErrorLike } from './serverErrors'
+import { throwOnServerError } from './errorGuidance'
 
 export interface Category {
   // id は transactions.category に保存される値 (= cat_key)。既存コードとの互換用に残す
@@ -260,13 +259,6 @@ export async function initCategories(supabase: SupabaseClient): Promise<void> {
 
 // ---------- CRUD(カテゴリ編集はオンライン前提。失敗時は throw) ----------
 
-// 原文をそのまま投げると、カテゴリ設定シートには英語の PostgREST メッセージが出る。
-// 他の lib (recurringRules / transactionTemplates / shareLinks / partnerComments) と
-// 同じく、原因と次の行動に置き換えてから投げる (機能161)
-function throwOn(error: ServerErrorLike | null): void {
-  if (error) throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
-}
-
 /** カテゴリを追加する。cat_key は uuid を採番 */
 export async function addCategory(
   supabase: SupabaseClient,
@@ -280,7 +272,7 @@ export async function addCategory(
     .insert({ cat_key: catKey, label, emoji, sort_order: sortOrder })
     .select('cat_key, label, emoji, sort_order, archived')
     .single()
-  throwOn(error)
+  throwOnServerError(error)
   if (!data) throw new Error('カテゴリを追加できませんでした')
   setCategories([...allCategories, fromRow(data as CategoryRow)])
 }
@@ -292,7 +284,7 @@ export async function updateCategory(
   patch: { label?: string; emoji?: string }
 ): Promise<void> {
   const { error } = await supabase.from('categories').update(patch).eq('cat_key', catKey)
-  throwOn(error)
+  throwOnServerError(error)
   setCategories(allCategories.map((c) => (c.catKey === catKey ? { ...c, ...patch } : c)))
 }
 
@@ -303,7 +295,7 @@ export async function updateCategory(
  */
 export async function archiveCategory(supabase: SupabaseClient, catKey: string): Promise<void> {
   const { error } = await supabase.from('categories').update({ archived: true }).eq('cat_key', catKey)
-  throwOn(error)
+  throwOnServerError(error)
   setCategories(allCategories.map((c) => (c.catKey === catKey ? { ...c, archived: true } : c)))
 }
 
@@ -316,7 +308,7 @@ export async function unarchiveCategory(supabase: SupabaseClient, catKey: string
     .from('categories')
     .update({ archived: false })
     .eq('cat_key', catKey)
-  throwOn(error)
+  throwOnServerError(error)
   setCategories(allCategories.map((c) => (c.catKey === catKey ? { ...c, archived: false } : c)))
 }
 
@@ -345,12 +337,12 @@ export async function moveCategory(
     .from('categories')
     .update({ sort_order: b.sortOrder })
     .eq('cat_key', a.catKey)
-  throwOn(e1)
+  throwOnServerError(e1)
   const { error: e2 } = await supabase
     .from('categories')
     .update({ sort_order: a.sortOrder })
     .eq('cat_key', b.catKey)
-  throwOn(e2)
+  throwOnServerError(e2)
   setCategories(
     allCategories.map((c) =>
       c.catKey === a.catKey

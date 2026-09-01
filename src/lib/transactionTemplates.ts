@@ -10,8 +10,8 @@ import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Transaction } from './types'
 import { categoryLabel } from './categories'
-import { isSchemaError, type ServerErrorLike } from './serverErrors'
-import { formatGuidance, guidanceForServerError, isOnlineNow } from './errorGuidance'
+import { isSchemaError } from './serverErrors'
+import { throwOnServerError } from './errorGuidance'
 
 export interface TransactionTemplate {
   id: string
@@ -157,14 +157,6 @@ export async function initTransactionTemplates(supabase: SupabaseClient): Promis
   }
 }
 
-/**
- * サーバーのエラーを、原因と次の行動が分かる文言にして投げる (機能161)。
- * 画面はこの message をそのまま出すので、ここで案内まで作ってしまう。
- */
-function throwOn(error: ServerErrorLike | null): void {
-  if (error) throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
-}
-
 /** テンプレートを追加する。編集系はオンライン前提で、失敗時は throw する */
 export async function addTransactionTemplate(
   supabase: SupabaseClient,
@@ -184,7 +176,7 @@ export async function addTransactionTemplate(
     })
     .select(SELECT_COLUMNS)
     .single()
-  throwOn(error)
+  throwOnServerError(error)
   if (!data) throw new Error('テンプレートを保存できませんでした。通信が不安定な可能性があります。もう一度お試しください')
   setTemplates([...templates, fromRow(data as unknown as TemplateRow)])
 }
@@ -194,6 +186,6 @@ export async function deleteTransactionTemplate(
   id: string
 ): Promise<void> {
   const { error } = await supabase.from('transaction_templates').delete().eq('id', id)
-  throwOn(error)
+  throwOnServerError(error)
   setTemplates(templates.filter((t) => t.id !== id))
 }
