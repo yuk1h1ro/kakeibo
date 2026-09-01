@@ -81,7 +81,16 @@ describe('createTableAvailability の判定条件', () => {
     expect(a.isMissing()).toBe(false)
   })
 
-  it('戻り値は「判定が変わったか」— 2度目の検知では false', () => {
+  // noteError の戻り値は「そのエラーがテーブル未作成を意味するか」。
+  // 何度でも同じ答えを返す — 呼び出し側はこれを見て手元を空にするので、
+  // 「2度目は false」にすると、2度目の検知だけ後始末が走らなくなる
+  it('noteError は同じエラーなら何度でも true を返す', () => {
+    const a = createTableAvailability('demo_table')
+    expect(a.noteError({ code: '42P01', message: 'does not exist' })).toBe(true)
+    expect(a.noteError({ code: '42P01', message: 'does not exist' })).toBe(true)
+  })
+
+  it('markMissing / markPresent の戻り値は「判定が変わったか」', () => {
     const a = createTableAvailability('demo_table')
     expect(a.markMissing()).toBe(true)
     expect(a.markMissing()).toBe(false)

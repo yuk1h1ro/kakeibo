@@ -37,7 +37,9 @@ export interface TableAvailability {
   markPresent(): boolean
   /**
    * エラー・例外を見て、テーブル未作成なら「無い」に倒す。
-   * 判定が変わったときだけ true(スキーマエラーでも既に倒れていれば false)。
+   * 戻り値は「そのエラーがテーブル未作成を意味するか」。
+   * 寄せる前の各モジュールが書いていた isSchemaError(error) と同じ意味なので、
+   * 「無いと分かったときだけ手元を空にする」といった後始末をそのまま書ける。
    */
   noteError(error: unknown): boolean
   subscribe(listener: () => void): () => void
@@ -96,7 +98,11 @@ export function createTableAvailability(
     isMissing: () => missing,
     markMissing: () => set(true),
     markPresent: () => set(false),
-    noteError: (error) => (isSchemaError(toServerError(error)) ? set(true) : false),
+    noteError(error) {
+      if (!isSchemaError(toServerError(error))) return false
+      set(true)
+      return true
+    },
     subscribe(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)

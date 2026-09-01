@@ -9,7 +9,7 @@
 import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { TransactionInput } from '../hooks/useTransactions'
-import { isSchemaError } from './serverErrors'
+import { createTableAvailability } from './tableAvailability'
 import { throwOnServerError } from './errorGuidance'
 import { pendingOccurrences, type Recurrence, type RecurrenceKind } from './recurrence'
 import { hasGeneratedMark, recordGeneratedMark } from './recurringLedger'
@@ -100,9 +100,16 @@ function saveCache(rows: RecurringRule[]): void {
 let rules: RecurringRule[] = loadCache()
 const listeners = new Set<() => void>()
 
-// recurring_rules テーブルが無い(マイグレーション未実行)場合は true。
+// recurring_rules テーブルが無い(マイグレーション未実行)場合。
 // 繰り返し入力の画面を出さず、生成も試みない = 既存の入力には一切触らない。
-let tableMissing = false
+// 答えは localStorage に残るので、次に開いたときは判定を待たずに導線を隠せる
+// (見分け方は tableAvailability.ts)。
+const availability = createTableAvailability('recurring_rules')
+
+/** テスト用に、モジュールに残る「テーブルが無い」判定を戻す */
+export function resetRecurringRulesForTest(): void {
+  availability.resetForTest()
+}
 
 function setRules(rows: RecurringRule[]): void {
   rules = rows
@@ -125,7 +132,7 @@ export function useRecurringRules(): RecurringRule[] {
 
 /** テーブルが無いと分かっているか(設定シートの表示可否に使う) */
 export function isRecurringUnavailable(): boolean {
-  return tableMissing
+  return availability.isMissing()
 }
 
 // ---------- Supabase 連携 ----------
@@ -200,14 +207,13 @@ export async function initRecurringRules(supabase: SupabaseClient): Promise<void
       .select(SELECT_COLUMNS)
       .order('created_at', { ascending: true })
     if (error) {
-      if (isSchemaError(error)) {
-        tableMissing = true
+      if (availability.noteError(error)) {
         // 別環境のキャッシュが残っていても、テーブルが無い以上は使わせない
         setRules([])
       }
       return
     }
-    tableMissing = false
+    availability.markPresent()
     setRules(((data ?? []) as unknown as RecurringRuleRow[]).map(fromRow))
   } catch {
     // ネットワーク例外等 — キャッシュのまま継続
@@ -277,7 +283,7 @@ export async function generateDueTransactions(
   today: string,
   enqueue: (input: TransactionInput, id?: string) => Promise<void>
 ): Promise<number> {
-  if (tableMissing) return 0
+  if (availability.isMissing()) return 0
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return 0
 
   let generated = 0
@@ -292,7 +298,7 @@ export async function generateDueTransactions(
           : query.eq('last_generated_date', rule.lastGeneratedDate)
       const { data, error } = await scoped.eq('id', rule.id).select('id')
       if (error) {
-        if (isSchemaError(error)) tableMissing = true
+        availability.noteError(error)
         continue // 生成済みの印を残せないうちは作らない
       }
       if (!data || data.length === 0) continue // 他の端末が先に生成した
