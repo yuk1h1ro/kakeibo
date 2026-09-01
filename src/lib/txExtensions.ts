@@ -22,6 +22,7 @@
 // ============================================================
 
 import { useSyncExternalStore } from 'react'
+import { createLocalSetting } from './localSetting'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isSchemaError, type ServerErrorLike } from './serverErrors'
 import { isPartnerLedgerType, type TransactionType } from './types'
@@ -30,45 +31,31 @@ export type TxFeature = 'settlement' | 'tagging' | 'favor'
 
 const STORAGE_KEY = 'kakeibo.txExtensions'
 
-// 既定は「使える」。初回は必ず起動直後の probe が答えを上書きするし、
-// 使えないと決めつけると、通信できないときに機能が消えてしまうため。
-const state: Record<TxFeature, boolean> = { settlement: true, tagging: true, favor: true }
-
-function loadCache(): void {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return
+const setting = createLocalSetting<Record<TxFeature, boolean>>({
+  key: STORAGE_KEY,
+  // 既定は「使える」。初回は必ず起動直後の probe が答えを上書きするし、
+  // 使えないと決めつけると、通信できないときに機能が消えてしまうため。
+  fallback: { settlement: true, tagging: true, favor: true },
+  parse: (raw) => {
+    if (!raw) return null
     const parsed: unknown = JSON.parse(raw)
-    if (typeof parsed !== 'object' || parsed === null) return
+    if (typeof parsed !== 'object' || parsed === null) return null
+    // 真偽値で入っている項目だけを信じる。欠けている / 壊れている項目は既定のまま
+    // (キャッシュが壊れても、機能が消える側には倒さない)
     const o = parsed as Partial<Record<TxFeature, unknown>>
-    if (typeof o.settlement === 'boolean') state.settlement = o.settlement
-    if (typeof o.tagging === 'boolean') state.tagging = o.tagging
-    if (typeof o.favor === 'boolean') state.favor = o.favor
-  } catch {
-    // 壊れたキャッシュは無視(既定に戻るだけ)
-  }
-}
-
-loadCache()
-
-const listeners = new Set<() => void>()
-// useSyncExternalStore に渡すスナップショットは参照を安定させる
-let snapshot: Record<TxFeature, boolean> = { ...state }
-
-function commit(): void {
-  snapshot = { ...state }
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  } catch {
-    // 保存できなくても、この起動中は正しく動く
-  }
-  for (const l of listeners) l()
-}
+    return {
+      settlement: typeof o.settlement === 'boolean' ? o.settlement : true,
+      tagging: typeof o.tagging === 'boolean' ? o.tagging : true,
+      favor: typeof o.favor === 'boolean' ? o.favor : true,
+    }
+  },
+  serialize: (state) => JSON.stringify(state),
+})
 
 function setAvailable(feature: TxFeature, available: boolean): void {
+  const state = setting.get()
   if (state[feature] === available) return
-  state[feature] = available
-  commit()
+  setting.set({ ...state, [feature]: available })
 }
 
 /** 同期時に列が無いと分かったときに呼ぶ。以後その機能は送らない・出さない */
@@ -77,21 +64,12 @@ export function markTxFeatureUnavailable(feature: TxFeature): void {
 }
 
 export function isTxFeatureAvailable(feature: TxFeature): boolean {
-  return state[feature]
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
-}
-
-function getSnapshot(): Record<TxFeature, boolean> {
-  return snapshot
+  return setting.get()[feature]
 }
 
 /** 導線を出してよいか。列が無いと分かった時点で消える */
 export function useTxFeature(feature: TxFeature): boolean {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)[feature]
+  return useSyncExternalStore(setting.subscribe, setting.get, setting.get)[feature]
 }
 
 // ---------- 起動時の確認 ----------
@@ -148,6 +126,7 @@ interface ExtendedPayload {
  *    列が無いと分かる前に入力してしまった1件のための保険)。
  */
 export function stripUnavailableColumns<T extends ExtendedPayload>(payload: T): Partial<T> {
+  const state = setting.get()
   const out: Partial<T> = { ...payload }
   if (!state.settlement) delete out.partner_paid
   if (!state.tagging) {
