@@ -27,6 +27,7 @@
 // ============================================================
 
 import { useSyncExternalStore } from 'react'
+import { createLocalSetting } from './localSetting'
 import { normalizeTag } from './tags'
 
 const STORAGE_KEY = 'kakeibo.specialTags'
@@ -87,46 +88,30 @@ export function normalizeSpecialTags(tags: readonly string[]): string[] {
   return parseSpecialTags(tags)
 }
 
-function load(): string[] {
-  try {
-    return resolveSpecialTags(localStorage.getItem(STORAGE_KEY))
-  } catch {
-    // プライベートブラウズ等で localStorage が使えない環境でも、既定の3つで動かす
-    return [...DEFAULT_SPECIAL_TAGS]
-  }
-}
-
-// useSyncExternalStore に渡すスナップショットは参照を安定させる
-// (毎回新しい配列を返すと再描画が止まらなくなる)
-let current: string[] = load()
-const listeners = new Set<() => void>()
+const setting = createLocalSetting<string[]>({
+  key: STORAGE_KEY,
+  // プライベートブラウズ等で localStorage が使えない環境でも、既定の3つで動かす
+  fallback: [...DEFAULT_SPECIAL_TAGS],
+  // 「キーが無い = 既定の3つ」「[] = 自分で全部外した」の区別は resolveSpecialTags 側
+  parse: resolveSpecialTags,
+  serialize: (tags) => JSON.stringify(tags),
+})
 
 export function getSpecialTags(): string[] {
-  return current
+  return setting.get()
 }
 
 export function setSpecialTags(tags: readonly string[]): void {
-  current = normalizeSpecialTags(tags)
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(current))
-  } catch {
-    // 保存できなくても、この起動中は選んだとおりに見える
-  }
-  for (const l of listeners) l()
+  setting.set(normalizeSpecialTags(tags))
 }
 
 /** 1つ入り切り(チップのタップ) */
 export function toggleSpecialTag(tag: string): void {
-  const next = current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag]
-  setSpecialTags(next)
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
+  const current = getSpecialTags()
+  setSpecialTags(current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag])
 }
 
 /** 現在の選択。設定の変更に追従する */
 export function useSpecialTags(): string[] {
-  return useSyncExternalStore(subscribe, getSpecialTags, getSpecialTags)
+  return useSyncExternalStore(setting.subscribe, setting.get, setting.get)
 }
