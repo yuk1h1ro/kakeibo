@@ -19,6 +19,7 @@
 // ============================================================
 
 import { useSyncExternalStore } from 'react'
+import { createLocalSetting } from './localSetting'
 
 export const AMOUNT_MASK_KEY = 'kakeibo.amountMask'
 
@@ -113,46 +114,29 @@ export function amountMaskStateLabel(masked: boolean): string {
 
 // ---------- 端末ごとの設定 (localStorage) ----------
 
-function readStorage(): string | null {
-  try {
-    return localStorage.getItem(AMOUNT_MASK_KEY)
-  } catch {
-    // プライベートブラウズ等で localStorage が使えなくても、
-    // このセッションの中では切り替えられるようにする
-    return null
-  }
-}
-
-function writeStorage(value: string): void {
-  try {
-    localStorage.setItem(AMOUNT_MASK_KEY, value)
-  } catch {
-    // 保存できなくても、このセッションの表示は切り替わる
-  }
-}
-
-let masked = parseMasked(readStorage())
-const listeners = new Set<() => void>()
+const setting = createLocalSetting<boolean>({
+  key: AMOUNT_MASK_KEY,
+  // 既定は「表示」。なぜ隠す側を既定にしないかは parseMasked の上に書いてある。
+  // アプリ切替時の目隠し(機能208)は既定オンで、ここと逆 —
+  // 入れ物が同じでも、この2つの既定は必ず別々に持つこと。
+  fallback: false,
+  parse: parseMasked,
+  serialize: serializeMasked,
+})
 
 /** いま金額を伏せているか。format.ts から毎回の整形で呼ばれる */
 export function isAmountMasked(): boolean {
-  return masked
+  return setting.get()
 }
 
 export function setAmountMasked(next: boolean): void {
-  if (masked === next) return
-  masked = next
-  writeStorage(serializeMasked(next))
-  for (const l of listeners) l()
+  // 変わっていないなら何もしない(押されていないのに画面全体を描き直さない)
+  if (setting.get() === next) return
+  setting.set(next)
 }
 
 export function toggleAmountMask(): void {
-  setAmountMasked(!masked)
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
+  setAmountMasked(!isAmountMasked())
 }
 
 /**
@@ -160,5 +144,5 @@ function subscribe(listener: () => void): () => void {
  * 画面のどこか1つがこれを読んでいれば、その配下は切り替えのたびに描き直される。
  */
 export function useAmountMasked(): boolean {
-  return useSyncExternalStore(subscribe, isAmountMasked, isAmountMasked)
+  return useSyncExternalStore(setting.subscribe, setting.get, setting.get)
 }
