@@ -135,9 +135,10 @@ export default function ReportTab({
     window.scrollTo({ top: 0 })
   }
 
+  // 右へ払う = 前の月、左へ払う = 次の月。紙をめくる向きに合わせている
   useSwipeNav(swipeRef, {
-    onPrev: () => goMonth(-1),
-    onNext: () => goMonth(1),
+    onSwipeRight: () => goMonth(-1),
+    onSwipeLeft: () => goMonth(1),
     enabled: mode === 'month',
   })
 
