@@ -8,6 +8,7 @@
 // ============================================================
 
 import { useSyncExternalStore } from 'react'
+import { createLocalSetting } from './localSetting'
 
 const STORAGE_KEY = 'kakeibo.monthlyBudget'
 
@@ -21,39 +22,25 @@ export function parseBudget(raw: string | null | undefined): number | null {
   return n
 }
 
-function load(): number | null {
-  try {
-    return parseBudget(localStorage.getItem(STORAGE_KEY))
-  } catch {
-    // localStorage が使えない環境では未設定として扱う(過去平均に自動で切り替わる)
-    return null
-  }
-}
-
-let budget: number | null = load()
-const listeners = new Set<() => void>()
+const setting = createLocalSetting<number | null>({
+  key: STORAGE_KEY,
+  // localStorage が使えない環境では未設定として扱う(過去平均に自動で切り替わる)
+  fallback: null,
+  parse: parseBudget,
+  // 未設定はキーごと消す。「0」を書いて残すと、次に読んだときに
+  // 予算 0円 と区別できなくなる(冒頭のとおり、それは無意味な参照線になる)
+  serialize: (value) => (value === null ? null : String(value)),
+})
 
 export function getMonthlyBudget(): number | null {
-  return budget
+  return setting.get()
 }
 
 /** null を渡すと設定を消す(= 過去平均から参照線を引く状態に戻る) */
 export function setMonthlyBudget(value: number | null): void {
-  budget = value
-  try {
-    if (value === null) localStorage.removeItem(STORAGE_KEY)
-    else localStorage.setItem(STORAGE_KEY, String(value))
-  } catch {
-    // 保存できなくてもこのセッションでは反映される
-  }
-  for (const l of listeners) l()
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
+  setting.set(value)
 }
 
 export function useMonthlyBudget(): number | null {
-  return useSyncExternalStore(subscribe, getMonthlyBudget, getMonthlyBudget)
+  return useSyncExternalStore(setting.subscribe, setting.get, setting.get)
 }
