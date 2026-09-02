@@ -119,6 +119,10 @@ export function fromCommentRow(r: CommentRow): PartnerComment {
 // (見分け方は tableAvailability.ts)。
 const availability = createTableAvailability('partner_share_comments')
 
+// **この判定を「画面を出すかどうか」のガードに使わないこと。**
+// 描画の手前で弾くと fetch まで届かず、答えを取り消す機会が永久に来ない
+// (マイグレーションを実行しても機能が戻らなくなる)。導線を隠すのは、
+// いまのように fetch の結果(null)を画面側の state で受けて判断すること。
 export function isCommentsUnavailable(): boolean {
   return availability.isMissing()
 }
