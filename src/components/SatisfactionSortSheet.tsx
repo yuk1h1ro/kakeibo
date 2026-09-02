@@ -70,8 +70,8 @@ export default function SatisfactionSortSheet({
   // 右へ払う = 満足 / 左へ払う = 後悔。「普通」とスキップはボタンで
   // (指の動きに意味を持たせるのは両端の2つだけにして、迷わないようにする)
   useSwipeNav(cardRef, {
-    onPrev: () => void assign('good'),
-    onNext: () => void assign('regret'),
+    onSwipeRight: () => void assign('good'),
+    onSwipeLeft: () => void assign('regret'),
     enabled: current !== undefined && !busy,
   })
 

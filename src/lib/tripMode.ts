@@ -35,6 +35,7 @@
 // ============================================================
 
 import { useSyncExternalStore } from 'react'
+import { createLocalSetting } from './localSetting'
 import { DEFAULT_SPECIAL_TAGS } from './reportTagSettings'
 import { todayISO } from './format'
 import { normalizeTag, sanitizeTags } from './tags'
@@ -285,33 +286,17 @@ export function tripTagOptions(specialTags: readonly string[]): string[] {
 
 // ---------- 端末内のストア ----------
 
-function load(): TripMode | null {
-  try {
-    return parseTripMode(localStorage.getItem(STORAGE_KEY))
-  } catch {
-    // プライベートブラウズ等で localStorage が使えない環境ではオフで動かす
-    return null
-  }
-}
-
-// useSyncExternalStore に渡すスナップショットは参照を安定させる
-// (毎回新しいオブジェクトを返すと再描画が止まらなくなる)
-let current: TripMode | null = load()
-const listeners = new Set<() => void>()
+const setting = createLocalSetting<TripMode | null>({
+  key: STORAGE_KEY,
+  // プライベートブラウズ等で localStorage が使えない環境ではオフで動かす
+  fallback: null,
+  parse: parseTripMode,
+  // 終わったらキーごと消す(「オフ」を書き残さない)
+  serialize: (mode) => (mode === null ? null : serializeTripMode(mode)),
+})
 
 export function getTripMode(): TripMode | null {
-  return current
-}
-
-function commit(next: TripMode | null): void {
-  current = next
-  try {
-    if (next === null) localStorage.removeItem(STORAGE_KEY)
-    else localStorage.setItem(STORAGE_KEY, serializeTripMode(next))
-  } catch {
-    // 保存できなくても、この起動中は選んだとおりに動く
-  }
-  for (const l of listeners) l()
+  return setting.get()
 }
 
 /**
@@ -322,21 +307,16 @@ function commit(next: TripMode | null): void {
 export function startTripMode(tagInput: string, placeInput = ''): boolean {
   const next = beginTripMode(tagInput, todayISO(), placeInput)
   if (next === null) return false
-  commit(next)
+  setting.set(next)
   return true
 }
 
 /** 旅行モードを終える。利用者が押したときだけ呼ばれる(自動では呼ばない) */
 export function endTripMode(): void {
-  commit(null)
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
+  setting.set(null)
 }
 
 /** 現在の旅行モード。開始・終了に追従する */
 export function useTripMode(): TripMode | null {
-  return useSyncExternalStore(subscribe, getTripMode, getTripMode)
+  return useSyncExternalStore(setting.subscribe, setting.get, setting.get)
 }

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   describeRecurrence,
-  daysInMonth,
   nextDay,
   nextOccurrenceOnOrAfter,
   occurrencesBetween,
@@ -34,12 +33,6 @@ describe('日付ユーティリティ', () => {
     expect(nextDay('2026-12-31')).toBe('2027-01-01')
     expect(nextDay('2024-02-28')).toBe('2024-02-29') // うるう年
     expect(nextDay('2026-02-28')).toBe('2026-03-01')
-  })
-
-  it('うるう年の2月を29日と数える', () => {
-    expect(daysInMonth(2024, 2)).toBe(29)
-    expect(daysInMonth(2026, 2)).toBe(28)
-    expect(daysInMonth(2026, 4)).toBe(30)
   })
 })
 

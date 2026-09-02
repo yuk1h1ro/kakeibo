@@ -1,25 +1,12 @@
 // 履歴タブで使う線画アイコン (icons.tsx と同じ作法: stroke 1.8px / currentColor)。
-// 共有ファイルの icons.tsx は他の作業と衝突しうるので、こちらに分けて置く。
 
 import type { SVGProps } from 'react'
+import { IconBase } from './icons'
 
-function Base({ children, ...rest }: SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width={20}
-      height={20}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      {...rest}
-    >
-      {children}
-    </svg>
-  )
+// 履歴は行の中に並ぶボタンなので、タブバーの 22px より一回り小さい 20px にしている。
+// 呼び出し側が width/height を渡せば、そちらが勝つ(IconBase と同じ)。
+function Base(props: SVGProps<SVGSVGElement>) {
+  return <IconBase width={20} height={20} {...props} />
 }
 
 /** ゴミ箱(削除) */

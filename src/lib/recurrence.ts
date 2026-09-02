@@ -7,6 +7,8 @@
 // すべてローカルタイムの 'YYYY-MM-DD' 文字列で扱い、toISOString は使わない。
 // ============================================================
 
+import { WEEKDAY_LABELS, dayOfWeek, daysInMonth } from './calendar'
+
 export type RecurrenceKind = 'monthly' | 'weekly' | 'yearly'
 
 export interface Recurrence {
@@ -18,8 +20,6 @@ export interface Recurrence {
   /** yearly の月 (1〜12)。monthly / weekly では未使用 */
   monthOfYear: number | null
 }
-
-export const WEEKDAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'] as const
 
 /** 壊れたデータで無限ループしないための上限。通常の運用では到達しない */
 const MAX_OCCURRENCES = 2000
@@ -46,11 +46,6 @@ function iso(y: number, m: number, d: number): string {
   return `${y}-${pad2(m)}-${pad2(d)}`
 }
 
-/** その年月の日数 (Date の「0日 = 前月末日」を使う) */
-export function daysInMonth(year: number, month: number): number {
-  return new Date(year, month, 0).getDate()
-}
-
 /** 'YYYY-MM-DD' の翌日 */
 export function nextDay(isoDate: string): string {
   const m = ISO_RE.exec(isoDate)
@@ -59,11 +54,14 @@ export function nextDay(isoDate: string): string {
   return iso(d.getFullYear(), d.getMonth() + 1, d.getDate())
 }
 
-/** 'YYYY-MM-DD' の曜日 (0=日 〜 6=土)。不正な文字列なら null */
+/**
+ * 'YYYY-MM-DD' の曜日 (0=日 〜 6=土)。不正な文字列なら null。
+ * 生成の起点になる日付は保存済みデータから来るので、
+ * ここだけは形が壊れていても例外にせず null で返す(生成を止めるほうが安全)。
+ */
 export function weekdayOf(isoDate: string): number | null {
-  const m = ISO_RE.exec(isoDate)
-  if (!m) return null
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getDay()
+  if (!ISO_RE.test(isoDate)) return null
+  return dayOfWeek(isoDate)
 }
 
 // ---------- 該当日の列挙 ----------
@@ -186,7 +184,7 @@ export function pendingOccurrences(schedule: RecurringSchedule, today: string): 
 /** 「毎月25日」「毎週金曜」「毎年3月1日」の形にする。(純粋関数) */
 export function describeRecurrence(rec: Recurrence): string {
   if (!isValidRecurrence(rec)) return '設定が不正です'
-  if (rec.kind === 'weekly') return `毎週${WEEKDAY_NAMES[rec.weekday as number]}曜`
+  if (rec.kind === 'weekly') return `毎週${WEEKDAY_LABELS[rec.weekday as number]}曜`
   if (rec.kind === 'monthly') return `毎月${rec.dayOfMonth}日`
   return `毎年${rec.monthOfYear}月${rec.dayOfMonth}日`
 }

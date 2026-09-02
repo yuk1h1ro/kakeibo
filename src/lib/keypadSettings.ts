@@ -6,6 +6,7 @@
 // ============================================================
 
 import { useSyncExternalStore } from 'react'
+import { createLocalSetting } from './localSetting'
 
 /** auto = 端末の種類で決める / on = 常にテンキー / off = 常に OS のキーボード */
 export type KeypadPreference = 'auto' | 'on' | 'off'
@@ -31,41 +32,25 @@ export function isCoarsePointer(): boolean {
   }
 }
 
-function loadPreference(): KeypadPreference {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw === 'on' || raw === 'off' || raw === 'auto') return raw
-  } catch {
-    // localStorage が使えない環境では既定(auto)で動かす
-  }
-  return 'auto'
-}
-
-let preference: KeypadPreference = loadPreference()
-const listeners = new Set<() => void>()
+const setting = createLocalSetting<KeypadPreference>({
+  key: STORAGE_KEY,
+  fallback: 'auto',
+  // 知らない文字列(古い版・手で書き換えた値)は既定に倒す
+  parse: (raw) => (raw === 'on' || raw === 'off' || raw === 'auto' ? raw : null),
+  serialize: (pref) => pref,
+})
 
 export function getKeypadPreference(): KeypadPreference {
-  return preference
+  return setting.get()
 }
 
 export function setKeypadPreference(pref: KeypadPreference): void {
-  preference = pref
-  try {
-    localStorage.setItem(STORAGE_KEY, pref)
-  } catch {
-    // 保存できなくてもこのセッションでは反映される
-  }
-  for (const l of listeners) l()
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
+  setting.set(pref)
 }
 
 /** 現在の設定値。設定シートでの変更に追従する */
 export function useKeypadPreference(): KeypadPreference {
-  return useSyncExternalStore(subscribe, getKeypadPreference, getKeypadPreference)
+  return useSyncExternalStore(setting.subscribe, setting.get, setting.get)
 }
 
 /** 実際にテンキーを表示するか。設定と端末の性質の両方を見る */

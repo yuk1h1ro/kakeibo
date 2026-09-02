@@ -7,7 +7,7 @@
 // 保存先は Supabase の transaction_changes テーブル
 // (supabase/migration-change-log.sql)。端末を変えても履歴が残るようにするため。
 // ただしこの機能は「記録そのもの」ではないので、次を絶対条件にしている:
-//   - マイグレーション未実行でもアプリが壊れない(isSchemaError で検知して静かに無効化)
+//   - マイグレーション未実行でもアプリが壊れない(tableAvailability で検知して静かに無効化)
 //   - オフラインでも書き込みを失わない(端末内のバッファに貯めて後で送る)
 //   - 送信に失敗しても、取引の保存・同期は一切止めない(投げっぱなし)
 //
@@ -21,7 +21,7 @@ import type { Transaction } from './types'
 import { partnerPaid, tagsOf } from './types'
 import { favorOf } from './favors'
 import { formatDate, yenPlain } from './format'
-import { isSchemaError } from './serverErrors'
+import { createTableAvailability } from './tableAvailability'
 
 export type ChangeAction = 'update' | 'delete' | 'restore'
 
@@ -224,12 +224,20 @@ function saveBuffer(entries: readonly ChangeEntry[]): void {
 // ---------- 状態(テーブルの有無・Supabase クライアント) ----------
 
 let client: SupabaseClient | null = null
-let tableMissing = false
 let prunedThisSession = false
-const listeners = new Set<() => void>()
 
-function notify(): void {
-  for (const l of listeners) l()
+// transaction_changes テーブルが無い(マイグレーション未実行)場合。
+// **答えは localStorage に残さない**(remember: false)。
+// このモジュールは「無い」と分かった時点で端末に貯めた履歴を捨て、以後 recordChange
+// も素通りするので、覚えたまま次の起動を迎えると、initChangeLog が確かめ直すまでの
+// 間に起きた変更を黙って落としてしまう。履歴は起動のたびに1回必ず確かめ直す
+// (= 判定を持ち越す利点が無い)ため、覚えないほうを採った。
+const availability = createTableAvailability('transaction_changes', { remember: false })
+
+/** テスト用に、モジュールに残る「テーブルが無い」判定を戻す */
+export function resetChangeLogForTest(): void {
+  availability.resetForTest()
+  prunedThisSession = false
 }
 
 /** useTransactions から渡される。履歴シートは props を増やさずここから使う */
@@ -237,26 +245,20 @@ export function attachChangeLogClient(supabase: SupabaseClient): void {
   client = supabase
 }
 
-function getSnapshot(): boolean {
-  return !tableMissing
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
-}
-
 /** 変更履歴の導線を出してよいか。テーブルが無いと分かった時点で消える */
 export function useChangeLogAvailable(): boolean {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  return useSyncExternalStore(
+    availability.subscribe,
+    availability.getAvailableSnapshot,
+    availability.getAvailableSnapshot
+  )
 }
 
+/** テーブルが無いと分かったときの後始末(判定は noteError 側で立てている) */
 function markUnavailable(): void {
-  if (tableMissing) return
-  tableMissing = true
+  availability.markMissing()
   // 送れない履歴を貯め続けても意味がないので捨てる(記録そのものではない)
   saveBuffer([])
-  notify()
 }
 
 // ---------- Supabase 連携 ----------
@@ -288,7 +290,7 @@ const SELECT_COLUMNS = 'id, transaction_id, action, summary, changes, changed_at
  * まず端末内に貯めてから送るので、オフラインでも消えない。
  */
 export function recordChange(entry: ChangeEntry): void {
-  if (tableMissing) return
+  if (availability.isMissing()) return
   if (entry.action === 'update' && entry.changes.length === 0) return // 変わっていないなら残さない
   saveBuffer([...loadBuffer(), entry])
   void flushChangeLog()
@@ -296,7 +298,7 @@ export function recordChange(entry: ChangeEntry): void {
 
 /** 貯まっている履歴をまとめて送る。送れた分だけバッファから消す */
 export async function flushChangeLog(): Promise<void> {
-  if (tableMissing || !client) return
+  if (availability.isMissing() || !client) return
   const buffered = loadBuffer()
   if (buffered.length === 0) return
   try {
@@ -311,7 +313,7 @@ export async function flushChangeLog(): Promise<void> {
       }))
     )
     if (error) {
-      if (isSchemaError(error)) markUnavailable()
+      if (availability.noteError(error)) markUnavailable()
       // 通信エラー等はバッファを残して次の機会に再送する
       return
     }
@@ -324,7 +326,7 @@ export async function flushChangeLog(): Promise<void> {
 
 /** 古い履歴をサーバー側から消す。1起動につき1回だけ試みる */
 async function pruneServerEntries(): Promise<void> {
-  if (prunedThisSession || tableMissing || !client) return
+  if (prunedThisSession || availability.isMissing() || !client) return
   prunedThisSession = true
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
   try {
@@ -340,7 +342,7 @@ async function pruneServerEntries(): Promise<void> {
  */
 export async function fetchChangeLog(limit: number = MAX_ENTRIES): Promise<ChangeEntry[]> {
   const local = loadBuffer()
-  if (tableMissing || !client) return pruneEntries(local, new Date()).slice(0, limit)
+  if (availability.isMissing() || !client) return pruneEntries(local, new Date()).slice(0, limit)
   try {
     const { data, error } = await client
       .from('transaction_changes')
@@ -348,7 +350,7 @@ export async function fetchChangeLog(limit: number = MAX_ENTRIES): Promise<Chang
       .order('changed_at', { ascending: false })
       .limit(limit)
     if (error) {
-      if (isSchemaError(error)) markUnavailable()
+      if (availability.noteError(error)) markUnavailable()
       return pruneEntries(local, new Date()).slice(0, limit)
     }
     const rows = ((data ?? []) as unknown as ChangeRow[]).map(fromRow)
@@ -370,13 +372,10 @@ export async function initChangeLog(supabase: SupabaseClient): Promise<void> {
   try {
     const { error } = await supabase.from('transaction_changes').select('id').limit(1)
     if (error) {
-      if (isSchemaError(error)) markUnavailable()
+      if (availability.noteError(error)) markUnavailable()
       return
     }
-    if (tableMissing) {
-      tableMissing = false
-      notify()
-    }
+    availability.markPresent()
     await flushChangeLog()
   } catch {
     // ネットワーク例外等 — 判定は据え置き

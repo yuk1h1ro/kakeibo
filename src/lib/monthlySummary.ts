@@ -14,11 +14,12 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { formatMonth, monthKey, monthKeyOffset, yenPlain } from './format'
+import { formatMonth, monthKey, yenPlain } from './format'
+import { shiftMonth } from './calendar'
 import { getWebhookUrl, sendDiscordMessage } from './discordNotify'
 import { balanceWording, partnerImpact, type PartnerTxLike } from './partnerBalance'
 import { partnerPaid } from './types'
-import { isSchemaError } from './serverErrors'
+import { createTableAvailability } from './tableAvailability'
 
 /** さかのぼって送る月数の上限。長期間アプリを開いていなくても通知が溢れないようにする */
 export const SUMMARY_LOOKBACK_MONTHS = 3
@@ -48,7 +49,7 @@ export function dueSummaryMonths(
   const out: string[] = []
   // i=1 が前月。古い順に並べたいので後ろから詰める
   for (let i = lookback; i >= 1; i--) {
-    const m = monthKeyOffset(current, -i)
+    const m = shiftMonth(current, -i)
     if (!sent.has(m)) out.push(m)
   }
   return out
@@ -184,10 +185,20 @@ export function formatMonthlySummary(
 
 // ---------- Supabase 連携 ----------
 
-let tableMissing = false
+// partner_summary_sends テーブルが無い(マイグレーション未実行)場合。
+// **答えは localStorage に残さない**(remember: false)。
+// 起動のたびにこのテーブルを確かめる経路は fetchSentMonths しか無く、その
+// fetchSentMonths 自体が下の「無いなら送らない」で飛ばされるので、覚えてしまうと
+// マイグレーションを実行しても月末サマリーが二度と送られなくなる。
+const availability = createTableAvailability('partner_summary_sends', { remember: false })
 
 export function isMonthlySummaryUnavailable(): boolean {
-  return tableMissing
+  return availability.isMissing()
+}
+
+/** テスト用に、モジュールに残る「テーブルが無い」判定を戻す */
+export function resetMonthlySummaryForTest(): void {
+  availability.resetForTest()
 }
 
 /** 送信済みの月を読み込む。テーブルが無ければ null(= 機能を静かに止める) */
@@ -195,10 +206,10 @@ export async function fetchSentMonths(supabase: SupabaseClient): Promise<string[
   try {
     const { data, error } = await supabase.from('partner_summary_sends').select('month')
     if (error) {
-      if (isSchemaError(error)) tableMissing = true
+      availability.noteError(error)
       return null
     }
-    tableMissing = false
+    availability.markPresent()
     return ((data ?? []) as { month: string }[]).map((r) => r.month)
   } catch {
     return null
@@ -217,7 +228,7 @@ export async function claimSummaryMonth(
   try {
     const { error } = await supabase.from('partner_summary_sends').insert({ month })
     if (error) {
-      if (isSchemaError(error)) tableMissing = true
+      availability.noteError(error)
       // 23505 = unique_violation(他の端末が先に送った)。それ以外も安全側で送らない
       return false
     }
@@ -239,7 +250,9 @@ export async function sendDueMonthlySummaries(
 ): Promise<number> {
   // Webhook 未設定なら何もしない(印も残さない。あとで設定したときに送れるように)
   if (!getWebhookUrl()) return 0
-  if (tableMissing) return 0
+  // この起動中に「無い」と分かっていれば、もう問い合わせない
+  // (判定を次の起動へ持ち越さない理由は上の createTableAvailability のコメント)
+  if (availability.isMissing()) return 0
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return 0
 
   const sent = await fetchSentMonths(supabase)

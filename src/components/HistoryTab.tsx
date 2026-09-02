@@ -28,13 +28,12 @@ import {
   formatMonth,
   maskCompact,
   monthKey,
-  monthKeyOffset,
   todayISO,
   yen,
 } from '../lib/format'
 import { categoryLabel } from '../lib/categories'
 import type { useTransactions } from '../hooks/useTransactions'
-import { WEEKDAY_LABELS, defaultSelectedDate, monthWeeks } from '../lib/calendar'
+import { WEEKDAY_LABELS, defaultSelectedDate, monthWeeks, shiftMonth } from '../lib/calendar'
 import {
   DEFAULT_FILTER,
   filterTransactions,
@@ -108,7 +107,7 @@ export default function HistoryTab({ store, onEdit, onStartInput }: Props) {
     [store.transactions, today]
   )
 
-  const changeMonth = (offset: number) => jumpToMonth(monthKeyOffset(month, offset))
+  const changeMonth = (offset: number) => jumpToMonth(shiftMonth(month, offset))
 
   // ---------- 集計(既存の見え方は変えない) ----------
 

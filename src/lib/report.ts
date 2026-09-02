@@ -6,7 +6,7 @@
 import type { Satisfaction, Transaction } from './types'
 import { ownAmount, satisfactionOf } from './types'
 import { partnerImpact } from './partnerBalance'
-import { WEEKDAY_LABELS } from './calendar'
+import { WEEKDAY_LABELS, dayOfWeek, monthEndISO } from './calendar'
 
 /** 両端を含む期間 */
 export interface DateRange {
@@ -21,9 +21,7 @@ export const NO_STORE_LABEL = '店名なし'
 
 /** 'YYYY-MM' の月キーからその月全体の期間を作る */
 export function monthRange(month: string): DateRange {
-  const [y, m] = month.split('-').map(Number)
-  const last = new Date(y, m, 0).getDate() // 翌月0日 = 当月末日(うるう年も正しく出る)
-  return { start: `${month}-01`, end: `${month}-${String(last).padStart(2, '0')}` }
+  return { start: `${month}-01`, end: monthEndISO(month) }
 }
 
 /** 開始・終了が逆でも破綻しないよう並べ替える(日付入力は自由に触れるため) */
@@ -51,12 +49,6 @@ export function rangeDays(r: DateRange): number {
   // 夏時間の無い日本でも安全側に倒して UTC の一日=86400000ms で差を取る
   const diff = Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)
   return Math.max(Math.round(diff / 86_400_000) + 1, 1)
-}
-
-/** 'YYYY-MM-DD' の曜日(0=日) */
-export function dayOfWeek(iso: string): number {
-  const [y, m, d] = iso.split('-').map(Number)
-  return new Date(y, m - 1, d).getDay()
 }
 
 /** 期間内の取引(種別を問わない) */

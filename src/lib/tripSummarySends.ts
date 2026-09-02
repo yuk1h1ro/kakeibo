@@ -24,6 +24,7 @@
 // ============================================================
 
 import { useSyncExternalStore } from 'react'
+import { createLocalSetting } from './localSetting'
 import type { DateRange } from './report'
 
 const STORAGE_KEY = 'kakeibo.tripSummarySends'
@@ -95,52 +96,28 @@ export function tripResendNotice(record: TripSendRecord, formatAt: (iso: string)
 
 // ---------- 端末内のストア ----------
 
-function load(): TripSendRecord[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    return parseTripSends(JSON.parse(raw))
-  } catch {
-    return []
-  }
-}
-
-// useSyncExternalStore に渡すスナップショットは参照を安定させる
-let current: TripSendRecord[] = load()
-const listeners = new Set<() => void>()
+const setting = createLocalSetting<TripSendRecord[]>({
+  key: STORAGE_KEY,
+  fallback: [],
+  parse: (raw) => (raw ? parseTripSends(JSON.parse(raw)) : null),
+  serialize: (list) => JSON.stringify(list),
+})
 
 export function getTripSends(): TripSendRecord[] {
-  return current
+  return setting.get()
 }
 
 /** 送り終えたときに呼ぶ。保存できなくても送信は成立している */
 export function rememberTripSend(record: TripSendRecord): void {
-  current = addTripSend(current, record)
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(current))
-  } catch {
-    // 覚え書きが書けなくても、この起動中は画面に出る
-  }
-  for (const l of listeners) l()
+  setting.set(addTripSend(setting.get(), record))
 }
 
 /** テスト用に控えを空にする */
 export function resetTripSendsForTest(): void {
-  current = []
-  try {
-    localStorage.removeItem(STORAGE_KEY)
-  } catch {
-    // localStorage が無い環境でも続けられる
-  }
-  for (const l of listeners) l()
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
+  setting.clear()
 }
 
 /** 送信済みの控え。送るたびに再描画される */
 export function useTripSends(): TripSendRecord[] {
-  return useSyncExternalStore(subscribe, getTripSends, getTripSends)
+  return useSyncExternalStore(setting.subscribe, setting.get, setting.get)
 }

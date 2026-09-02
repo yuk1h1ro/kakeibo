@@ -8,7 +8,7 @@
 
 import type { Transaction } from './types'
 import { ownAmount, tagsOf } from './types'
-import { monthKeyOffset } from './format'
+import { monthEndISO, shiftMonth } from './calendar'
 import { matchesAnyTag } from './tags'
 
 // ---------- 検索文字列の正規化 (機能145) ----------
@@ -225,12 +225,6 @@ export function parseHistoryFilter(raw: unknown): HistoryFilter {
   return out
 }
 
-function lastDayOfMonth(month: string): string {
-  const [y, m] = month.split('-').map(Number)
-  const day = new Date(y, m, 0).getDate()
-  return `${month}-${String(day).padStart(2, '0')}`
-}
-
 /**
  * 期間の指定を日付の範囲に直す。(純粋関数)
  * 基準は「今日」ではなく画面で表示中の月。カレンダーで遡った月のまま
@@ -244,9 +238,9 @@ export function periodRange(
     case 'all':
       return null
     case 'month':
-      return { from: `${month}-01`, to: lastDayOfMonth(month) }
+      return { from: `${month}-01`, to: monthEndISO(month) }
     case 'last3':
-      return { from: `${monthKeyOffset(month, -2)}-01`, to: lastDayOfMonth(month) }
+      return { from: `${shiftMonth(month, -2)}-01`, to: monthEndISO(month) }
     case 'year': {
       const year = month.slice(0, 4)
       return { from: `${year}-01-01`, to: `${year}-12-31` }

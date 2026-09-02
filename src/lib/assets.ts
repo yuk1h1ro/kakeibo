@@ -17,8 +17,8 @@
 
 import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { isSchemaError, toServerError } from './serverErrors'
-import { formatGuidance, guidanceForServerError, isOnlineNow } from './errorGuidance'
+import { isSchemaError } from './serverErrors'
+import { throwOnServerError } from './errorGuidance'
 
 /** 資産か負債か。負債は残債を正の数で持ち、純資産を出すときに引く */
 export type AssetKind = 'asset' | 'liability'
@@ -258,17 +258,21 @@ export async function initAssets(supabase: SupabaseClient): Promise<void> {
   }
 }
 
-/** 編集系はオンライン前提。失敗したら理由を添えて throw する */
+/**
+ * 編集系はオンライン前提。失敗したら理由を添えて throw する。
+ *
+ * 資産だけは、テーブルが無いときに一般的なマイグレーション案内より
+ * 「資産のテーブルが無い」と言い切ったほうが分かりやすく、
+ * あわせて画面も unavailable に落としておく必要があるので、
+ * 共通の throwOnServerError にスキーマエラーの後始末だけを渡している。
+ */
 function throwOn(error: unknown): void {
-  if (!error) return
-  const e = toServerError(error)
-  if (isSchemaError(e)) {
-    publish({ status: 'unavailable' })
-    throw new Error('資産のテーブルがありません(supabase/migration-assets.sql を実行してください)')
-  }
-  // 原文のままだと英語の PostgREST メッセージが資産シートに出てしまうので、
-  // 原因と次の行動に置き換える (機能161)
-  throw new Error(formatGuidance(guidanceForServerError(e, isOnlineNow())))
+  throwOnServerError(error, {
+    onSchemaError: () => {
+      publish({ status: 'unavailable' })
+      return '資産のテーブルがありません(supabase/migration-assets.sql を実行してください)'
+    },
+  })
 }
 
 export async function addAsset(supabase: SupabaseClient, input: AssetInput): Promise<AssetDef> {

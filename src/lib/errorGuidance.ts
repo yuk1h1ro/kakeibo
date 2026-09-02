@@ -14,7 +14,7 @@
 //     (原因を特定できなかったときに、これが唯一の手がかりになる)
 // ============================================================
 
-import { isNetworkError, isSchemaError, type ServerErrorLike } from './serverErrors'
+import { isNetworkError, isSchemaError, toServerError, type ServerErrorLike } from './serverErrors'
 
 export type GuidanceKind =
   /** マイグレーション未実行(列・テーブルが無い) */
@@ -536,4 +536,33 @@ export function describeUnknownError(e: unknown, online = true): string {
 /** navigator.onLine を安全に読む(非ブラウザ環境では「オンライン」とみなす) */
 export function isOnlineNow(): boolean {
   return typeof navigator === 'undefined' || navigator.onLine !== false
+}
+
+/**
+ * サーバーのエラーを、原因と次の行動が分かる文言にして投げる (機能161)。
+ *
+ * 原文をそのまま投げると、設定シートや資産シートに英語の PostgREST メッセージ
+ * (`column ... does not exist` など)がそのまま出てしまう。
+ * 画面はこの message をそのまま出すので、ここで案内まで作ってしまう。
+ *
+ * shareLinks / partnerComments も同じ式で投げているが、あちらは同じ場所で
+ * 「テーブルが無い」判定(tableAvailability)も立てるため、
+ * この関数には寄せずインラインのままにしてある。
+ *
+ * onSchemaError は、マイグレーション未実行のときだけ通常の案内より先に割り込むための口。
+ * 資産のように「テーブルが無い」を画面の状態にも反映したい呼び出し側があるため、
+ * 後始末をここで走らせられるようにしてある。文言を返せばそれで投げ、
+ * 返さなければ通常の案内に落ちる。
+ */
+export function throwOnServerError(
+  error: unknown,
+  options?: { onSchemaError?: (err: ServerErrorLike) => string | void }
+): void {
+  if (!error) return
+  const e = toServerError(error)
+  if (options?.onSchemaError && isSchemaError(e)) {
+    const message = options.onSchemaError(e)
+    if (message) throw new Error(message)
+  }
+  throw new Error(formatGuidance(guidanceForServerError(e, isOnlineNow())))
 }

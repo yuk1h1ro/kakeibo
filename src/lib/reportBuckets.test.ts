@@ -6,7 +6,6 @@ import {
   bucketSeries,
   dailyTotals,
   enumerateDates,
-  shiftMonth,
   startOfWeek,
 } from './reportBuckets'
 
@@ -43,11 +42,6 @@ describe('日付ユーティリティ', () => {
   it('週の始まりは日曜', () => {
     expect(startOfWeek('2026-08-04')).toBe('2026-08-02') // 火曜 → 直前の日曜
     expect(startOfWeek('2026-08-02')).toBe('2026-08-02') // 日曜はその日
-  })
-
-  it('月の加減算が年をまたぐ', () => {
-    expect(shiftMonth('2026-01', -1)).toBe('2025-12')
-    expect(shiftMonth('2026-12', 1)).toBe('2027-01')
   })
 
   it('期間の日付を列挙する(逆順は空)', () => {

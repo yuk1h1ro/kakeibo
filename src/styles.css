@@ -283,6 +283,8 @@ textarea:focus {
   transition: transform 0.08s ease, filter 0.08s ease, background-color 0.08s ease;
 }
 
+/* 押し込みの深さ(0.97)と暗さは、押した相手が何であれ同じ手応えであるべきなので
+   1か所にまとめている。transition は要素ごとの基本ルールが持っている。 */
 .btn-primary:active:not(:disabled),
 .btn-ghost:active:not(:disabled),
 .category-chip:active,
@@ -291,12 +293,17 @@ textarea:focus {
 .calc-key:active,
 .date-chip:active,
 .store-chip:active,
-.recent-chip:active {
+.recent-chip:active,
+.scan-btn:active:not(:disabled),
+.keypad-key:active,
+.btn-secondary:active:not(:disabled),
+.stamp-btn:active:not(:disabled) {
   transform: scale(0.97);
   filter: brightness(0.92);
 }
 
 @media (prefers-color-scheme: dark) {
+  /* 暗い面では暗くしても押した感じが出ないので、逆に明るくする */
   .btn-primary:active:not(:disabled),
   .btn-ghost:active:not(:disabled),
   .category-chip:active,
@@ -305,7 +312,11 @@ textarea:focus {
   .calc-key:active,
   .date-chip:active,
   .store-chip:active,
-  .recent-chip:active {
+  .recent-chip:active,
+  .scan-btn:active:not(:disabled),
+  .keypad-key:active,
+  .btn-secondary:active:not(:disabled),
+  .stamp-btn:active:not(:disabled) {
     filter: brightness(1.25);
   }
 }
@@ -651,17 +662,6 @@ textarea:focus {
   font-size: 15px;
   font-weight: 700;
   transition: transform 0.08s ease, filter 0.08s ease;
-}
-
-.scan-btn:active:not(:disabled) {
-  transform: scale(0.97);
-  filter: brightness(0.92);
-}
-
-@media (prefers-color-scheme: dark) {
-  .scan-btn:active:not(:disabled) {
-    filter: brightness(1.25);
-  }
 }
 
 .scan-btn:disabled {
@@ -1408,17 +1408,6 @@ textarea:focus {
   transition: transform 0.08s ease, filter 0.08s ease;
 }
 
-.keypad-key:active {
-  transform: scale(0.97);
-  filter: brightness(0.92);
-}
-
-@media (prefers-color-scheme: dark) {
-  .keypad-key:active {
-    filter: brightness(1.25);
-  }
-}
-
 /* 0 は最も使うので2列ぶんの幅を与える */
 .keypad-wide {
   grid-column: span 2;
@@ -1693,17 +1682,6 @@ body.keypad-open .modal-sheet {
   cursor: default;
 }
 
-.btn-secondary:active:not(:disabled) {
-  transform: scale(0.97);
-  filter: brightness(0.92);
-}
-
-@media (prefers-color-scheme: dark) {
-  .btn-secondary:active:not(:disabled) {
-    filter: brightness(1.25);
-  }
-}
-
 /* 連続保存の手応え(何件目まで入ったかが分かる1行) */
 .streak-note {
   font-size: 13px;
@@ -1747,17 +1725,6 @@ body.keypad-open .modal-sheet {
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 700;
-}
-
-.stamp-btn:active:not(:disabled) {
-  transform: scale(0.97);
-  filter: brightness(0.92);
-}
-
-@media (prefers-color-scheme: dark) {
-  .stamp-btn:active:not(:disabled) {
-    filter: brightness(1.25);
-  }
 }
 
 .stamp-btn:disabled {

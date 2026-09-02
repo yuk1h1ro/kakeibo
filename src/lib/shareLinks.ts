@@ -7,7 +7,8 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { isSchemaError, toServerError } from './serverErrors'
+import { toServerError } from './serverErrors'
+import { createTableAvailability } from './tableAvailability'
 import { formatGuidance, guidanceForServerError, isOnlineNow } from './errorGuidance'
 
 export interface ShareLink {
@@ -85,11 +86,22 @@ function fromRow(r: ShareLinkRow): ShareLink {
   }
 }
 
-/** テーブルが無いと分かったら true。以後この機能の導線を出さない */
-let tableMissing = false
+// テーブルが無いと分かったら「無い」。以後この機能の導線を出さない。
+// 答えは localStorage に残るので、オフライン起動でも前回の答えが効く
+// (見分け方は tableAvailability.ts)。
+const availability = createTableAvailability('partner_share_links')
 
+// **この判定を「画面を出すかどうか」のガードに使わないこと。**
+// 描画の手前で弾くと fetch まで届かず、答えを取り消す機会が永久に来ない
+// (マイグレーションを実行しても機能が戻らなくなる)。導線を隠すのは、
+// いまのように fetch の結果(null)を画面側の state で受けて判断すること。
 export function isShareUnavailable(): boolean {
-  return tableMissing
+  return availability.isMissing()
+}
+
+/** テスト用に、モジュールに残る「テーブルが無い」判定を戻す */
+export function resetShareLinksForTest(): void {
+  availability.resetForTest()
 }
 
 /**
@@ -104,10 +116,10 @@ export async function fetchShareLinks(supabase: SupabaseClient): Promise<ShareLi
       .select(SELECT_COLUMNS)
       .order('created_at', { ascending: false })
     if (error) {
-      if (isSchemaError(error)) tableMissing = true
+      availability.noteError(error)
       return null
     }
-    tableMissing = false
+    availability.markPresent()
     return ((data ?? []) as unknown as ShareLinkRow[]).map(fromRow)
   } catch {
     return null
@@ -128,7 +140,7 @@ export async function createShareLink(
     .select(SELECT_COLUMNS)
     .single()
   if (error) {
-    if (isSchemaError(error)) tableMissing = true
+    availability.noteError(error)
     throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
   }
   if (!data) {

@@ -2,7 +2,8 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import ReportTab from './ReportTab'
-import { monthKey, monthKeyOffset, todayISO } from '../lib/format'
+import { monthKey, todayISO } from '../lib/format'
+import { shiftMonth } from '../lib/calendar'
 import { totalOwn } from '../lib/report'
 import { monthRange } from '../lib/report'
 import type { Transaction } from '../lib/types'
@@ -21,7 +22,7 @@ import type { Transaction } from '../lib/types'
 
 const TODAY = todayISO()
 const THIS_MONTH = monthKey(TODAY)
-const LAST_MONTH_DAY = `${monthKeyOffset(THIS_MONTH, -1)}-15`
+const LAST_MONTH_DAY = `${shiftMonth(THIS_MONTH, -1)}-15`
 
 function tx(over: Partial<Transaction> = {}): Transaction {
   return {
@@ -162,7 +163,7 @@ describe('レポートの前月比', () => {
       tx({ id: 'b', amount: 3000, partner_amount: 1000, date: LAST_MONTH_DAY }),
     ]
     // 期待値も画面と同じ式から出す。総額(¥3,000)で比べていたら差は 0 にならない
-    expect(totalOwn(txs, monthRange(monthKeyOffset(THIS_MONTH, -1)))).toBe(2000)
+    expect(totalOwn(txs, monthRange(shiftMonth(THIS_MONTH, -1)))).toBe(2000)
     const html = render(txs)
     expect(html).toContain('前月比 +¥0')
     // 差が無い月には色を付けない(良い・悪いのどちらでもない)

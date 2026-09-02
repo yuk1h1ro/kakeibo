@@ -4,7 +4,6 @@ import {
   NO_STORE_LABEL,
   annualFromMonthly,
   annualFromRange,
-  dayOfWeek,
   hourBandStats,
   jstHour,
   lastYearMonth,
@@ -66,7 +65,7 @@ describe('monthRange / lastYearMonth', () => {
   })
 })
 
-describe('normalizeRange / rangeDays / dayOfWeek', () => {
+describe('normalizeRange / rangeDays', () => {
   it('開始と終了が逆なら入れ替える', () => {
     expect(normalizeRange('2026-08-31', '2026-08-01')).toEqual({
       start: '2026-08-01',
@@ -90,11 +89,6 @@ describe('normalizeRange / rangeDays / dayOfWeek', () => {
 
   it('年をまたぐ期間も数えられる', () => {
     expect(rangeDays({ start: '2025-12-31', end: '2026-01-01' })).toBe(2)
-  })
-
-  it('曜日を返す', () => {
-    expect(dayOfWeek('2026-08-04')).toBe(2) // 火
-    expect(dayOfWeek('2026-08-09')).toBe(0) // 日
   })
 })
 
