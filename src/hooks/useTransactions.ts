@@ -473,6 +473,14 @@ export function useTransactions(supabase: SupabaseClient) {
           // 個々の op の通知とは別に、確定した残高そのものを見て判断する
           if (message) notifyLowBalanceIfNeeded(partnerBalance(nextRows))
           localRows = nextRows
+          // 進めた手元のスナップショットは、この flush を抜けても引き継ぐ。
+          // ここを flush の中の変数だけに留めていたころは、serverTxRef が
+          // 「キューが空になったときの refresh()」でしか進まず、圏外で送信が
+          // 途中で切れると、次の flush が **成功済みの op を含まない古い写し** から
+          // 残高を計算し直していた(彼女の Discord に古い残高が届く原因)。
+          // 同じ理由で、隔離するときの「すでにサーバーへ入った分割の片割れ」も
+          // 見つけられなかった。通信を増やさずに直せるよう、手元の写しを進める。
+          serverTxRef.current = nextRows
           // 繰り返し入力が作った行なら、「サーバーが受け付けた」ことをここで控えに記す。
           // 取り込み直しを待たずにこの瞬間に記すのが肝心 — 待つと、その隙に
           // 別の端末で消された記録を「届いていない」と誤認して復活させてしまう

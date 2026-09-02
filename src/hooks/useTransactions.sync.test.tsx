@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, renderHook, waitFor } from '@testing-library/react'
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { useTransactions, type TransactionInput } from './useTransactions'
@@ -9,15 +9,19 @@ import { resetDiscordWebhookForTest } from '../lib/discordWebhook'
 import type { Transaction } from '../lib/types'
 
 // ============================================================
-// 圏外から復帰したときの同期。ここには実際に起きた不具合がぶら下がっている。
+// 圏外から復帰したときの同期。ここには実際に起きた不具合が2件ぶら下がっている。
 //
-// サーバーが行を確定させた直後に接続が切れ、**応答だけ** が失われた場合。
-// 端末は「届いていない」と見て同じ行IDで送り直す → 主キー重複 (23505)。
-// これを拒否として扱うと、分割は会計まるごと隔離されたうえ、隔離箱から
-// 送り直しても同じ行IDでまた 23505 になり、永久に復旧できなかった。
-// 行IDは端末が採番しているので、これは「すでに終わっている」= 成功。
+//  1. サーバーが行を確定させた直後に接続が切れ、**応答だけ** が失われた場合。
+//     端末は「届いていない」と見て同じ行IDで送り直す → 主キー重複 (23505)。
+//     これを拒否として扱うと、分割は会計まるごと隔離されたうえ、隔離箱から
+//     送り直しても同じ行IDでまた 23505 になり、永久に復旧できなかった。
+//     行IDは端末が採番しているので、これは「すでに終わっている」= 成功。
 //
-// lib の純粋関数だけでは再現できない —— **flush の道筋** の問題なので、
+//  2. flush が途中で切れると、次の flush が「成功済みの op を含まない
+//     古いスナップショット」から残高を計算し直し、彼女の Discord に
+//     古い残高が届いていた(画面は正しいので気付きにくい)。
+//
+// どちらも lib の純粋関数だけでは再現できない —— **flush の道筋** の問題なので、
 // フックを実際に回して、サーバーに入った行と彼女に届いた文面で確かめる。
 // ============================================================
 
@@ -119,6 +123,19 @@ const SPLIT: PendingOp[] = [
   ),
 ]
 
+const DEPOSIT: Transaction = {
+  id: 'deposit',
+  date: '2026-09-01',
+  type: 'partner_deposit',
+  amount: 50000,
+  category: null,
+  memo: '事前の預かり',
+  store: '',
+  partner_amount: 0,
+  partner_paid: 0,
+  created_at: '2026-09-01T00:00:00.000Z',
+}
+
 /** 彼女の Discord に届いた文面 */
 let sent: string[] = []
 
@@ -189,5 +206,33 @@ describe('応答だけ失われた再送 (23505)', () => {
     await waitFor(() => expect(loadQuarantine().length).toBe(1))
     expect(result.current.pendingCount).toBe(0)
     expect(server.rows).toEqual([])
+  })
+})
+
+describe('送信が中断されたあとの残高通知', () => {
+  it('成功した op を反映したスナップショットを次の flush にも引き継ぐ', async () => {
+    const server = newServer([DEPOSIT])
+    server.unreachable.add('r2') // 2件目は届かない = ここで flush が切れる
+    saveQueue(SPLIT)
+
+    const supabase = fakeSupabase(server)
+    const { result } = renderHook(() => useTransactions(supabase))
+    // 1件目だけが通り、キューには2件残る
+    await waitFor(() => expect(result.current.pendingCount).toBe(2))
+    expect(sent).toEqual(['🍽️ 応答喪失スーパー −¥700\n残高: ¥49,300(預かり中)'])
+
+    // 圏外を抜けて残りを送る
+    server.unreachable.clear()
+    await act(async () => {
+      window.dispatchEvent(new Event('online'))
+    })
+    await waitFor(() => expect(result.current.pendingCount).toBe(0))
+
+    // 50,000 − 700 − 500 − 250。中断をまたいでも彼女に届く残高は続きから
+    expect(sent).toEqual([
+      '🍽️ 応答喪失スーパー −¥700\n残高: ¥49,300(預かり中)',
+      '🍽️ 応答喪失スーパー −¥500\n残高: ¥48,800(預かり中)',
+      '🍽️ 応答喪失スーパー −¥250\n残高: ¥48,550(預かり中)',
+    ])
   })
 })
