@@ -48,6 +48,7 @@ import {
   stripUnavailableColumns,
 } from '../lib/txExtensions'
 import {
+  isDuplicateRowError,
   isNetworkError,
   isRetryableServerError,
   isSchemaError,
@@ -360,6 +361,20 @@ export function useTransactions(supabase: SupabaseClient) {
         } catch (e) {
           err = { message: e instanceof Error ? e.message : String(e) }
         }
+        // 「その行はもう入っている」と断られた = 前回の送信は実は成功していて、
+        // 応答だけが返ってこなかった(圏外に入る瞬間に起きる)。
+        // 行IDは端末側で採番しているので、その id がサーバーに在るなら、それは
+        // 自分が前に送った行そのもの。失敗ではなく **すでに終わっている** ので、
+        // 下の成功の道へそのまま合流させ、キューから外す(同期を冪等にする)。
+        // ここを拒否のまま扱っていたころは、分割が会計まるごと隔離されたうえ、
+        // 隔離箱から送り直しても同じ行IDでまた 23505 になり、永久に復旧できなかった。
+        // 判定の根拠(details の "Key (id)=(…)")は serverErrors.ts に書いてある。
+        // update / delete に同じ手当ては要らない: PATCH も DELETE も同じ内容を
+        // 送り直すだけで成功して返る(対象が消えていても 0件更新の成功)ので、
+        // 「実は成功していたのに永久に断られ続ける」という形にはならない。
+        if (err && op.kind === 'insert' && isDuplicateRowError(err, op.id)) {
+          err = null
+        }
         if (err) {
           if (isNetworkError(err.message)) {
             // 通信起因 — 届いてすらいないので、キューは保持したまま静かに中断する。
@@ -458,6 +473,14 @@ export function useTransactions(supabase: SupabaseClient) {
           // 個々の op の通知とは別に、確定した残高そのものを見て判断する
           if (message) notifyLowBalanceIfNeeded(partnerBalance(nextRows))
           localRows = nextRows
+          // 進めた手元のスナップショットは、この flush を抜けても引き継ぐ。
+          // ここを flush の中の変数だけに留めていたころは、serverTxRef が
+          // 「キューが空になったときの refresh()」でしか進まず、圏外で送信が
+          // 途中で切れると、次の flush が **成功済みの op を含まない古い写し** から
+          // 残高を計算し直していた(彼女の Discord に古い残高が届く原因)。
+          // 同じ理由で、隔離するときの「すでにサーバーへ入った分割の片割れ」も
+          // 見つけられなかった。通信を増やさずに直せるよう、手元の写しを進める。
+          serverTxRef.current = nextRows
           // 繰り返し入力が作った行なら、「サーバーが受け付けた」ことをここで控えに記す。
           // 取り込み直しを待たずにこの瞬間に記すのが肝心 — 待つと、その隙に
           // 別の端末で消された記録を「届いていない」と誤認して復活させてしまう
