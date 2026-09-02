@@ -59,23 +59,72 @@
 
 ---
 
-## 課題2. 重複の統合（約550行）
+## 課題2. 重複の統合（着手済み・2026-09-01）
+
+**（2026-09-01 追記）8項目のうち7項目に着手しました（#7 のみ未着手）。うち6項目は完了、#4 は8モジュールを載せ替えて1つを意図的に見送っています。まず下の「やってみて分かったこと」を読んでください。**
+
+### やってみて分かったこと（重要）
+
+**この節の見積り「約550行の削減」は誤りでした。実測は本体で +86行です。**
+
+| 項目 | 見積り | 実測（本体） |
+|---|---|---|
+| #2 `throwOn` / #3 アイコン / #5 CSS / #8 改名 | −150行 | **−52行** |
+| #1 日付・期間の計算 | −70行 | **−5行** |
+| #6 マイグレーション検知 | −80行 | **+174行** |
+| #4 localStorage 設定ストア | −140行 | **−31行** |
+| 合計 | −440行 | **+86行** |
+
+原因は見積りの立て方にあります。重複していたのは `if (isSchemaError(error)) tableMissing = true` や `new Date(y, m, 0).getDate()` のような**1〜2行の式**が大半で、共通化して消えるコードより、統合先に置く doc コメントのほうが行数を食います。
+
+**行数を目的にしないでください。** 得られたのは次の3つです。
+
+- 同じ判定・同じ計算が1箇所になった（スキーマエラーの判定を1箇所書き漏らすと「マイグレーション未実行で入力が失われる」に戻る。このプロジェクトで実際に起きた種類の事故）
+- テストが 1,435 → 1,592件（+157）に増え、統合した箇所すべてに回帰検出器が付いた
+- 潜在的な不具合が2件見つかった（後述）
+
+**この節に書かれた「同一」「N箇所」という記述は当てになりません。** 実際に突き合わせたところ、3件が事実と違いました（下記）。次に着手する人は必ず現物を確認してください。
+
+### 状態
+
+| # | 内容 | 状態 |
+|---|---|---|
+| 1 | 日付・期間の計算が7種類に分裂 | **完了。** `calendar.ts` に `daysInMonth` / `monthEndISO` / `shiftMonth` / `dayOfWeek` |
+| 2 | `throwOn` が3ファイルで同一 | **完了。** `errorGuidance.ts` の `throwOnServerError` |
+| 3 | アイコンの `Base` ラッパー | **完了。** `icons.tsx` の `IconBase`（`historyIcons` は 20px のラッパー経由） |
+| 4 | localStorage 設定ストアが14モジュールに5通り | **8モジュール完了**（`localSetting.ts` の `createLocalSetting`）。`lowBalanceSettings` は見送り、5つは対象外（下記） |
+| 5 | 押した手応え `scale(0.97)` | **完了。** ダークの `brightness(1.25)` も一緒に合流 |
+| 6 | マイグレーション未実行の検知 | **完了。** `tableAvailability.ts`。`tableMissing` 派7つのみ |
+| 7 | 日時表示の関数が4つ、書式が3通り | **未着手。** もともと「書式が3通りなのは用途が違うから正しい」と判定しており、優先度は低いまま |
+| 8 | `useSwipeNav` の名前と意味のずれ | **完了。** `onSwipeRight` / `onSwipeLeft` |
+
+### 見つかった潜在的な不具合（修正済み）
+
+- **`storeCategories` だけ「テーブルが無い」判定を取り消す口が無かった。** セッション内では初期化が1回なので害は出ていませんでしたが、判定を localStorage に残す方式にした以上、取り消す口が無いとマイグレーション実行後も機能が戻りません。`initStoreCategories` の成功時に取り消すようにしました
+- **`monthlySummary` の早期 return が罠に変わる直前だった。** テーブル確認の経路が `fetchSentMonths` 1つしかなく、そこ自体が `if (tableMissing) return 0` の内側にあります。判定を覚えさせると、マイグレーション実行後も**二度と送られなくなります**。`changeLog` と合わせて「覚えない」（`remember: false`）にしてあります
+
+### 記録が事実と違っていたもの（次に読む人へ）
+
+- 「アイコンの `Base` は4ファイルとも同一」→ **`historyIcons.tsx` だけ 20px**（他は 22px）。履歴は行の中の小さいボタンなので意図的な差。揃えていません
+- 「月キーずらしの3実装は1文字違わず同一」→ 変数名と `pad2` の有無が違う。振る舞いは100年ぶん全一致だったので統合しましたが、文言は不正確でした
+- 「`throwOn` の統合で −90行」→ 実体は1定義2行。**本体は +8行**
+
+### 追加で「統合してはいけない」と判明したもの
+
+前からある下の一覧に加えて、今回の作業で**分けたままにすべきと判明した**ものです。**重複しているから、という理由だけで触らないでください。**
+
+- **n日ずらす3実装**（`reportBuckets.addDays` / `recurringLedger.shiftDays` / `recurrence.nextDay`）— 壊れた入力での振る舞いが3つとも違う。`"bad"` を渡すと `"NaN-NaN-NaN"` / `"bad"` / `"bad"`、`"2026-00-10"` を渡すと `"2025-12-11"` / そのまま / `"2025-12-11"`。揃えると「壊れたデータを黙って進めるか止めるか」の判断が呼び出し元で変わる
+- **`report.rangeDays` と `netWorth.daysBetween`** — 同じ `Date.UTC` 差分に見えるが、前者は両端を含み最低1、後者は素の差で負も返す（同じ入力で `1` と `-9`）。別物
+- **`format.monthKey` と `netWorth.monthOf`** — どちらも `slice(0, 7)` で内容は同一だが、統合すると純粋な `netWorth.ts` が `format.ts` 経由で `amountMask` の可変状態に依存する。1行のために依存を増やす価値がない
+- **`lowBalanceSettings`** — `loadLowBalanceThreshold()` は購読スナップショットではなく**呼ばれるたびに localStorage を読み直す**。`createLocalSetting` に載せると別タブで変えたしきい値が通知に効かなくなる。直読みを保ったまま載せると +1行で、得るものが無い
+- **`privacyShield` / `privacyBlur`** — 下の一覧のとおり `amountMask` と統合してはいけないのに加え、値の持ち主が設置済みハンドルで `installed?.isEnabled() ?? parseEnabled(保存値)` の2段構え。「値はストアが持つ」前提の `createLocalSetting` とは形が合わない
+- **`satisfaction` / `discordWebhook` / `quarantine`** — 「設定ストア14」に数えられているが、順に「localStorage を使っていない（メモリのみ）」「真の置き場は Supabase の `discord_settings`」「2キーを持つ隔離箱であって設定ではない」。載せ替える対象がない
+- **`changeLog` / `monthlySummary` の「テーブルが無い」判定** — 上記のとおり覚えさせてはいけない（`remember: false`）
+
+### 元の分析（記録日 2026-08-04）
 
 調査で約650行ぶんの重複が見つかり、うち約100行（未使用コード・NUL バイト・ダークモードの色）は対応済みです。
 残りは**不具合修正と混ぜるべきではない**と判断して見送りました。コンポーネントのテストができてからの方が安全です。
-
-### やる価値がある順
-
-| # | 内容 | 場所 | 削減 | リスク | 判断 |
-|---|---|---|---|---|---|
-| 1 | 日付・期間の計算が7種類に分裂 | `format.ts` `calendar.ts` `report.ts` `reportBuckets.ts` `monthJump.ts` `recurrence.ts` `netWorth.ts` `reportPace.ts` `historyFilter.ts` | −70行 | **低** | **やる価値あり。** 月末日を求める実装が7箇所、月キーをNヶ月ずらす実装が3箇所（3つとも1文字違わず同一）、曜日算出が5箇所。既存131件のテストがそのまま回帰検出器になる |
-| 2 | `throwOn` が3ファイルで完全に同一 | `categories.ts:264` `recurringRules.ts:220` `transactionTemplates.ts:164` | −90行 | **低** | **やる価値あり。** `errorGuidance.ts` に移す。`assets.ts` 版はスキーマエラーを先に見る拡張版なので、任意引数で吸収 |
-| 3 | アイコンの `Base` ラッパーが4ファイルにコピー | `icons.tsx` `maskIcons.tsx` `historyIcons.tsx` `assetIcons.tsx` | −40行 | **極低** | やってよい。`maskIcons.tsx` の `Base` は `icons.tsx` と1文字も違わない。3ファイルとも「他の作業と衝突するので分けた」とコメントに書いてあり、その制約はもう無い |
-| 4 | localStorage 設定ストアが14モジュールに5通り | `keypadSettings` `amountMask` `privacyBlur` `lowBalanceSettings` `monthlyBudget` `txExtensions` ほか | −140行 | **低〜中** | `createLocalSetting<T>` を作る。**ストア本体にテストが1件も無い**ので、5つを一度に載せ替えず1つずつ。ストレージキーと直列化形式は変えないこと（既存端末のデータが読めなくなる） |
-| 5 | 押した手応え `transform: scale(0.97)` が5箇所 | `styles.css:259, 577, 1336, 1532, 1588` | −20行 | **低** | セレクタリストに合流するだけ |
-| 6 | 「マイグレーション未実行」の検知が4方式9モジュール | `storeCategories` `recurringRules` `transactionTemplates` `partnerComments` `shareLinks` `monthlySummary` `changeLog` `satisfaction` `assets` `txExtensions` | −80行 | **中** | `txExtensions.ts` の方式（localStorage に答えを残すのでオフライン起動でも効く）が最良。他8つにはその利点が無い。ただし**一度に全部ではなく `tableMissing` 派の7つだけ**を先に統一すること |
-| 7 | 日時表示の関数が4つ、書式が3通り | `ChangeLogSheet` `CommentThread` `ShareLinkCard` `pullRefresh` | −20行 | 低 | 優先度低。書式が3通りあるのは**用途が違うから正しい**とも言える（共有ページは初見の人が読むので記号を減らしている） |
-| 8 | `useSwipeNav` を「満足/後悔」に流用していて名前と意味がずれる | `SatisfactionSortSheet.tsx:51-55` | ±0 | 極低 | `onSwipeRight` / `onSwipeLeft` に改名。ついでにやってよい |
 
 ### 統合してはいけないもの（重要）
 
