@@ -48,6 +48,7 @@ import {
   stripUnavailableColumns,
 } from '../lib/txExtensions'
 import {
+  isDuplicateRowError,
   isNetworkError,
   isRetryableServerError,
   isSchemaError,
@@ -359,6 +360,20 @@ export function useTransactions(supabase: SupabaseClient) {
           }
         } catch (e) {
           err = { message: e instanceof Error ? e.message : String(e) }
+        }
+        // 「その行はもう入っている」と断られた = 前回の送信は実は成功していて、
+        // 応答だけが返ってこなかった(圏外に入る瞬間に起きる)。
+        // 行IDは端末側で採番しているので、その id がサーバーに在るなら、それは
+        // 自分が前に送った行そのもの。失敗ではなく **すでに終わっている** ので、
+        // 下の成功の道へそのまま合流させ、キューから外す(同期を冪等にする)。
+        // ここを拒否のまま扱っていたころは、分割が会計まるごと隔離されたうえ、
+        // 隔離箱から送り直しても同じ行IDでまた 23505 になり、永久に復旧できなかった。
+        // 判定の根拠(details の "Key (id)=(…)")は serverErrors.ts に書いてある。
+        // update / delete に同じ手当ては要らない: PATCH も DELETE も同じ内容を
+        // 送り直すだけで成功して返る(対象が消えていても 0件更新の成功)ので、
+        // 「実は成功していたのに永久に断られ続ける」という形にはならない。
+        if (err && op.kind === 'insert' && isDuplicateRowError(err, op.id)) {
+          err = null
         }
         if (err) {
           if (isNetworkError(err.message)) {

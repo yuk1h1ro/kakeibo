@@ -38,6 +38,43 @@ export function isSchemaError(err: ServerErrorLike): boolean {
   return /schema cache|does not exist|could not find/i.test(text)
 }
 
+// ---------- 「実はもう入っていた」行の判定 ----------
+//
+// 行の UUID は **端末側で採番してから** 送っている (offlineQueue.ts の PendingOp.id)。
+// だから「自分がいま送ろうとしている id が、すでにサーバーに在る」と断られたなら、
+// それは前回の送信がサーバーまで届いて確定し、**応答だけが返ってこなかった**
+// ということに他ならない(トンネルに入った瞬間など。端末からは「届かなかった」と
+// 区別が付かないのでキューに残り、復帰後に同じ行IDで送り直される)。
+//
+// つまりこれは失敗ではなく「すでに終わっている」。成功として扱ってキューから外すのが
+// 正しい = 同期を冪等にする。隔離してしまうと、同じ行IDで送り直す限り永久に
+// 23505 で断られ続け、隔離箱の「もう一度送る」でも二度と復旧できなくなる。
+//
+// ただし 23505 は主キー以外の一意制約でも起きるので、無関係な重複まで成功に
+// 倒してはいけない。実測した PostgREST(Supabase)の応答は
+//   code    : "23505"
+//   message : duplicate key value violates unique constraint "transactions_pkey"
+//   details : Key (id)=(<uuid>) already exists.
+// で、**どの列のどの値がぶつかったか** が分かるのは details だけ
+// (例えば partner_share_links のトークン重複なら "Key (token)=(...)" になる)。
+// そこで「ぶつかった列が id」かつ「その値が今まさに送っている行ID」のときに限る。
+// details が読めないときは今までどおり拒否として扱う — 取りこぼしても記録は
+// 隔離箱に残るので、安全側に倒しておく。
+const UNIQUE_VIOLATION_CODE = '23505'
+
+// details の "Key (列)=(値) already exists." から列と値を取り出す
+const DUPLICATE_KEY_DETAIL = /\(([^()]+)\)=\(([^()]*)\)/
+
+export function isDuplicateRowError(err: ServerErrorLike, rowId: string): boolean {
+  const unique =
+    err.code === UNIQUE_VIOLATION_CODE || /duplicate key value|unique constraint/i.test(err.message)
+  if (!unique) return false
+  const m = DUPLICATE_KEY_DETAIL.exec(err.details ?? '')
+  if (!m) return false
+  // uuid の英大小は問わない(PostgreSQL は小文字で返すが、端末側の採番に合わせる)
+  return m[1].trim() === 'id' && m[2].trim().toLowerCase() === rowId.trim().toLowerCase()
+}
+
 // 「あとで直せる(再試行すべき)」失敗か。
 // true のとき op はキューに残す = 入力した記録は絶対に失わない。
 export function isRetryableServerError(err: ServerErrorLike): boolean {
