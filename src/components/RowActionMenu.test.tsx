@@ -15,6 +15,7 @@ import type { Transaction } from '../lib/types'
 // ============================================================
 
 const DUPLICATE = '同じ内容で今日の日付に複製する'
+const STORE_FILTER = 'このお店の履歴だけ見る'
 
 function tx(over: Partial<Transaction> = {}): Transaction {
   return {
@@ -38,6 +39,8 @@ function render(t: Transaction): string {
       onDuplicate={() => {}}
       onEdit={() => {}}
       onDelete={() => {}}
+      // 本番(HistoryTab)は常に渡す。渡さないときの見え方は下の節で確かめる
+      onFilterStore={() => {}}
       onClose={() => {}}
     />
   )
@@ -68,6 +71,41 @@ describe('長押しメニューの複製の出し分け', () => {
       expect(html).toContain('編集する')
       expect(html).toContain('削除する')
     }
+  })
+})
+
+describe('長押しメニューからお店で絞り込む導線', () => {
+  it('店名のある支出には出す', () => {
+    expect(render(tx({ store: 'オカモトセルフ' }))).toContain(STORE_FILTER)
+  })
+
+  it('店名が空の記録には出さない(絞り込む先が無いので、押しても何も起きない項目になる)', () => {
+    expect(render(tx({ store: '' }))).not.toContain(STORE_FILTER)
+    // 空白だけの店名も「店名なし」と同じ扱い(レポートの束ね方と揃える)
+    expect(render(tx({ store: '   ' }))).not.toContain(STORE_FILTER)
+    // 預かり・返金・調整は店名を持たない
+    expect(render(ledger('partner_deposit', 30000))).not.toContain(STORE_FILTER)
+    expect(render(ledger('partner_refund', 5000))).not.toContain(STORE_FILTER)
+  })
+
+  it('受け取り手が渡されていなければ出さない', () => {
+    const html = renderToStaticMarkup(
+      <RowActionMenu
+        tx={tx()}
+        onDuplicate={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onClose={() => {}}
+      />
+    )
+    expect(html).not.toContain(STORE_FILTER)
+  })
+
+  it('既存3項目の並びは変えない(複製・編集・削除の順のまま、間に挟む)', () => {
+    const html = render(tx({ store: 'オカモトセルフ' }))
+    expect(html.indexOf(DUPLICATE)).toBeLessThan(html.indexOf(STORE_FILTER))
+    expect(html.indexOf(STORE_FILTER)).toBeLessThan(html.indexOf('編集する'))
+    expect(html.indexOf('編集する')).toBeLessThan(html.indexOf('削除する'))
   })
 })
 

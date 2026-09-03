@@ -56,11 +56,22 @@ import '../history.css'
 
 type Store = ReturnType<typeof useTransactions>
 
+/**
+ * レポートのお店別の行から渡ってくる「このお店で絞って開く」指示。
+ * 入力タブの datePrefill (機能053) と同じ形にしてある(nonce が変わるたびに適用する)。
+ */
+export interface StorePrefill {
+  nonce: number
+  store: string
+}
+
 interface Props {
   store: Store
   onEdit: (t: Transaction) => void
   /** その日付で入力タブを開く(機能053) */
   onStartInput: (date: string) => void
+  /** レポートのお店別から「そのお店の履歴」を開く */
+  storePrefill?: StorePrefill
 }
 
 /** 検索結果を一度に描く上限 */
@@ -71,7 +82,7 @@ interface DaySummary {
   deposit: number
 }
 
-export default function HistoryTab({ store, onEdit, onStartInput }: Props) {
+export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }: Props) {
   const today = todayISO()
   const currentMonth = monthKey(today)
   const [month, setMonth] = useState(currentMonth)
@@ -86,6 +97,25 @@ export default function HistoryTab({ store, onEdit, onStartInput }: Props) {
   const [pull, setPull] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
   const [now, setNow] = useState(() => new Date())
+
+  // ---------- お店で絞り込む (長押しメニュー / レポートのお店別からの導線) ----------
+  //
+  // 「だけ見る」を言葉どおりにするため、いまの絞り込みに足すのではなく置き換える。
+  // 期間は既定の「すべて」のまま — 欲しいのは「そのお店の履歴」であって、
+  // レポートで見ていた月のぶんではない。**そのぶんレポートの行の件数とは変わる**ので、
+  // 何で絞っているか(お店・期間)は HistoryFilterBar が describeFilter で常に画面に出す。
+  // 突き合わせは完全一致(types.ts の storeKey)。レポートのお店別と同じキーなので、
+  // 同じ期間で見れば件数も一致する。
+  const showStoreOnly = useCallback((storeName: string) => {
+    setFilter({ ...DEFAULT_FILTER, stores: [storeName] })
+    // 結果の一覧は絞り込みバーの下に出る。押した結果が見えるよう先頭へ戻す
+    window.scrollTo({ top: 0 })
+  }, [])
+
+  useEffect(() => {
+    if (!storePrefill) return
+    showStoreOnly(storePrefill.store)
+  }, [storePrefill, showStoreOnly])
 
   const logAvailable = useChangeLogAvailable()
   const canNext = month < currentMonth
@@ -551,6 +581,7 @@ export default function HistoryTab({ store, onEdit, onStartInput }: Props) {
           onDuplicate={duplicateTx}
           onEdit={onEdit}
           onDelete={(t) => deleteTxs([t])}
+          onFilterStore={showStoreOnly}
           onClose={() => setMenuTx(null)}
         />
       )}

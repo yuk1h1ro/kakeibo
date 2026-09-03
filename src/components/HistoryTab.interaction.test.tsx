@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import HistoryTab from './HistoryTab'
 import type { TransactionInput, useTransactions } from '../hooks/useTransactions'
 import { LONG_PRESS_MS } from '../lib/rowGesture'
-import { todayISO } from '../lib/format'
+import { monthKey, todayISO } from '../lib/format'
+import { shiftMonth } from '../lib/calendar'
 import type { Transaction } from '../lib/types'
 
 // ============================================================
@@ -49,7 +50,7 @@ function tx(over: Partial<Transaction> = {}): Transaction {
   }
 }
 
-function setup(transactions: Transaction[]) {
+function setup(transactions: Transaction[], storePrefill?: { nonce: number; store: string }) {
   const added: TransactionInput[] = []
   const updated: { id: string; input: TransactionInput }[] = []
   const removed: Transaction[][] = []
@@ -70,7 +71,14 @@ function setup(transactions: Transaction[]) {
     lastSyncedAt: null,
   } as unknown as ReturnType<typeof useTransactions>
 
-  render(<HistoryTab store={store} onEdit={() => {}} onStartInput={() => {}} />)
+  render(
+    <HistoryTab
+      store={store}
+      onEdit={() => {}}
+      onStartInput={() => {}}
+      storePrefill={storePrefill}
+    />
+  )
   return { user: userEvent.setup(), added, updated, removed }
 }
 
@@ -212,5 +220,90 @@ describe('履歴の一覧に出る合計', () => {
     ])
     const head = document.querySelector('.hist-result-total') as HTMLElement
     expect(head.textContent).toContain('¥1,200')
+  })
+})
+
+// ============================================================
+// お店で絞り込む導線(長押しメニュー / レポートのお店別から)。
+//
+// 気をつけるところは2つ:
+//   ・押した結果、本当に一覧がその店だけになること
+//     (sameFilter に stores を足し忘れると「押しても何も起きない」で終わる)
+//   ・**いま何で絞っているかが画面に出ていること**。
+//     レポートから飛んだときは期間が全期間になるので、
+//     レポートの行に出ていた件数とは変わる。黙って数字が変わるのがいちばん困る
+// ============================================================
+describe('お店で絞り込む導線', () => {
+  const OLD_DAY = `${shiftMonth(monthKey(TODAY), -3)}-15`
+
+  /** 行を長押しして、その場のメニューを開く */
+  async function longPress(row: HTMLElement) {
+    vi.useFakeTimers()
+    try {
+      fireEvent.pointerDown(row, { pointerId: 1, clientX: 10, clientY: 10, button: 0 })
+      await act(async () => {
+        vi.advanceTimersByTime(LONG_PRESS_MS + 10)
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  }
+
+  const rows = () => [
+    tx({ id: 'a', store: 'オカモトセルフ', date: TODAY }),
+    tx({ id: 'b', store: 'セブンイレブン', date: TODAY }),
+    // 3ヶ月前の同じ店。期間は「すべて」なので、これも一緒に出てこないといけない
+    tx({ id: 'c', store: 'オカモトセルフ', date: OLD_DAY, created_at: `${OLD_DAY}T01:00:00.000Z` }),
+  ]
+
+  /** 絞り込みバーに出ている「いま何で絞っているか」の説明文 */
+  const filterState = () =>
+    (document.querySelector('.hist-filter-state') as HTMLElement).textContent
+
+  it('長押し →「このお店の履歴だけ見る」で、その店だけの一覧になる', async () => {
+    setup(rows())
+    // 絞る前はカレンダー + その日の明細(検索結果ではない)
+    expect(screen.queryByText(/検索結果/)).toBeNull()
+
+    await longPress(txRow(/オカモトセルフ/))
+    fireEvent.click(screen.getByRole('button', { name: /このお店の履歴だけ見る/ }))
+
+    // 期間は「すべて」なので、3ヶ月前の1件も一緒に出る
+    expect(screen.getByText('検索結果 2件')).toBeTruthy()
+    const shown = [...document.querySelectorAll('.hist-row')].map((el) => el.textContent ?? '')
+    expect(shown).toHaveLength(2)
+    expect(shown.every((t) => t.includes('オカモトセルフ'))).toBe(true)
+    expect(shown.some((t) => t.includes('セブンイレブン'))).toBe(false)
+  })
+
+  it('絞り込んでいるお店が画面に出る(黙って件数が変わったように見せない)', async () => {
+    setup(rows())
+    await longPress(txRow(/オカモトセルフ/))
+    fireEvent.click(screen.getByRole('button', { name: /このお店の履歴だけ見る/ }))
+
+    expect(filterState()).toBe('お店:オカモトセルフ / すべて')
+  })
+
+  it('店名を持たない記録の長押しには、その項目が出ない', async () => {
+    setup([tx({ id: 'd1', type: 'partner_deposit', amount: 30000, category: null, store: '' })])
+    await longPress(txRow(/彼女から預かり/))
+    expect(screen.queryByRole('button', { name: /このお店の履歴だけ見る/ })).toBeNull()
+  })
+
+  it('レポートから渡された店名は、開いた時点で効いている', () => {
+    setup(rows(), { nonce: 1, store: 'オカモトセルフ' })
+    expect(screen.getByText('検索結果 2件')).toBeTruthy()
+    expect(filterState()).toBe('お店:オカモトセルフ / すべて')
+  })
+
+  it('絞り込みは解除できる(カレンダーの見え方に戻る)', async () => {
+    const { user } = setup(rows(), { nonce: 1, store: 'オカモトセルフ' })
+    await user.click(screen.getByRole('button', { name: /絞り込み・並べ替え/ }))
+    // 開いた中に、外せるお店のチップが出ている
+    expect(screen.getByRole('button', { name: 'オカモトセルフ ✕' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: '絞り込みを解除' }))
+
+    expect(screen.queryByText(/検索結果/)).toBeNull()
+    expect(filterState()).toBe('')
   })
 })

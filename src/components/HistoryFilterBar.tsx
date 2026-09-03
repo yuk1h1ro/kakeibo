@@ -16,8 +16,10 @@ import {
   PERIOD_OPTIONS,
   SORT_OPTIONS,
   describeFilter,
+  filterStores,
   filterTags,
   isFilterActive,
+  suggestFilterName,
   type HistoryFilter,
 } from '../lib/historyFilter'
 import { collectTags } from '../lib/tags'
@@ -45,6 +47,9 @@ export default function HistoryFilterBar({ filter, onChange, transactions }: Pro
   // 実際に使われているタグだけを候補にする(空の選択肢を並べない)
   const tagOptions = collectTags(transactions ?? [], 40)
   const activeTags = filterTags(filter)
+  // お店はこの画面から選ぶものではなく(候補が数百件になる)、
+  // レポートのお店別か行の長押しから渡ってくる。ここでは外せるようにだけしておく
+  const activeStores = filterStores(filter)
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState(filter.query)
   const [saved, setSaved] = useState<SavedFilter[]>(() => loadSavedFilters())
@@ -228,6 +233,25 @@ export default function HistoryFilterBar({ filter, onChange, transactions }: Pro
             </div>
           </div>
 
+          {/* お店。絞り込んでいるときだけ出す(選ぶ場所ではなく、外す場所) */}
+          {activeStores.length > 0 && (
+            <div>
+              <span className="hist-field-label">お店(押すと外せます)</span>
+              <div className="hist-chips">
+                {activeStores.map((s) => (
+                  <button
+                    key={s}
+                    className="hist-chip is-on"
+                    aria-pressed={true}
+                    onClick={() => patch({ stores: activeStores.filter((x) => x !== s) })}
+                  >
+                    {s} ✕
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* 機能088: タグ。使われているタグが1つも無ければ節ごと出さない */}
           {tagOptions.length > 0 && (
             <div>
@@ -298,7 +322,9 @@ export default function HistoryFilterBar({ filter, onChange, transactions }: Pro
               <button
                 className="hist-primary"
                 disabled={!canSaveFilter(filter)}
-                onClick={() => setNaming(describeFilter(filter, categoryLabel).slice(0, 20))}
+                /* 名前の初期値は説明文そのままではなく、20文字に収まりやすい形にする
+                   (既定のままの期間「すべて」を落とす。理由は suggestFilterName) */
+                onClick={() => setNaming(suggestFilterName(filter, categoryLabel))}
               >
                 この条件を保存
               </button>
