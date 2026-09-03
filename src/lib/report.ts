@@ -4,7 +4,7 @@
 // ローカルタイムで組み立てて使う(toISOString を使うと TZ でずれるため)。
 
 import type { Satisfaction, Transaction } from './types'
-import { ownAmount, satisfactionOf } from './types'
+import { ownAmount, satisfactionOf, storeKey } from './types'
 import { partnerImpact } from './partnerBalance'
 import { WEEKDAY_LABELS, dayOfWeek, monthEndISO } from './calendar'
 
@@ -177,7 +177,11 @@ export function rankByStore(txs: readonly Transaction[], r: DateRange): RankItem
   return rankBy(
     txs,
     r,
-    (t) => t.store.trim(),
+    // 束ねるキーは storeKey(= 前後の空白だけを落とした完全一致)。
+    // 履歴のお店絞り込み (historyFilter.ts の stores) と同じ関数を通すこと —
+    // 片方だけ表記ゆれを吸収すると、この集計の件数と、行を押して飛んだ先の
+    // 履歴の件数が食い違う(理由は types.ts の storeKey のコメント)
+    storeKey,
     (key) => (key === '' ? NO_STORE_LABEL : key)
   )
 }

@@ -7,7 +7,7 @@
 // ============================================================
 
 import type { Transaction } from './types'
-import { ownAmount, tagsOf } from './types'
+import { ownAmount, storeKey, tagsOf } from './types'
 import { monthEndISO, shiftMonth } from './calendar'
 import { matchesAnyTag } from './tags'
 
@@ -160,11 +160,30 @@ export interface HistoryFilter {
    * (savedFilters)を読み直したときに壊れないようにするため。
    */
   tags?: string[]
+  /**
+   * お店(店名)の絞り込み。空 / 未指定 = すべて。
+   *
+   * 突き合わせは **完全一致**(types.ts の storeKey = 前後の空白を落とした店名)。
+   * 検索(query)のような表記ゆれの吸収は **わざと通していない**。
+   * レポートのお店別集計 (report.ts の rankByStore) が同じキーで束ねており、
+   * こちらだけ緩めると「レポートで 6件と出ている行を押したのに、
+   * 飛んだ先の履歴は 7件」という食い違いが起きるため。
+   * 揺れごと拾いたいときはフリーワード検索が既にその役目を持っている。
+   *
+   * tags と同じく任意 (?) にしてあるのは、この項目より前に localStorage へ
+   * 保存された条件 (savedFilters) を読み直したときに壊れないようにするため。
+   */
+  stores?: string[]
 }
 
 /** 絞り込みに指定されたタグ。未指定は空配列。(純粋関数) */
 export function filterTags(filter: HistoryFilter): string[] {
   return filter.tags ?? []
+}
+
+/** 絞り込みに指定されたお店。未指定は空配列。(純粋関数) */
+export function filterStores(filter: HistoryFilter): string[] {
+  return filter.stores ?? []
 }
 
 /**
@@ -181,6 +200,7 @@ export const DEFAULT_FILTER: HistoryFilter = {
   period: 'all',
   categories: [],
   tags: [],
+  stores: [],
 }
 
 /**
@@ -212,6 +232,7 @@ const FILTER_READERS: FilterReaders = {
   period: (raw) => PERIOD_OPTIONS.find((o) => o.value === raw)?.value,
   categories: stringArray,
   tags: stringArray,
+  stores: stringArray,
 }
 
 export function parseHistoryFilter(raw: unknown): HistoryFilter {
@@ -264,9 +285,14 @@ export function filterTransactions(
   const tokens = searchTokens(filter.query)
   const cats = filter.categories
   const tags = filterTags(filter)
+  // お店は完全一致で突き合わせる(レポートのお店別と同じキー = storeKey)
+  const stores = filterStores(filter).map((s) => s.trim())
   const hit = txs.filter((t) => {
     if (range && (t.date < range.from || t.date > range.to)) return false
     if (cats.length > 0 && !cats.includes(t.category ?? NO_CATEGORY_KEY)) return false
+    // お店 (機能109 の導線)。選んだ店のどれかなら通す(カテゴリと同じ OR)。
+    // 店名が空の記録(預かり・返金・調整など)は、店を選んだ時点で必ず落ちる
+    if (stores.length > 0 && !stores.includes(storeKey(t))) return false
     // タグ (機能088)。選んだタグのどれかが付いていれば通す(カテゴリと同じ OR)
     if (!matchesAnyTag(t, tags)) return false
     return matchesTokens(t, tokens, ctx.labelOf)
@@ -274,19 +300,29 @@ export function filterTransactions(
   return sortTransactions(hit, filter.sort)
 }
 
-/** 同じ絞り込みか(保存済み条件と今の状態の突き合わせ用)。(純粋関数) */
+/** 並び順の違いを無視して、同じ顔ぶれか。(純粋関数) */
+function sameSet(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && [...a].sort().join('\u0000') === [...b].sort().join('\u0000')
+}
+
+/**
+ * 同じ絞り込みか(保存済み条件と今の状態の突き合わせ用)。(純粋関数)
+ *
+ * ⚠ HistoryFilter に項目を足したら、**必ずここにも1行足すこと**。
+ * 読み取り (FILTER_READERS) と違ってここは手書きなので、型は守ってくれない。
+ * 書き忘れると isFilterActive が「何も絞っていない」と判定し続けるので、
+ * その項目で絞っても一覧に切り替わらず(押しても何も起きない)、
+ * 保存ボタンも押せず、findMatchingFilter が別の条件を「一致」と誤判定する。
+ */
 export function sameFilter(a: HistoryFilter, b: HistoryFilter): boolean {
-  // タグ (機能088) は後から足した任意の項目なので、未指定は空配列として比べる
-  const at = filterTags(a)
-  const bt = filterTags(b)
   return (
     a.query.trim() === b.query.trim() &&
     a.sort === b.sort &&
     a.period === b.period &&
-    a.categories.length === b.categories.length &&
-    [...a.categories].sort().join('\u0000') === [...b.categories].sort().join('\u0000') &&
-    at.length === bt.length &&
-    [...at].sort().join('\u0000') === [...bt].sort().join('\u0000')
+    sameSet(a.categories, b.categories) &&
+    // タグ・お店は後から足した任意の項目なので、未指定は空配列として比べる
+    sameSet(filterTags(a), filterTags(b)) &&
+    sameSet(filterStores(a), filterStores(b))
   )
 }
 
@@ -298,11 +334,25 @@ export function isFilterActive(filter: HistoryFilter): boolean {
   return !sameFilter(filter, DEFAULT_FILTER)
 }
 
-/** 保存名の初期値や、いま何で絞っているかの説明文。(純粋関数) */
-export function describeFilter(filter: HistoryFilter, labelOf: (id: string | null) => string): string {
+/**
+ * 説明文の部品。(純粋関数)
+ *
+ * ⚠ HistoryFilter に項目を足したら、**必ずここにも1行足すこと**。
+ * ここも手書きなので型は守ってくれない。書き忘れると、その項目で絞っている間
+ * 画面のどこにも絞り込みの中身が出ず(何が起きたのか分からなくなる)、
+ * 保存名の初期値からも抜け落ちる。
+ */
+function filterParts(
+  filter: HistoryFilter,
+  labelOf: (id: string | null) => string,
+  opts: { keepDefaultPeriod: boolean }
+): string[] {
   const parts: string[] = []
   const q = filter.query.trim()
   if (q !== '') parts.push(`「${q}」`)
+  // お店は検索語のすぐ後ろ(いちばん強い絞り込みなので、切り詰められても残る位置)
+  const stores = filterStores(filter)
+  if (stores.length > 0) parts.push(`お店:${stores.join('・')}`)
   if (filter.categories.length > 0) {
     parts.push(
       filter.categories
@@ -312,9 +362,43 @@ export function describeFilter(filter: HistoryFilter, labelOf: (id: string | nul
   }
   const tags = filterTags(filter)
   if (tags.length > 0) parts.push(tags.map((t) => `#${t}`).join('・'))
-  parts.push(PERIOD_OPTIONS.find((p) => p.value === filter.period)?.label ?? '')
+  if (opts.keepDefaultPeriod || filter.period !== DEFAULT_FILTER.period) {
+    parts.push(PERIOD_OPTIONS.find((p) => p.value === filter.period)?.label ?? '')
+  }
   if (filter.sort !== DEFAULT_FILTER.sort) {
     parts.push(SORT_OPTIONS.find((s) => s.value === filter.sort)?.label ?? '')
   }
-  return parts.filter((p) => p !== '').join(' / ')
+  return parts.filter((p) => p !== '')
+}
+
+/**
+ * いま何で絞っているかの説明文。(純粋関数)
+ *
+ * 期間は既定(すべて)でも必ず出す。レポートのお店別から飛んできたときは
+ * 全期間で絞り直すので **レポートに出ていた件数とは変わる**。
+ * その理由が画面に出ていないと「黙って数字が変わった」ように見える。
+ */
+export function describeFilter(filter: HistoryFilter, labelOf: (id: string | null) => string): string {
+  return filterParts(filter, labelOf, { keepDefaultPeriod: true }).join(' / ')
+}
+
+/** 保存名の初期値の長さ(これを超えるぶんは名前から消える) */
+export const FILTER_NAME_MAX = 20
+
+/**
+ * 「この条件を保存」の名前の初期値。(純粋関数)
+ *
+ * 説明文をそのまま切り詰めると、後ろの条件から順に名前から消えていく。
+ * お店(機能109 の導線)を足して条件が1つ増えたぶん、
+ * **既定のまま何も選んでいない期間(「すべて」)は名前からは落として席を空けている**。
+ * 画面の説明文からは落とさない — そちらでは期間が全期間であることが
+ * 「レポートと件数が違う」ことの説明になっているため。
+ */
+export function suggestFilterName(
+  filter: HistoryFilter,
+  labelOf: (id: string | null) => string
+): string {
+  return filterParts(filter, labelOf, { keepDefaultPeriod: false })
+    .join(' / ')
+    .slice(0, FILTER_NAME_MAX)
 }
