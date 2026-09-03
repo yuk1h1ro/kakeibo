@@ -73,12 +73,18 @@ interface ReportTabProps {
    * オフラインキュー経由の updateMany を渡す(渡さないとその導線が出ないだけ)
    */
   onBulkUpdate?: (updates: { id: string; input: TransactionInput }[]) => void
+  /**
+   * お店別の行から「そのお店の履歴」へ飛ぶ (タブをまたぐので MainScreen が受ける)。
+   * 渡さなければ、お店の行はこれまでどおり押せない表示のままになる。
+   */
+  onPickStore?: (store: string) => void
 }
 
 export default function ReportTab({
   transactions,
   onSetSatisfaction,
   onBulkUpdate,
+  onPickStore,
 }: ReportTabProps) {
   const today = todayISO()
   const currentMonth = monthKey(today)
@@ -381,13 +387,26 @@ export default function ReportTab({
                 />
               </div>
 
-              {/* 109: お店(店名)別の集計 */}
+              {/* 109: お店(店名)別の集計。行を押すとその店の履歴へ */}
               <div className="card">
                 <h2>お店別支出</h2>
                 <CategoryBars
                   ariaLabel="お店別支出"
-                  data={shownStores.map((s) => ({ label: s.label, value: s.total }))}
+                  /* 渡すのは表示名ではなく集計のキー(= 店名そのもの)。
+                     履歴側も同じキーで完全一致させるので件数がずれない。
+                     「店名なし」(キーが空)は絞り込む先が無いので押せる行にしない */
+                  data={shownStores.map((s) => ({
+                    label: s.label,
+                    value: s.total,
+                    pickKey: s.key === '' ? undefined : s.key,
+                  }))}
+                  onPick={onPickStore}
                 />
+                {onPickStore && (
+                  <p className="muted chart-tap-hint">
+                    お店を押すと、そのお店の履歴だけを見られます(期間はすべて)
+                  </p>
+                )}
                 {stats.stores.length > TOP_N && (
                   <button
                     className="more-btn"
@@ -426,16 +445,42 @@ export default function ReportTab({
                   <p className="muted">支出がありません</p>
                 ) : (
                   <ol className="rank-list">
-                    {shownRank.map((item, i) => (
-                      <li key={item.key} className="rank-row">
-                        <span className="rank-no">{i + 1}</span>
-                        <span className="rank-body">
-                          <span className="rank-label">{item.label}</span>
-                          <span className="rank-sub">{rankSub(item, i)}</span>
-                        </span>
-                        <span className="rank-amount">{yen(item.total)}</span>
-                      </li>
-                    ))}
+                    {shownRank.map((item, i) => {
+                      const body = (
+                        <>
+                          <span className="rank-no">{i + 1}</span>
+                          <span className="rank-body">
+                            <span className="rank-label">{item.label}</span>
+                            <span className="rank-sub">{rankSub(item, i)}</span>
+                          </span>
+                          <span className="rank-amount">{yen(item.total)}</span>
+                        </>
+                      )
+                      // 押せるのはお店別の行だけ(item.key が店名そのもの)。
+                      // カテゴリ別・1件ごとは今までどおり押せない表示のまま。
+                      // 「店名なし」(キーが空)も絞り込む先が無いので押せる行にしない
+                      if (rankKind !== 'store' || !onPickStore || item.key === '') {
+                        return (
+                          <li key={item.key} className="rank-row">
+                            {body}
+                          </li>
+                        )
+                      }
+                      return (
+                        <li key={item.key} className="rank-row is-pickable">
+                          <button
+                            className="rank-row-btn"
+                            aria-label={`${item.label} の履歴を見る`}
+                            onClick={() => onPickStore(item.key)}
+                          >
+                            {body}
+                            <span className="rank-go" aria-hidden="true">
+                              ›
+                            </span>
+                          </button>
+                        </li>
+                      )
+                    })}
                   </ol>
                 )}
                 {rankItems.length > TOP_N && (

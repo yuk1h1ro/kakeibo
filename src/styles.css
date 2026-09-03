@@ -1311,6 +1311,48 @@ textarea:focus {
   font-variant-numeric: tabular-nums;
 }
 
+/* 押せるランキング行(お店別 → その店の履歴へ)。
+   見た目は今までの行のまま、当たり判定だけ行いっぱいに広げる */
+.rank-row.is-pickable {
+  padding: 0;
+}
+
+.rank-row .rank-row-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.rank-row .rank-go {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 17px;
+  line-height: 1;
+}
+
+/* 棒グラフの押せる行(お店別)。押せることは下の一文と矢印で伝える */
+.chart-svg .bar-pickable {
+  cursor: pointer;
+}
+
+.chart-svg .bar-pickable:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+.chart-tap-hint {
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
 /* 「もっと見る」。カードの下端いっぱいの押しやすい行にする */
 .more-btn {
   display: block;
