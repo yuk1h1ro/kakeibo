@@ -36,11 +36,15 @@ import type { useTransactions } from '../hooks/useTransactions'
 import { WEEKDAY_LABELS, defaultSelectedDate, monthWeeks, shiftMonth } from '../lib/calendar'
 import {
   DEFAULT_FILTER,
+  customRangeActive,
+  describeRange,
   filterTransactions,
   isFilterActive,
   type HistoryFilter,
 } from '../lib/historyFilter'
 import { categoryBulkTargets, duplicateInput, withCategory } from '../lib/txActions'
+import { bulkTagSuggestions } from '../lib/bulkTags'
+import { useSpecialTags } from '../lib/reportTagSettings'
 import { canStartPull, formatSyncedAt, pullOffset, shouldTriggerRefresh } from '../lib/pullRefresh'
 import { useChangeLogAvailable } from '../lib/changeLog'
 import { splitPositions } from '../lib/splits'
@@ -49,6 +53,7 @@ import HistoryFilterBar from './HistoryFilterBar'
 import MonthPickerSheet from './MonthPickerSheet'
 import RowActionMenu from './RowActionMenu'
 import BulkCategorySheet from './BulkCategorySheet'
+import BulkTagSheet from './BulkTagSheet'
 import ChangeLogSheet from './ChangeLogSheet'
 import { IconHistory, IconRefresh, IconUndo } from './historyIcons'
 import '../calendar.css'
@@ -56,11 +61,22 @@ import '../history.css'
 
 type Store = ReturnType<typeof useTransactions>
 
+/**
+ * レポートのお店別の行から渡ってくる「このお店で絞って開く」指示。
+ * 入力タブの datePrefill (機能053) と同じ形にしてある(nonce が変わるたびに適用する)。
+ */
+export interface StorePrefill {
+  nonce: number
+  store: string
+}
+
 interface Props {
   store: Store
   onEdit: (t: Transaction) => void
   /** その日付で入力タブを開く(機能053) */
   onStartInput: (date: string) => void
+  /** レポートのお店別から「そのお店の履歴」を開く */
+  storePrefill?: StorePrefill
 }
 
 /** 検索結果を一度に描く上限 */
@@ -71,7 +87,7 @@ interface DaySummary {
   deposit: number
 }
 
-export default function HistoryTab({ store, onEdit, onStartInput }: Props) {
+export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }: Props) {
   const today = todayISO()
   const currentMonth = monthKey(today)
   const [month, setMonth] = useState(currentMonth)
@@ -81,15 +97,49 @@ export default function HistoryTab({ store, onEdit, onStartInput }: Props) {
   const [pickedIds, setPickedIds] = useState<string[]>([])
   const [menuTx, setMenuTx] = useState<Transaction | null>(null)
   const [bulkOpen, setBulkOpen] = useState(false)
+  // タグのシートを開いたときの対象。選択そのもの(pickedIds)とは別に持つ —
+  // 絞り込み中にそのタグを外すと一覧から行が消え、選択が空になってシートの
+  // 対象まで 0件になってしまう(「35件に付けました」の隣で 0件と出る)
+  const [tagIds, setTagIds] = useState<string[] | null>(null)
+  const [tagApplied, setTagApplied] = useState(false)
   const [showPicker, setShowPicker] = useState(false)
   const [showLog, setShowLog] = useState(false)
   const [pull, setPull] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
   const [now, setNow] = useState(() => new Date())
 
+  // ---------- お店で絞り込む (長押しメニュー / レポートのお店別からの導線) ----------
+  //
+  // 「だけ見る」を言葉どおりにするため、いまの絞り込みに足すのではなく置き換える。
+  // 期間は既定の「すべて」のまま — 欲しいのは「そのお店の履歴」であって、
+  // レポートで見ていた月のぶんではない。**そのぶんレポートの行の件数とは変わる**ので、
+  // 何で絞っているか(お店・期間)は HistoryFilterBar が describeFilter で常に画面に出す。
+  // 突き合わせは完全一致(types.ts の storeKey)。レポートのお店別と同じキーなので、
+  // 同じ期間で見れば件数も一致する。
+  const showStoreOnly = useCallback((storeName: string) => {
+    setFilter({ ...DEFAULT_FILTER, stores: [storeName] })
+    // 結果の一覧は絞り込みバーの下に出る。押した結果が見えるよう先頭へ戻す
+    window.scrollTo({ top: 0 })
+  }, [])
+
+  useEffect(() => {
+    if (!storePrefill) return
+    showStoreOnly(storePrefill.store)
+  }, [storePrefill, showStoreOnly])
+
   const logAvailable = useChangeLogAvailable()
   const canNext = month < currentMonth
   const searching = isFilterActive(filter)
+
+  // ---------- 月送りの見出しと、日付を指定した絞り込みの整理 ----------
+  //
+  // 見出しの ← → は「表示中の月」を動かす。期間が この月 / 直近3ヶ月 / この年 の
+  // ときは絞り込みの基準もこの月なので、押せば結果が動く(そのまま残す)。
+  // ところが **日付を指定して絞っている間** は、範囲が月に依らないので
+  // ← → を押しても何も変わらない — 押しても何も起きないボタンが残る。
+  // そこで、その間だけ月送りの行を「いま絞っている範囲」の表示に差し替える。
+  // 月そのもの(month)は動かさないので、絞り込みを解除すれば元の月のカレンダーに戻る。
+  const rangeActive = customRangeActive(filter)
 
   // ---------- 月の移動 ----------
 
@@ -173,6 +223,35 @@ export default function HistoryTab({ store, onEdit, onStartInput }: Props) {
   const exitSelect = () => {
     setSelectMode(false)
     setPickedIds([])
+  }
+
+  // ---------- 選んだ記録にまとめてタグを付ける / 外す ----------
+  //
+  // レポートの「回ごと」からの一括タグ付け(report/EventTagSheet)は、対象の記録に
+  // **すでに何かタグが付いている**ことが前提で、1つも付いていない旅行には入れない。
+  // 旅行モードを使い忘れて帰ってきた旅行に、あとから #旅行 や #2026北海道 を
+  // 付けられる場所がここ。日付やお店で絞ってから選べるので、複数選択が自然な置き場になる。
+  // 判断(誰に効くか・すでに付いている・上限で付けられない)は lib/bulkTags.ts、
+  // 画面は共通の BulkTagSheet。どちらもレポート側とまったく同じものを使う。
+  const specialTags = useSpecialTags()
+  const tagTargets = useMemo(() => {
+    if (tagIds === null) return []
+    const ids = new Set(tagIds)
+    return store.transactions.filter((t) => ids.has(t.id))
+  }, [store.transactions, tagIds])
+  // 候補は「いま実際に使われているタグ」+ 特別タグ(旅行・デート・出張)。
+  // 絞り込み(機能088)と同じ考え方で、使っていないタグは並べない
+  const tagChoices = useMemo(
+    () => bulkTagSuggestions(store.transactions, specialTags),
+    [store.transactions, specialTags]
+  )
+
+  const closeTagSheet = () => {
+    setTagIds(null)
+    // 付け外しをしたなら、カテゴリの一括変更と同じく選択モードから抜ける。
+    // 何もしていないときは選び直しの途中なので、選択はそのまま残す
+    if (tagApplied) exitSelect()
+    setTagApplied(false)
   }
 
   const togglePick = (t: Transaction) => {
@@ -352,23 +431,29 @@ export default function HistoryTab({ store, onEdit, onStartInput }: Props) {
           </span>
         </div>
 
-        <div className="month-nav">
-          <button onClick={() => changeMonth(-1)} aria-label="前の月">
-            ←
-          </button>
-          {/* 見出しを押すと年月ピッカー(機能130)。矢印の連打をやめられる */}
-          <button
-            className="hist-month-title"
-            onClick={() => setShowPicker(true)}
-            aria-haspopup="dialog"
-          >
-            {formatMonth(month)}
-            <span className="hist-caret">▼</span>
-          </button>
-          <button onClick={() => changeMonth(1)} disabled={!canNext} aria-label="次の月">
-            →
-          </button>
-        </div>
+        {rangeActive ? (
+          <div className="month-nav hist-range-head" role="status">
+            <span className="hist-range-title">{describeRange(filter)} で絞り込み中</span>
+          </div>
+        ) : (
+          <div className="month-nav">
+            <button onClick={() => changeMonth(-1)} aria-label="前の月">
+              ←
+            </button>
+            {/* 見出しを押すと年月ピッカー(機能130)。矢印の連打をやめられる */}
+            <button
+              className="hist-month-title"
+              onClick={() => setShowPicker(true)}
+              aria-haspopup="dialog"
+            >
+              {formatMonth(month)}
+              <span className="hist-caret">▼</span>
+            </button>
+            <button onClick={() => changeMonth(1)} disabled={!canNext} aria-label="次の月">
+              →
+            </button>
+          </div>
+        )}
 
         {/* タグの選択肢は実際に使われているものだけを出す (機能088) */}
         <HistoryFilterBar filter={filter} onChange={setFilter} transactions={store.transactions} />
@@ -493,33 +578,53 @@ export default function HistoryTab({ store, onEdit, onStartInput }: Props) {
         </div>
       </div>
 
-      {/* ---------- 複数選択中の操作バー (機能151) ---------- */}
+      {/* ---------- 複数選択中の操作バー (機能151) ----------
+          390px 幅では、4つ並べた時点で「N件を選択中」が幅39pxまで潰れて3行に折れていた
+          (実測)。5つ目の「タグ」を足す余地は無いので **2段** にする。
+            上段 = いまの状態と、選択そのものの操作(全部 / やめる)
+            下段 = 選んだ記録に効く操作(カテゴリ / タグ / 削除)
+          削除は下段の右端に離して置く。同じ行に詰めると押し間違いが痛いので、
+          タグとの間は margin-left:auto で必ず空ける(元の10pxより広い)。 */}
       {selectMode && (
-        <div className="hist-bottom-bar">
-          <span className="hist-bar-text">{pickedIds.length}件を選択中</span>
-          <button className="hist-bar-ghost" onClick={pickAllVisible}>
-            全部
-          </button>
-          <button
-            className="hist-bar-undo"
-            disabled={pickedIds.length === 0}
-            onClick={() => setBulkOpen(true)}
-          >
-            カテゴリ
-          </button>
-          <button
-            className="hist-bar-danger"
-            disabled={pickedIds.length === 0}
-            onClick={() => {
-              deleteTxs(pickedTxs)
-              exitSelect()
-            }}
-          >
-            削除
-          </button>
-          <button className="hist-bar-ghost" onClick={exitSelect}>
-            やめる
-          </button>
+        <div className="hist-bottom-bar hist-select-bar">
+          <div className="hist-bar-line">
+            <span className="hist-bar-text">{pickedIds.length}件を選択中</span>
+            <button className="hist-bar-ghost" onClick={pickAllVisible}>
+              全部
+            </button>
+            <button className="hist-bar-ghost" onClick={exitSelect}>
+              やめる
+            </button>
+          </div>
+          <div className="hist-bar-line">
+            <button
+              className="hist-bar-undo"
+              disabled={pickedIds.length === 0}
+              onClick={() => setBulkOpen(true)}
+            >
+              カテゴリ
+            </button>
+            <button
+              className="hist-bar-undo"
+              disabled={pickedIds.length === 0}
+              onClick={() => {
+                setTagApplied(false)
+                setTagIds(pickedIds)
+              }}
+            >
+              タグ
+            </button>
+            <button
+              className="hist-bar-danger hist-bar-apart"
+              disabled={pickedIds.length === 0}
+              onClick={() => {
+                deleteTxs(pickedTxs)
+                exitSelect()
+              }}
+            >
+              削除
+            </button>
+          </div>
         </div>
       )}
 
@@ -551,6 +656,7 @@ export default function HistoryTab({ store, onEdit, onStartInput }: Props) {
           onDuplicate={duplicateTx}
           onEdit={onEdit}
           onDelete={(t) => deleteTxs([t])}
+          onFilterStore={showStoreOnly}
           onClose={() => setMenuTx(null)}
         />
       )}
@@ -566,6 +672,27 @@ export default function HistoryTab({ store, onEdit, onStartInput }: Props) {
             exitSelect()
           }}
           onClose={() => setBulkOpen(false)}
+        />
+      )}
+
+      {tagIds !== null && (
+        <BulkTagSheet
+          targets={tagTargets}
+          scopeLabel={`選んだ${tagTargets.length}件`}
+          lead={
+            <>
+              選んだ <strong>{tagTargets.length}件</strong> にまとめてタグを付けます。
+              旅行モードを使い忘れた旅行でも、あとから「旅行」や行き先の名前(「2026北海道」など)を
+              付けておけば、レポートでその旅行だけを選んで見られます。
+            </>
+          }
+          suggestionsLabel="よく使うタグ"
+          suggestions={tagChoices}
+          onApply={(updates) => {
+            setTagApplied(true)
+            void store.updateMany(updates)
+          }}
+          onClose={closeTagSheet}
         />
       )}
 

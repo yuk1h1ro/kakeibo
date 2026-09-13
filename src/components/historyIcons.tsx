@@ -41,6 +41,17 @@ export function IconCopy(props: SVGProps<SVGSVGElement>) {
   )
 }
 
+/** お店(日よけのある店先) */
+export function IconStore(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Base {...props}>
+      <path d="M4.5 10.5V19a1 1 0 0 0 1 1h13a1 1 0 0 0 1-1v-8.5" />
+      <path d="M3 10.5 4.8 4.5h14.4L21 10.5a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0Z" />
+      <path d="M9.5 20v-5h5v5" />
+    </Base>
+  )
+}
+
 /** 元に戻す矢印 */
 export function IconUndo(props: SVGProps<SVGSVGElement>) {
   return (

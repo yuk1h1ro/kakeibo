@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Transaction } from './types'
 import {
   bulkTagConfirmText,
+  bulkTagSuggestions,
   bulkTagDoneText,
   bulkTagUpdates,
   planAddTag,
@@ -156,5 +157,42 @@ describe('tagsOnTransactions', () => {
 
   it('タグが1つも無ければ空', () => {
     expect(tagsOnTransactions([tx()])).toEqual([])
+  })
+})
+
+// ============================================================
+// 候補の出し方。**履歴の複数選択** からタグを付けるとき、
+// 「まだ1件も付いていない #旅行」を打ち直させないことがこの入り口の要。
+// ============================================================
+describe('bulkTagSuggestions', () => {
+  it('いま使われているタグを多い順に出し、うしろに特別タグを足す', () => {
+    const txs = [tx({ tags: ['デート'] }), tx({ tags: ['仕事'] }), tx({ tags: ['仕事'] })]
+    expect(bulkTagSuggestions(txs, ['旅行', 'デート', '出張'])).toEqual([
+      // 使われている順(仕事2件 → デート1件)
+      '仕事',
+      'デート',
+      // まだ使っていない特別タグ。これが出ないと打ち直しになる
+      '旅行',
+      '出張',
+    ])
+  })
+
+  it('1件も付いていない記録しかなくても、特別タグは候補に出る', () => {
+    expect(bulkTagSuggestions([tx()], ['旅行', 'デート', '出張'])).toEqual([
+      '旅行',
+      'デート',
+      '出張',
+    ])
+  })
+
+  it('特別タグは入力欄と同じ規則でならしてから重複を見る(「#旅行」と「旅行」を並べない)', () => {
+    expect(bulkTagSuggestions([tx({ tags: ['旅行'] })], ['#旅行', ' ', 'デート'])).toEqual([
+      '旅行',
+      'デート',
+    ])
+  })
+
+  it('特別タグを1つも選んでいなければ、使われているタグだけを出す', () => {
+    expect(bulkTagSuggestions([tx({ tags: ['仕事'] })], [])).toEqual(['仕事'])
   })
 })

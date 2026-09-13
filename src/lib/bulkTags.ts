@@ -24,7 +24,7 @@
 import type { TransactionInput } from '../hooks/useTransactions'
 import type { Transaction } from './types'
 import { tagsOf } from './types'
-import { MAX_TAGS_PER_TX, normalizeTag, sanitizeTags } from './tags'
+import { MAX_TAGS_PER_TX, collectTags, normalizeTag, sanitizeTags } from './tags'
 import { transactionToInput } from './txActions'
 
 export interface BulkTagPlan {
@@ -149,6 +149,31 @@ export function bulkTagDoneText(plan: BulkTagPlan, mode: 'add' | 'remove'): stri
     return `${head}。${plan.fullCount}件は付けられませんでした(タグは1件${MAX_TAGS_PER_TX}個までです)`
   }
   return head
+}
+
+/**
+ * まとめて付けるときに出すタグの候補。(純粋関数)
+ *
+ * 先に出すのは **いま実際に使われているタグ**(多い順)。履歴の絞り込み(機能088)が
+ * 同じ考え方で、使っていないタグを並べても押す相手が無いため。
+ * そのうしろに特別タグ(旅行・デート・出張)を、**1件も付いていなくても** 足す —
+ * 「旅行モードを使い忘れた旅行に、あとから #旅行 を付ける」がこの入り口の用途そのもので、
+ * 付いていないからこそ候補に出ていないと打ち直しになる。
+ * 正規化は normalizeTag(tags.ts)を通す。ここで独自に整えると
+ * 「#旅行」と「旅行」が別々に並ぶ。
+ */
+export function bulkTagSuggestions(
+  txs: readonly Transaction[],
+  specialTags: readonly string[],
+  limit = 20
+): string[] {
+  const out = collectTags(txs, limit).map((u) => u.tag)
+  for (const raw of specialTags) {
+    const tag = normalizeTag(raw)
+    if (tag === null || out.includes(tag)) continue
+    out.push(tag)
+  }
+  return out
 }
 
 /**

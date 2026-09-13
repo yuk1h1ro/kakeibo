@@ -10,19 +10,28 @@
 import type { Transaction } from '../lib/types'
 import { categoryLabel } from '../lib/categories'
 import { formatDate, yen } from '../lib/format'
-import { ownAmount } from '../lib/types'
+import { ownAmount, storeKey } from '../lib/types'
 import { ledgerRowTitle, partnerImpact } from '../lib/partnerBalance'
-import { IconCopy, IconEdit, IconTrash } from './historyIcons'
+import { IconCopy, IconEdit, IconStore, IconTrash } from './historyIcons'
 
 interface Props {
   tx: Transaction
   onDuplicate: (t: Transaction) => void
   onEdit: (t: Transaction) => void
   onDelete: (t: Transaction) => void
+  /** そのお店だけの履歴にする。渡さなければその項目を出さない */
+  onFilterStore?: (store: string) => void
   onClose: () => void
 }
 
-export default function RowActionMenu({ tx, onDuplicate, onEdit, onDelete, onClose }: Props) {
+export default function RowActionMenu({
+  tx,
+  onDuplicate,
+  onEdit,
+  onDelete,
+  onFilterStore,
+  onClose,
+}: Props) {
   // 預かり・返金・調整は専用の見出しと「残高への影響額」で出す
   // (支出と同じ書き方にすると、返金・調整が ¥0 の行に見えてしまう)
   const isExpense = tx.type === 'expense'
@@ -59,6 +68,21 @@ export default function RowActionMenu({ tx, onDuplicate, onEdit, onDelete, onClo
             >
               <IconCopy />
               同じ内容で今日の日付に複製する
+            </button>
+          )}
+          {/* お店で絞り込む導線。店名を持たない記録(預かり・返金・調整や、
+              店名を入れずに記録した支出)では絞り込む先が無いので出さない。
+              突き合わせは完全一致 = レポートのお店別と同じキー(types.ts の storeKey) */}
+          {storeKey(tx) !== '' && onFilterStore && (
+            <button
+              className="hist-menu-item"
+              onClick={() => {
+                onFilterStore(storeKey(tx))
+                onClose()
+              }}
+            >
+              <IconStore />
+              このお店の履歴だけ見る
             </button>
           )}
           <button

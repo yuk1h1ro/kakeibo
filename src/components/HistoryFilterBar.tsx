@@ -15,9 +15,13 @@ import {
   NO_CATEGORY_KEY,
   PERIOD_OPTIONS,
   SORT_OPTIONS,
+  datesReversed,
   describeFilter,
+  describeRange,
+  filterStores,
   filterTags,
   isFilterActive,
+  suggestFilterName,
   type HistoryFilter,
 } from '../lib/historyFilter'
 import { collectTags } from '../lib/tags'
@@ -45,6 +49,9 @@ export default function HistoryFilterBar({ filter, onChange, transactions }: Pro
   // 実際に使われているタグだけを候補にする(空の選択肢を並べない)
   const tagOptions = collectTags(transactions ?? [], 40)
   const activeTags = filterTags(filter)
+  // お店はこの画面から選ぶものではなく(候補が数百件になる)、
+  // レポートのお店別か行の長押しから渡ってくる。ここでは外せるようにだけしておく
+  const activeStores = filterStores(filter)
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState(filter.query)
   const [saved, setSaved] = useState<SavedFilter[]>(() => loadSavedFilters())
@@ -89,6 +96,11 @@ export default function HistoryFilterBar({ filter, onChange, transactions }: Pro
       : [...activeTags, tag]
     patch({ tags: next })
   }
+
+  // 指定期間 (日付範囲)。逆に入っているときは入れ替えて絞る (filterDates) ので、
+  // 入れ替えたことと、実際に絞っている範囲を画面に出す
+  const reversed = datesReversed(filter)
+  const rangeText = describeRange(filter)
 
   const active = isFilterActive(filter)
   const matching = findMatchingFilter(saved, filter)
@@ -190,7 +202,10 @@ export default function HistoryFilterBar({ filter, onChange, transactions }: Pro
           </div>
 
           <div>
-            <span className="hist-field-label">期間(表示中の月が基準)</span>
+            {/* 「指定」だけは表示中の月を基準にしない。基準が変わることを見出しで言う */}
+            <span className="hist-field-label">
+              期間({filter.period === 'custom' ? '指定した日付が基準' : '表示中の月が基準'})
+            </span>
             <div className="hist-chips">
               {PERIOD_OPTIONS.map((o) => (
                 <button
@@ -203,6 +218,51 @@ export default function HistoryFilterBar({ filter, onChange, transactions }: Pro
                 </button>
               ))}
             </div>
+
+            {/* 日付範囲。「指定」を選んでいるときだけ出す。
+                入力は入力タブ (TransactionForm) と同じ <input type="date">。
+                この端末の日付ピッカーがそのまま出るので、覚え直すものが無い */}
+            {filter.period === 'custom' && (
+              <div className="hist-date-range">
+                <label className="hist-date-field">
+                  <span className="hist-field-label">開始</span>
+                  <input
+                    type="date"
+                    value={filter.from ?? ''}
+                    aria-label="絞り込みの開始日"
+                    onChange={(e) => patch({ from: e.target.value })}
+                  />
+                </label>
+                <label className="hist-date-field">
+                  <span className="hist-field-label">終了</span>
+                  <input
+                    type="date"
+                    value={filter.to ?? ''}
+                    aria-label="絞り込みの終了日"
+                    onChange={(e) => patch({ to: e.target.value })}
+                  />
+                </label>
+                <p
+                  className={`hist-date-note${reversed ? ' is-warn' : ''}`}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {reversed
+                    ? `開始と終了が逆です。${rangeText} として絞り込みます`
+                    : rangeText !== ''
+                      ? `${rangeText} で絞り込んでいます(開始日と終了日も含みます)`
+                      : '開始か終了を入れると絞り込みます(片方だけなら「その日以降」「その日まで」)'}
+                </p>
+                {rangeText !== '' && (
+                  <button
+                    className="hist-chip hist-date-clear"
+                    onClick={() => patch({ from: '', to: '' })}
+                  >
+                    日付を消す
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <div>
@@ -227,6 +287,25 @@ export default function HistoryFilterBar({ filter, onChange, transactions }: Pro
               </button>
             </div>
           </div>
+
+          {/* お店。絞り込んでいるときだけ出す(選ぶ場所ではなく、外す場所) */}
+          {activeStores.length > 0 && (
+            <div>
+              <span className="hist-field-label">お店(押すと外せます)</span>
+              <div className="hist-chips">
+                {activeStores.map((s) => (
+                  <button
+                    key={s}
+                    className="hist-chip is-on"
+                    aria-pressed={true}
+                    onClick={() => patch({ stores: activeStores.filter((x) => x !== s) })}
+                  >
+                    {s} ✕
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* 機能088: タグ。使われているタグが1つも無ければ節ごと出さない */}
           {tagOptions.length > 0 && (
@@ -298,7 +377,9 @@ export default function HistoryFilterBar({ filter, onChange, transactions }: Pro
               <button
                 className="hist-primary"
                 disabled={!canSaveFilter(filter)}
-                onClick={() => setNaming(describeFilter(filter, categoryLabel).slice(0, 20))}
+                /* 名前の初期値は説明文そのままではなく、20文字に収まりやすい形にする
+                   (既定のままの期間「すべて」を落とす。理由は suggestFilterName) */
+                onClick={() => setNaming(suggestFilterName(filter, categoryLabel))}
               >
                 この条件を保存
               </button>

@@ -104,6 +104,21 @@
   color: var(--text-muted);
 }
 
+/* 日付を指定して絞り込んでいる間の見出し。月送り(← 見出し →)と同じ場所に、
+   同じ高さで置き換わる。範囲は月に依らないので、動かせる月の矢印は出さない */
+.hist-range-head {
+  justify-content: center;
+  min-height: 44px;
+}
+
+.hist-range-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
 .hist-year-nav {
   display: flex;
   align-items: center;
@@ -267,6 +282,42 @@
 .hist-chip.hist-chip-del {
   padding: 6px 10px;
   color: var(--text-muted);
+}
+
+/* 期間「指定」の日付入力。390px でも2列に収まるよう最小幅を持たせない。
+   入力そのものは入力タブと同じ <input type="date">(共通の input 規則が効く) */
+.hist-date-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.hist-date-field {
+  min-width: 0;
+}
+
+.hist-date-field .hist-field-label {
+  margin-bottom: 4px;
+}
+
+.hist-date-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* 開始と終了が逆のとき。黙って0件にせず、入れ替えて絞ることをここで言う */
+.hist-date-note.is-warn {
+  color: var(--expense);
+  font-weight: 600;
+}
+
+.hist-date-clear {
+  grid-column: 1 / -1;
+  justify-self: start;
 }
 
 .hist-saved-row {
@@ -497,6 +548,26 @@
   background: var(--surface);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-2);
+}
+
+/* 複数選択の操作バーだけは2段。390px 幅では「N件を選択中 / 全部 / カテゴリ /
+   タグ / 削除 / やめる」が1行に収まらず、状態の文字が潰れて折り返していた。
+   上段=いまの状態と選択の操作 / 下段=選んだ記録に効く操作、で分ける */
+.hist-bottom-bar.hist-select-bar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.hist-bottom-bar .hist-bar-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 削除は右端に離す。押し間違いが痛いボタンを、隣と詰めて置かない */
+.hist-bottom-bar .hist-bar-apart {
+  margin-left: auto;
 }
 
 .hist-bottom-bar .hist-bar-text {

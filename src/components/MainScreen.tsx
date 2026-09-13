@@ -16,7 +16,7 @@ import { withSatisfaction } from '../lib/txActions'
 import { amountMaskToggleLabel, toggleAmountMask, useAmountMasked } from '../lib/amountMask'
 import { type Guidance } from '../lib/errorGuidance'
 import InputTab from './InputTab'
-import HistoryTab from './HistoryTab'
+import HistoryTab, { type StorePrefill } from './HistoryTab'
 import ReportTab from './ReportTab'
 import PartnerTab from './PartnerTab'
 import AssetsTab from './AssetsTab'
@@ -81,6 +81,8 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
   const [templateFrom, setTemplateFrom] = useState<Transaction | null>(null)
   // 履歴カレンダーの「この日で入力する」で入力タブへ渡す日付(機能053)
   const [datePrefill, setDatePrefill] = useState<DatePrefill | undefined>(undefined)
+  // レポートのお店別から履歴タブへ渡す店名(タブをまたぐのはここだけの仕事)
+  const [storePrefill, setStorePrefill] = useState<StorePrefill | undefined>(undefined)
 
   // 取引編集モーダルを開いている間は背面ページを固定する
   // (設定/Geminiキーの各シートは自前でロックを取得する)
@@ -124,6 +126,21 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
     setDatePrefill({ nonce: (datePrefill?.nonce ?? 0) + 1, date })
     setTab('input')
   }
+
+  // レポートのお店別の行から「そのお店の履歴」を開く。
+  // 期間はレポートの選択期間ではなく全期間になる(欲しいのはその店の履歴そのもの)。
+  // 何で絞られているかは履歴側が画面に出す
+  const showStoreHistory = (storeName: string) => {
+    setStorePrefill({ nonce: (storePrefill?.nonce ?? 0) + 1, store: storeName })
+    setTab('history')
+  }
+
+  // 履歴タブを離れたら、渡した店名は捨てる。
+  // 残したままだと、後で履歴タブを開き直すたびに(履歴タブは切り替えで作り直される)
+  // 身に覚えのない絞り込みが復活してしまう
+  useEffect(() => {
+    if (tab !== 'history' && storePrefill) setStorePrefill(undefined)
+  }, [tab, storePrefill])
 
   // 繰り返し入力の未生成分は「アプリを開いたとき」にまとめて作る(サーバー側の cron が無いため)。
   // store.add はオフラインキュー経由なので、生成した記録が失われることはない
@@ -245,7 +262,12 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
           <InputTab store={store} supabase={supabase} datePrefill={datePrefill} />
         )}
         {activeTab === 'history' && (
-          <HistoryTab store={store} onEdit={setEditing} onStartInput={startInputOn} />
+          <HistoryTab
+            store={store}
+            onEdit={setEditing}
+            onStartInput={startInputOn}
+            storePrefill={storePrefill}
+          />
         )}
         {activeTab === 'report' && (
           <ReportTab
@@ -254,6 +276,8 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
             /* 「回ごと」から過去の旅行にまとめてタグを付ける。
                書き込みは必ずオフラインキュー経由(updateMany)にする */
             onBulkUpdate={(updates) => void store.updateMany(updates)}
+            /* お店別の行から、その店で絞り込んだ履歴タブへ */
+            onPickStore={showStoreHistory}
           />
         )}
         {activeTab === 'partner' && (
