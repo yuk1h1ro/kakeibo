@@ -2204,6 +2204,39 @@ body.keypad-open .modal-sheet {
   overflow-wrap: anywhere;
 }
 
+/* ---------- まとめてタグを付ける(BulkTagSheet。履歴の複数選択 / レポートの回ごと) ---------- */
+
+/* 押した瞬間に35件が変わることのないよう、件数を出したこの塊を必ず挟む */
+.bulk-tag-confirm {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-btn);
+  background: var(--accent-soft);
+}
+
+.bulk-tag-confirm-text {
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.bulk-tag-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.bulk-tag-actions button {
+  flex: 1;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.bulk-tag-done {
+  margin-top: 12px;
+  line-height: 1.7;
+}
+
 /* ---------- 入力フォームの中の1行(保存ボタンの直前) ---------- */
 
 .trip-tag-row {
