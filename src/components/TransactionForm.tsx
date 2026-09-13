@@ -68,8 +68,6 @@ export interface FormPrefill {
   memo: string
   store: string
   partner_amount: number
-  // 任意: 指定があるときだけ日付も更新する(レシート読み取り用。「最近の記録から入力」は渡さない)
-  date?: string
 }
 
 // カレンダーの日付タップ(機能053)。日付だけを差し替え、他の入力には触らない
@@ -411,17 +409,16 @@ export default function TransactionForm({
     return () => document.removeEventListener('click', onDocumentClick)
   }, [keypadOpen])
 
-  // 外部プリフィル適用(日付は prefill.date があるときだけ更新)
+  // 外部プリフィル適用(日付は現在の選択を維持する。差し替えたいときは DatePrefill を使う)
   useEffect(() => {
     if (!prefill) return
     setCalc(EMPTY_CALC) // 計算途中の状態が混ざらないようにリセット
     setAmount(prefill.amount > 0 ? String(prefill.amount) : '')
-    if (prefill.date) setDate(prefill.date)
     setMemo(prefill.memo)
     setStore(prefill.store)
     setWithPartner(prefill.partner_amount > 0)
     setPartnerAmount(prefill.partner_amount > 0 ? String(prefill.partner_amount) : '')
-    // テンプレート・レシート・最近の記録から入れ直すときは、
+    // テンプレート・最近の記録から入れ直すときは、
     // 前の1件の「支払った人」「タグ」「分割」を持ち越さない
     setPayer('me')
     setPartnerPaidInput('')
@@ -433,7 +430,7 @@ export default function TransactionForm({
     setSplitParts(null)
     setSplitNotice(null)
     setTripTagSkipped(false)
-    // レシート読み取りのように店名だけ入ってくる場合も、手入力と同じ経路でカテゴリを補う
+    // カテゴリ無しで店名だけ入ってくる場合も、手入力と同じ経路でカテゴリを補う
     setCategory(prefill.category)
     setAutoCategory(null)
     setAutoRivals([])
@@ -441,7 +438,7 @@ export default function TransactionForm({
       applyLearnedCategory(prefill.store, null)
     }
     // お店・メモ・彼女の負担分・日付はすべて主線に出ているので、開く操作は要らない
-    // (レシート読み取りで入った内容は、そのまま上から下に読んで確認できる)
+    // (入った内容は、そのまま上から下に読んで確認できる)
     // applyLearnedCategory は学習内容のスナップショットに依存するだけなので依存に含めない
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill])
@@ -1098,7 +1095,7 @@ export default function TransactionForm({
                   value={partnerAmount}
                   onChange={setPartnerAmount}
                 />
-                {/* ここもレシートから読み取った値段を打つ場所なので、税込を同じ形で置く。
+                {/* ここも税抜きの値段を打つ場所なので、税込を同じ形で置く。
                     電卓(＋ − ×)はこの欄には無いので ％ は出さない */}
                 <AmountTaxKeys
                   state={{ input: partnerAmount, pendingValue: null, pendingOp: null }}
@@ -1311,7 +1308,7 @@ export default function TransactionForm({
                           value={favorAmountInput}
                           onChange={setFavorAmountInput}
                         />
-                        {/* レシートの値引き額をそのまま打つ場所なので、
+                        {/* 値引き額をそのまま打つ場所なので、
                             ここにも税込ボタンを置く(電卓はこの欄に無いので ％ は出ない) */}
                         <AmountTaxKeys
                           state={{ input: favorAmountInput, pendingValue: null, pendingOp: null }}

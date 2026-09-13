@@ -33,8 +33,7 @@
   .btn-ghost:hover:not(:disabled),
   .icon-btn:hover,
   .month-nav button:hover:not(:disabled),
-  .more-btn:hover,
-  .scan-settings-btn:hover:not(:disabled) {
+  .more-btn:hover {
     background: var(--fill);
   }
 
@@ -52,7 +51,6 @@
   }
 
   .btn-primary:hover:not(:disabled),
-  .scan-btn:hover:not(:disabled),
   .btn-secondary:hover:not(:disabled) {
     filter: brightness(1.06);
   }
@@ -204,7 +202,7 @@
      実際 1440px では入力フォームが真ん中の列に落ちていた。
      入力タブは「書き込む」ための画面なので、主役のフォームは開いた瞬間に目が行く
      左端に固定したい。そこで入力タブのときだけ段組みをやめて grid にし、
-     フォームを1列目に置く。残りのカード(残高・レシート・テンプレート・最近の記録)は
+     フォームを1列目に置く。残りのカード(旅行モード・残高・テンプレート・最近の記録)は
      自動配置でそのまま右の列に積まれるので、DOM の順番は触らなくてよい。
      :has() が効かないブラウザでは従来どおりの段組みに落ちるだけで、崩れはしない。 */
 

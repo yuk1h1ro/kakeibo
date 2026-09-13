@@ -338,13 +338,13 @@ describe('formatGuidance / describeUnknownError', () => {
   })
 
   it('すでに日本語で書かれた自前の文言は言い換えない', () => {
-    // レシート読み取り・Gemini の上限・「オンライン時のみ可能です」など、
+    // 共有リンクの作成失敗・資産の保存失敗・「オンライン時のみ可能です」など、
     // ここに来る前にもっと具体的なことが書けている文言を上書きしないこと
-    const parse = 'レシートを読み取れませんでした。明るい場所でもう一度撮影してください'
-    expect(describeUnknownError(new Error(parse))).toBe(parse)
-    const quota =
-      'Gemini の1分あたりの上限に達しました。1分ほど待ってからもう一度お試しください'
-    expect(describeUnknownError(new Error(quota))).toBe(quota)
+    const share =
+      '共有リンクを作成できませんでした。通信が不安定な可能性があります。もう一度お試しください'
+    expect(describeUnknownError(new Error(share))).toBe(share)
+    const asset = '資産を保存できませんでした'
+    expect(describeUnknownError(new Error(asset))).toBe(asset)
     expect(describeUnknownError(new Error('カテゴリの編集はオンライン時のみ可能です'))).toBe(
       'カテゴリの編集はオンライン時のみ可能です'
     )

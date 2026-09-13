@@ -85,7 +85,7 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
   const [storePrefill, setStorePrefill] = useState<StorePrefill | undefined>(undefined)
 
   // 取引編集モーダルを開いている間は背面ページを固定する
-  // (設定/Geminiキーの各シートは自前でロックを取得する)
+  // (設定などの各シートは自前でロックを取得する)
   useBodyScrollLock(editing !== null)
 
   // カテゴリをSupabaseから読み込む(初回は既定カテゴリを移行)。失敗時はキャッシュで継続
