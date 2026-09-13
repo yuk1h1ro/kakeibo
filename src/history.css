@@ -532,6 +532,14 @@
 
 /* ---------- 一括操作バー / 元に戻すバー (機能151/159) ---------- */
 
+/* 下に浮かぶバーが出ている間だけ、一覧の下にバーぶんの余白を空ける。
+   無いと最後の数行がバーに隠れ、見えているのにタップできない
+   (複数選択では、その行を選べない)。高さは実測値を --hist-bar-h で受け取る。
+   80px はバー自身の bottom(タブバーの上に出すぶん)、12px は指を置く余裕 */
+.hist-root-barred {
+  padding-bottom: calc(var(--hist-bar-h, 118px) + 80px + env(safe-area-inset-bottom) + 12px);
+}
+
 .hist-bottom-bar {
   position: fixed;
   left: 50%;

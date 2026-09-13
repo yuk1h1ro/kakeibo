@@ -21,6 +21,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import type { Transaction } from '../lib/types'
 import { ownAmount } from '../lib/types'
 import {
@@ -301,6 +302,32 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
   const pullingRef = useRef(false)
   const busyRef = useRef(false)
   const rootRef = useRef<HTMLDivElement>(null)
+
+  // 画面下に浮かぶバー(複数選択・元に戻す)の高さを実測して、一覧の下に同じだけ余白を空ける。
+  //
+  // バーは position: fixed なので一覧の上に重なる。余白が無いと最後の数行がバーの下に隠れ、
+  // **見えているのにタップできない**(複数選択では、その行を選べない)。
+  // 高さを決め打ちにしないのは、件数の文字が折り返したり、iOS の文字サイズ設定を
+  // 大きくしたりすると伸びるため。実際、1段から2段に変えたときに隠れる量が倍になって
+  // この不具合が表に出た。測っておけば、次に中身が変わっても勝手に追従する。
+  const barRef = useRef<HTMLDivElement>(null)
+  const [barH, setBarH] = useState(0)
+  useEffect(() => {
+    const el = barRef.current
+    if (el === null) {
+      setBarH(0)
+      return
+    }
+    const measure = () => setBarH(el.getBoundingClientRect().height)
+    measure()
+    // ResizeObserver が無い環境(テストの jsdom や古いブラウザ)では、
+    // 測り直しを諦めて初回の実測だけで動かす。余白が少しずれることはあっても、
+    // 隠れて押せないという元の不具合には戻らない(CSS 側に既定値も置いてある)
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  })
   const settleRef = useRef<number | null>(null)
 
   const doRefresh = useCallback(async () => {
@@ -395,7 +422,11 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
   const syncedText = formatSyncedAt(store.lastSyncedAt, now)
 
   return (
-    <div className="hist-root" ref={rootRef}>
+    <div
+      className={`hist-root${barH > 0 ? ' hist-root-barred' : ''}`}
+      ref={rootRef}
+      style={barH > 0 ? ({ '--hist-bar-h': `${barH}px` } as CSSProperties) : undefined}
+    >
       <div
         className="hist-pullable"
         style={{ transform: pull > 0 ? `translateY(${pull}px)` : undefined }}
@@ -586,7 +617,7 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
           削除は下段の右端に離して置く。同じ行に詰めると押し間違いが痛いので、
           タグとの間は margin-left:auto で必ず空ける(元の10pxより広い)。 */}
       {selectMode && (
-        <div className="hist-bottom-bar hist-select-bar">
+        <div ref={barRef} className="hist-bottom-bar hist-select-bar">
           <div className="hist-bar-line">
             <span className="hist-bar-text">{pickedIds.length}件を選択中</span>
             <button className="hist-bar-ghost" onClick={pickAllVisible}>
@@ -630,7 +661,7 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
 
       {/* ---------- 削除直後の「元に戻す」 (機能159) ---------- */}
       {!selectMode && undoTxs && (
-        <div className="hist-bottom-bar hist-undo-bar" role="status">
+        <div ref={barRef} className="hist-bottom-bar hist-undo-bar" role="status">
           <span className="hist-bar-text">
             {undoTxs.length === 1 ? '1件を削除しました' : `${undoTxs.length}件を削除しました`}
           </span>
