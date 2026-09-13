@@ -3,7 +3,7 @@
 //
 // これまで signOut() は Supabase のセッションを消すだけで、
 //   - 全明細のキャッシュ (kakeibo.txCache)
-//   - Gemini の APIキー / Discord の Webhook URL
+//   - Discord の Webhook URL
 //   - 未同期の記録 (kakeibo.pendingOps)
 //   - 目隠しや予算などの設定
 // が端末にそのまま残っていた。リモートからは触れないので、これは
@@ -14,7 +14,7 @@
 // 「その端末にしかない記録」なので、消せば1件も取り返せない。
 // 残っているときは片付けを行わず、その旨を伝えるだけにする。
 // 未同期が無いときも、消える物を並べて確認を取ってから消す
-// (APIキーや Webhook URL の入れ直しは手間で、黙って消えると事故に見える)。
+// (Webhook URL の入れ直しは手間で、黙って消えると事故に見える)。
 //
 // ---- 消さずに残すもの (KEEP_ON_SIGN_OUT) ----
 //   kakeibo.supabaseUrl / kakeibo.supabaseAnonKey
@@ -36,8 +36,6 @@
 //   むしろ「知っていれば誰でもそのチャンネルに投稿できる」トークンなので、
 //   端末を貸す・売るときには消えてくれた方がよい。
 //   KEEP_ON_SIGN_OUT に足すと、消したい物が端末に残るだけで得が無い。
-//   (Gemini の APIキーは同期しないので、こちらは消したら入れ直しになる。
-//    それでも鍵を端末に残す方が危ないので、従来どおり消す側)
 // ============================================================
 
 import { loadQueue } from './offlineQueue'
@@ -90,7 +88,6 @@ export function signOutConfirmText(): string {
     'ログアウトしました。この端末に残っている家計簿のデータも消しますか?',
     '',
     '・全明細のキャッシュ',
-    '・Gemini APIキー(入れ直しが必要です)',
     '・Discord Webhook URL(サーバーにも保存されているので、次のログインで戻ります)',
     '・保存した絞り込み条件・予算などの設定',
     '',
@@ -127,6 +124,54 @@ export function clearSupabaseSession(storage: Storage = localStorage): string[] 
   const targets = supabaseSessionKeys(allKeysOf(storage))
   for (const key of targets) storage.removeItem(key)
   return targets
+}
+
+// ============================================================
+// 役目を終えた機能が端末に置いたままにしている値の後始末
+//
+// ---- なぜ「掃除だけのコード」がここに1つあるのか ----
+// レシート読み取り (Gemini) を凍結したとき、**コードは消えても
+// `kakeibo.geminiApiKey` / `kakeibo.geminiModel` は利用者の iPhone と PC の
+// localStorage に残り続ける**。この鍵はサーバーには同期しておらず、
+// 消す導線(設定シートの「解除」)ごと消えたので、放っておくと
+// 「もう二度と使わない機能のための鍵」だけが端末に残り続けることになる。
+// 端末を貸す・修理に出す・売るときに損をするのは鍵が残っている側なので、
+// 次に起動した端末から順に、黙って消す。
+//
+// ---- いつ消してよいか ----
+// **全端末が一度アプリを起動すれば、このコードは要らなくなる。**
+// 使っているのは本人の iPhone と PC の2台なので、両方で一度起動したことが
+// 分かっていれば、この節(RETIRED_KEYS と clearRetiredKeys、呼び出し元の
+// main.tsx の1行、対応するテスト)をまとめて消してよい。
+// 判断できないときも、消し忘れの害は「毎回 removeItem が2回空振りする」だけ。
+//
+// ---- 起動のたびに走っても害がないこと ----
+// やるのは removeItem だけで、無いキーに対しては何も起きない(冪等)。
+// 接頭辞 `kakeibo.` の一括処理ではなく **名指しした2つだけ** を消すので、
+// 他の `kakeibo.*`(接続設定・目隠し・未同期の記録…)は1つも巻き込まない。
+// ============================================================
+
+/** もう使わない機能が置いたままにしている、名指しで消すキー */
+export const RETIRED_KEYS: readonly string[] = ['kakeibo.geminiApiKey', 'kakeibo.geminiModel']
+
+/**
+ * 役目を終えたキーだけを消す。消したキーを返す。(起動のたびに呼んでよい)
+ *
+ * localStorage が使えない環境(プライベートブラウズ等)でも起動を止めないよう、
+ * 例外は外に出さない。掃除に失敗しても、次の起動でまた試すだけで済む。
+ */
+export function clearRetiredKeys(storage: Storage = localStorage): string[] {
+  const removed: string[] = []
+  for (const key of RETIRED_KEYS) {
+    try {
+      if (storage.getItem(key) === null) continue
+      storage.removeItem(key)
+      removed.push(key)
+    } catch {
+      // 読めない / 書けない端末では何もしない(次の起動で改めて試す)
+    }
+  }
+  return removed
 }
 
 // 利用者が自分でログアウトを押したかどうか。
