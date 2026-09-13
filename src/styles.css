@@ -107,6 +107,9 @@ body {
 
 .app-main {
   flex: 1;
+  /* 下の 76px はタブバーぶん。history.css の .hist-root-barred が
+     「バーの bottom(80px) との差」としてこの数字を当てにしているので、
+     変えるならあちらも直すこと */
   padding: 4px 16px calc(76px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;

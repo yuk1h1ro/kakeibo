@@ -312,6 +312,10 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
   // この不具合が表に出た。測っておけば、次に中身が変わっても勝手に追従する。
   const barRef = useRef<HTMLDivElement>(null)
   const [barH, setBarH] = useState(0)
+  // バーが出ているか。余白を付ける条件はこちらで決め、実測値(barH)は幅の調整だけに使う。
+  // 実測は配置の無い環境(テストの jsdom)では 0 になるので、条件に混ぜると
+  // 「バーが出ているのに余白が付かない」をテストで捕まえられなくなる
+  const barShown = selectMode || (undoTxs !== null && undoTxs !== undefined)
   useEffect(() => {
     const el = barRef.current
     if (el === null) {
@@ -327,7 +331,10 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
-  })
+    // バーの出入りでだけ測り直す。依存を空にすると毎レンダリングで
+    // getBoundingClientRect が走り、引き下げ更新の最中は指を動かすたびに測ることになる。
+    // 中身が伸びた場合(文字サイズ・件数の折り返し)は ResizeObserver が拾う
+  }, [barShown])
   const settleRef = useRef<number | null>(null)
 
   const doRefresh = useCallback(async () => {
@@ -423,7 +430,7 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
 
   return (
     <div
-      className={`hist-root${barH > 0 ? ' hist-root-barred' : ''}`}
+      className={`hist-root${barShown ? ' hist-root-barred' : ''}`}
       ref={rootRef}
       style={barH > 0 ? ({ '--hist-bar-h': `${barH}px` } as CSSProperties) : undefined}
     >
