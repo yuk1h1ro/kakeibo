@@ -15,7 +15,9 @@ import {
   NO_CATEGORY_KEY,
   PERIOD_OPTIONS,
   SORT_OPTIONS,
+  datesReversed,
   describeFilter,
+  describeRange,
   filterStores,
   filterTags,
   isFilterActive,
@@ -94,6 +96,11 @@ export default function HistoryFilterBar({ filter, onChange, transactions }: Pro
       : [...activeTags, tag]
     patch({ tags: next })
   }
+
+  // 指定期間 (日付範囲)。逆に入っているときは入れ替えて絞る (filterDates) ので、
+  // 入れ替えたことと、実際に絞っている範囲を画面に出す
+  const reversed = datesReversed(filter)
+  const rangeText = describeRange(filter)
 
   const active = isFilterActive(filter)
   const matching = findMatchingFilter(saved, filter)
@@ -195,7 +202,10 @@ export default function HistoryFilterBar({ filter, onChange, transactions }: Pro
           </div>
 
           <div>
-            <span className="hist-field-label">期間(表示中の月が基準)</span>
+            {/* 「指定」だけは表示中の月を基準にしない。基準が変わることを見出しで言う */}
+            <span className="hist-field-label">
+              期間({filter.period === 'custom' ? '指定した日付が基準' : '表示中の月が基準'})
+            </span>
             <div className="hist-chips">
               {PERIOD_OPTIONS.map((o) => (
                 <button
@@ -208,6 +218,51 @@ export default function HistoryFilterBar({ filter, onChange, transactions }: Pro
                 </button>
               ))}
             </div>
+
+            {/* 日付範囲。「指定」を選んでいるときだけ出す。
+                入力は入力タブ (TransactionForm) と同じ <input type="date">。
+                この端末の日付ピッカーがそのまま出るので、覚え直すものが無い */}
+            {filter.period === 'custom' && (
+              <div className="hist-date-range">
+                <label className="hist-date-field">
+                  <span className="hist-field-label">開始</span>
+                  <input
+                    type="date"
+                    value={filter.from ?? ''}
+                    aria-label="絞り込みの開始日"
+                    onChange={(e) => patch({ from: e.target.value })}
+                  />
+                </label>
+                <label className="hist-date-field">
+                  <span className="hist-field-label">終了</span>
+                  <input
+                    type="date"
+                    value={filter.to ?? ''}
+                    aria-label="絞り込みの終了日"
+                    onChange={(e) => patch({ to: e.target.value })}
+                  />
+                </label>
+                <p
+                  className={`hist-date-note${reversed ? ' is-warn' : ''}`}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {reversed
+                    ? `開始と終了が逆です。${rangeText} として絞り込みます`
+                    : rangeText !== ''
+                      ? `${rangeText} で絞り込んでいます(開始日と終了日も含みます)`
+                      : '開始か終了を入れると絞り込みます(片方だけなら「その日以降」「その日まで」)'}
+                </p>
+                {rangeText !== '' && (
+                  <button
+                    className="hist-chip hist-date-clear"
+                    onClick={() => patch({ from: '', to: '' })}
+                  >
+                    日付を消す
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <div>

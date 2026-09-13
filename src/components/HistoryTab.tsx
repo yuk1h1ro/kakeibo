@@ -36,6 +36,8 @@ import type { useTransactions } from '../hooks/useTransactions'
 import { WEEKDAY_LABELS, defaultSelectedDate, monthWeeks, shiftMonth } from '../lib/calendar'
 import {
   DEFAULT_FILTER,
+  customRangeActive,
+  describeRange,
   filterTransactions,
   isFilterActive,
   type HistoryFilter,
@@ -128,6 +130,16 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
   const logAvailable = useChangeLogAvailable()
   const canNext = month < currentMonth
   const searching = isFilterActive(filter)
+
+  // ---------- 月送りの見出しと、日付を指定した絞り込みの整理 ----------
+  //
+  // 見出しの ← → は「表示中の月」を動かす。期間が この月 / 直近3ヶ月 / この年 の
+  // ときは絞り込みの基準もこの月なので、押せば結果が動く(そのまま残す)。
+  // ところが **日付を指定して絞っている間** は、範囲が月に依らないので
+  // ← → を押しても何も変わらない — 押しても何も起きないボタンが残る。
+  // そこで、その間だけ月送りの行を「いま絞っている範囲」の表示に差し替える。
+  // 月そのもの(month)は動かさないので、絞り込みを解除すれば元の月のカレンダーに戻る。
+  const rangeActive = customRangeActive(filter)
 
   // ---------- 月の移動 ----------
 
@@ -419,23 +431,29 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
           </span>
         </div>
 
-        <div className="month-nav">
-          <button onClick={() => changeMonth(-1)} aria-label="前の月">
-            ←
-          </button>
-          {/* 見出しを押すと年月ピッカー(機能130)。矢印の連打をやめられる */}
-          <button
-            className="hist-month-title"
-            onClick={() => setShowPicker(true)}
-            aria-haspopup="dialog"
-          >
-            {formatMonth(month)}
-            <span className="hist-caret">▼</span>
-          </button>
-          <button onClick={() => changeMonth(1)} disabled={!canNext} aria-label="次の月">
-            →
-          </button>
-        </div>
+        {rangeActive ? (
+          <div className="month-nav hist-range-head" role="status">
+            <span className="hist-range-title">{describeRange(filter)} で絞り込み中</span>
+          </div>
+        ) : (
+          <div className="month-nav">
+            <button onClick={() => changeMonth(-1)} aria-label="前の月">
+              ←
+            </button>
+            {/* 見出しを押すと年月ピッカー(機能130)。矢印の連打をやめられる */}
+            <button
+              className="hist-month-title"
+              onClick={() => setShowPicker(true)}
+              aria-haspopup="dialog"
+            >
+              {formatMonth(month)}
+              <span className="hist-caret">▼</span>
+            </button>
+            <button onClick={() => changeMonth(1)} disabled={!canNext} aria-label="次の月">
+              →
+            </button>
+          </div>
+        )}
 
         {/* タグの選択肢は実際に使われているものだけを出す (機能088) */}
         <HistoryFilterBar filter={filter} onChange={setFilter} transactions={store.transactions} />

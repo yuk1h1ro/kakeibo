@@ -439,3 +439,128 @@ describe('複数選択からのまとめてタグ付け', () => {
     expect(screen.getByText('1件を選択中')).toBeTruthy()
   })
 })
+
+// ============================================================
+// 日付を指定して絞り込む → そのまま選んでタグを付ける。
+//
+// 本来の用途:「旅行モードを使い忘れた3日間の旅行に、あとから #旅行 を付ける」。
+// 期間が すべて/この月/直近3ヶ月/この年 の4択だった頃は、旅行1回を選ぶのに
+// 日ごとにカレンダーを叩き直す必要があった。ここで固定するのは
+// **日付範囲で絞ってから、複数選択 → 全部 → タグ が最後まで通ること**。
+// ============================================================
+describe('日付を指定した絞り込み (期間「指定」)', () => {
+  const LAST = shiftMonth(monthKey(TODAY), -1)
+  const trip = (day: string, id: string) =>
+    tx({ id, date: `${LAST}-${day}`, store: `旅行${day}`, tags: [], created_at: `${LAST}-${day}T01:00:00.000Z` })
+  const rows = () => [
+    trip('10', 'd1'),
+    trip('11', 'd2'),
+    trip('12', 'd3'),
+    // 旅行の前後。日付でちょうど切り落とせることを見る
+    tx({ id: 'before', date: `${LAST}-09`, store: '出発前', tags: [] }),
+    tx({ id: 'after', date: `${LAST}-13`, store: '帰宅後', tags: [] }),
+  ]
+
+  const filterState = () =>
+    (document.querySelector('.hist-filter-state') as HTMLElement).textContent
+
+  /** 絞り込みを開いて「指定」を選び、開始・終了を入れる */
+  async function pickRange(
+    user: ReturnType<typeof userEvent.setup>,
+    from: string,
+    to: string
+  ) {
+    await user.click(screen.getByRole('button', { name: /絞り込み・並べ替え/ }))
+    await user.click(screen.getByRole('button', { name: '指定' }))
+    if (from !== '') fireEvent.change(screen.getByLabelText('絞り込みの開始日'), { target: { value: from } })
+    if (to !== '') fireEvent.change(screen.getByLabelText('絞り込みの終了日'), { target: { value: to } })
+  }
+
+  it('入力は入力タブと同じ日付ピッカー(<input type="date">)', async () => {
+    const { user } = setup(rows())
+    await user.click(screen.getByRole('button', { name: /絞り込み・並べ替え/ }))
+    // 「指定」を選ぶまでは日付の欄は出さない(4択だけの見た目を変えない)
+    expect(screen.queryByLabelText('絞り込みの開始日')).toBeNull()
+    await user.click(screen.getByRole('button', { name: '指定' }))
+    expect((screen.getByLabelText('絞り込みの開始日') as HTMLInputElement).type).toBe('date')
+    expect((screen.getByLabelText('絞り込みの終了日') as HTMLInputElement).type).toBe('date')
+    // 日付を入れるまでは何も絞らない(押した途端に一覧へ切り替わらない)
+    expect(screen.queryByText(/検索結果/)).toBeNull()
+  })
+
+  it('3日間を指定すると、その3日だけの一覧になる(両端を含む)', async () => {
+    const { user } = setup(rows())
+    await pickRange(user, `${LAST}-10`, `${LAST}-12`)
+
+    expect(screen.getByText('検索結果 3件')).toBeTruthy()
+    const shown = [...document.querySelectorAll('.hist-row')].map((el) => el.textContent ?? '')
+    expect(shown).toHaveLength(3)
+    expect(shown.some((t) => t.includes('出発前'))).toBe(false)
+    expect(shown.some((t) => t.includes('帰宅後'))).toBe(false)
+  })
+
+  it('絞り込んでいる範囲が画面に出て、解除できる', async () => {
+    const { user } = setup(rows())
+    await pickRange(user, `${LAST}-10`, `${LAST}-12`)
+
+    const [y, m] = LAST.split('-')
+    expect(filterState()).toBe(`${y}/${Number(m)}/10〜${Number(m)}/12`)
+    await user.click(screen.getByRole('button', { name: '絞り込みを解除' }))
+    expect(screen.queryByText(/検索結果/)).toBeNull()
+    expect(filterState()).toBe('')
+  })
+
+  it('開始 > 終了 のときは、入れ替えて絞ることを画面に出す(黙って0件にしない)', async () => {
+    const { user } = setup(rows())
+    await pickRange(user, `${LAST}-12`, `${LAST}-10`)
+
+    const [y, m] = LAST.split('-')
+    const range = `${y}/${Number(m)}/10〜${Number(m)}/12`
+    expect(screen.getByText(`開始と終了が逆です。${range} として絞り込みます`)).toBeTruthy()
+    expect(screen.getByText('検索結果 3件')).toBeTruthy()
+  })
+
+  it('片方だけでも効く(その日以降)', async () => {
+    const { user } = setup(rows())
+    await pickRange(user, `${LAST}-12`, '')
+
+    // 12日と13日の2件
+    expect(screen.getByText('検索結果 2件')).toBeTruthy()
+    const [y, m] = LAST.split('-')
+    expect(filterState()).toBe(`${y}/${Number(m)}/12以降`)
+  })
+
+  it('日付で絞っている間は、月送りの見出しを範囲の表示に差し替える', async () => {
+    const { user } = setup(rows())
+    // 絞る前はいつもどおりの月送り
+    expect(screen.getByRole('button', { name: '前の月' })).toBeTruthy()
+
+    await pickRange(user, `${LAST}-10`, `${LAST}-12`)
+    // 範囲は月に依らないので、押しても何も起きない ← → は出さない
+    expect(screen.queryByRole('button', { name: '前の月' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '次の月' })).toBeNull()
+    const [y, m] = LAST.split('-')
+    expect(screen.getByText(`${y}/${Number(m)}/10〜${Number(m)}/12 で絞り込み中`)).toBeTruthy()
+
+    // 解除すれば元の月送りに戻る(月そのものは動かしていない)
+    await user.click(screen.getByRole('button', { name: '絞り込みを解除' }))
+    expect(screen.getByRole('button', { name: '前の月' })).toBeTruthy()
+  })
+
+  it('日付で絞る → 選択 → 全部 → タグ が通る(本来の用途)', async () => {
+    const { user, updated } = setup(rows())
+    await pickRange(user, `${LAST}-10`, `${LAST}-12`)
+    await user.click(screen.getByRole('button', { name: '選択' }))
+    await user.click(screen.getByRole('button', { name: '全部' }))
+
+    expect(screen.getByText('3件を選択中')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'タグ' }))
+    await user.type(within(sheet()).getByLabelText('付けるタグ'), '2026北海道')
+    await user.click(screen.getByRole('button', { name: '3件に #2026北海道 を付ける' }))
+    await user.click(screen.getByRole('button', { name: '付ける' }))
+
+    // 範囲の外(出発前・帰宅後)は巻き込まない
+    expect(updated.map((u) => u.id).sort()).toEqual(['d1', 'd2', 'd3'])
+    expect(updated[0].input).toMatchObject({ tags: ['2026北海道'] })
+  })
+})
