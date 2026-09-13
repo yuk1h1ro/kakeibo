@@ -3,7 +3,12 @@ import type { Transaction } from './types'
 import {
   DEFAULT_FILTER,
   NO_CATEGORY_KEY,
+  customRangeActive,
+  datesReversed,
   describeFilter,
+  describeRange,
+  filterDates,
+  filterRange,
   filterStores,
   filterTransactions,
   isFilterActive,
@@ -449,6 +454,9 @@ describe('parseHistoryFilter', () => {
       categories: 'food',
       tags: ['ok', 3, null],
       stores: ['オカモトセルフ', 7],
+      // 'YYYY-MM-DD' の形でない日付は既定(空)に落とす
+      from: '2026/09/10',
+      to: 20260912,
       unknownKey: 'なにか',
     })
     expect(got).toEqual({ ...DEFAULT_FILTER, tags: ['ok'], stores: ['オカモトセルフ'] })
@@ -458,13 +466,194 @@ describe('parseHistoryFilter', () => {
     const full: HistoryFilter = {
       query: 'スタバ',
       sort: 'amount_asc',
-      period: 'last3',
+      // 期間は 'custom'。日付は period が 'custom' のときだけ効くので、
+      // ここを 'last3' にすると from / to が落ちても sameFilter が気付けない
+      period: 'custom',
       categories: ['food', NO_CATEGORY_KEY],
       tags: ['デート'],
       stores: ['オカモトセルフ'],
+      from: '2026-09-10',
+      to: '2026-09-12',
     }
     expect(parseHistoryFilter(JSON.parse(JSON.stringify(full)))).toEqual(full)
     // 読み直したものが元と「同じ条件」として突き合わせられること
     expect(sameFilter(parseHistoryFilter(full), full)).toBe(true)
+  })
+})
+
+// ============================================================
+// 日付を指定した絞り込み(期間の5つめの選択肢 = 'custom')。
+//
+// 用途は「旅行モードを使い忘れた旅行に、あとからまとめてタグを付ける」。
+// 3日間の35件を **1回の絞り込みで** 選べることがこの機能の全部なので、
+// ここで固定するのは次の取り決め:
+//   ・期間の軸は period 1本。日付は period が 'custom' のときだけ効く
+//   ・両端を含む(report.ts の inRange と同じ)
+//   ・開始 > 終了 は入れ替えて絞る(黙って0件にしない)
+//   ・片方だけでも効く(「その日以降」「その日まで」)
+//   ・表示中の月に依らない
+// ============================================================
+describe('日付を指定した絞り込み', () => {
+  const before = tx({ id: 'b', date: '2026-09-09' })
+  const day1 = tx({ id: 'd1', date: '2026-09-10' })
+  const day2 = tx({ id: 'd2', date: '2026-09-11', category: 'eating_out' })
+  const day3 = tx({ id: 'd3', date: '2026-09-12' })
+  const after = tx({ id: 'a', date: '2026-09-13' })
+  const rows = [before, day1, day2, day3, after]
+  const ctx = { month: '2026-09', labelOf }
+  const ids = (f: Partial<HistoryFilter>) =>
+    filterTransactions(rows, { ...DEFAULT_FILTER, period: 'custom', ...f }, ctx)
+      .map((t) => t.id)
+      .sort()
+
+  it('開始日と終了日の両方を含む(片端がこぼれると旅行の初日/最終日が抜ける)', () => {
+    expect(ids({ from: '2026-09-10', to: '2026-09-12' })).toEqual(['d1', 'd2', 'd3'])
+    // 1日だけ(開始 = 終了)も1件として残る
+    expect(ids({ from: '2026-09-10', to: '2026-09-10' })).toEqual(['d1'])
+  })
+
+  it('開始 > 終了 は入れ替えて絞る(黙って0件にしない)', () => {
+    expect(ids({ from: '2026-09-12', to: '2026-09-10' })).toEqual(['d1', 'd2', 'd3'])
+    // 入れ替えたことは画面に出せるようにしておく(HistoryFilterBar の注意書き)
+    const reversed = { ...DEFAULT_FILTER, period: 'custom' as const, from: '2026-09-12', to: '2026-09-10' }
+    expect(datesReversed(reversed)).toBe(true)
+    expect(filterDates(reversed)).toEqual({ from: '2026-09-10', to: '2026-09-12' })
+    // 説明文も「実際に絞っている範囲」を言う
+    expect(describeRange(reversed)).toBe('2026/9/10〜9/12')
+  })
+
+  it('片方だけでも効く(その日以降 / その日まで)', () => {
+    expect(ids({ from: '2026-09-12' })).toEqual(['a', 'd3'])
+    expect(ids({ to: '2026-09-10' })).toEqual(['b', 'd1'])
+    // 開いている端は番兵で表す(絞り込みそのものは効いている)
+    expect(filterRange({ ...DEFAULT_FILTER, period: 'custom', from: '2026-09-12' }, '2026-09')).toEqual({
+      from: '2026-09-12',
+      to: '9999-12-31',
+    })
+    expect(describeRange({ ...DEFAULT_FILTER, period: 'custom', from: '2026-09-12' })).toBe(
+      '2026/9/12以降'
+    )
+    expect(describeRange({ ...DEFAULT_FILTER, period: 'custom', to: '2026-09-10' })).toBe(
+      '2026/9/10まで'
+    )
+  })
+
+  it('「指定」を選んだだけ(日付なし)では何も絞らない', () => {
+    // 日付を入れる前に画面がぜんぶ作り変わる(カレンダーが消えて全件の一覧になる)のを避ける
+    expect(ids({})).toEqual(['a', 'b', 'd1', 'd2', 'd3'])
+    expect(isFilterActive({ ...DEFAULT_FILTER, period: 'custom' })).toBe(false)
+    expect(customRangeActive({ ...DEFAULT_FILTER, period: 'custom' })).toBe(false)
+    expect(customRangeActive({ ...DEFAULT_FILTER, period: 'custom', from: '2026-09-10' })).toBe(true)
+  })
+
+  it('「指定」以外を選んでいる間は、残っている日付が効かない(軸は period 1本)', () => {
+    const kept = { ...DEFAULT_FILTER, from: '2026-09-10', to: '2026-09-12' }
+    // 期間は「すべて」のまま = 全件。日付は画面の入力欄に残っているだけ
+    expect(filterTransactions(rows, kept, ctx)).toHaveLength(5)
+    expect(filterDates(kept)).toEqual({ from: '', to: '' })
+    expect(describeRange(kept)).toBe('')
+    // 「別の条件」にもしない(解除したはずなのに保存済み条件と一致しなくなるのを防ぐ)
+    expect(sameFilter(kept, DEFAULT_FILTER)).toBe(true)
+    expect(isFilterActive(kept)).toBe(false)
+  })
+
+  it('表示中の月に依らない(この月・直近3ヶ月と違って月送りで動かない)', () => {
+    const f: HistoryFilter = { ...DEFAULT_FILTER, period: 'custom', from: '2026-09-10', to: '2026-09-12' }
+    const at = (month: string) => filterTransactions(rows, f, { month, labelOf }).map((t) => t.id)
+    expect(at('2026-09')).toEqual(at('2026-01'))
+    expect(at('2026-09')).toHaveLength(3)
+  })
+
+  it('ほかの条件と重ねると AND になる(カテゴリ・お店・タグ・検索語)', () => {
+    expect(ids({ from: '2026-09-10', to: '2026-09-12', categories: ['eating_out'] })).toEqual(['d2'])
+    const tagged = tx({ id: 'tg', date: '2026-09-11', tags: ['旅行2026'] })
+    expect(
+      filterTransactions(
+        [...rows, tagged],
+        { ...DEFAULT_FILTER, period: 'custom', from: '2026-09-10', to: '2026-09-12', tags: ['旅行2026'] },
+        ctx
+      ).map((t) => t.id)
+    ).toEqual(['tg'])
+    const shop = tx({ id: 'sh', date: '2026-09-11', store: 'セブンイレブン' })
+    expect(
+      filterTransactions(
+        [...rows, shop],
+        { ...DEFAULT_FILTER, period: 'custom', from: '2026-09-10', to: '2026-09-12', stores: ['セブンイレブン'] },
+        ctx
+      ).map((t) => t.id)
+    ).toEqual(['sh'])
+    expect(ids({ from: '2026-09-10', to: '2026-09-12', query: 'あるはずのない語' })).toEqual([])
+  })
+
+  it('この項目より前に保存された条件(日付のキーが無い)もそのまま読める', () => {
+    const legacy = {
+      query: '',
+      sort: 'date_desc',
+      period: 'all',
+      categories: [],
+      tags: [],
+      stores: [],
+    } as HistoryFilter
+    expect(filterDates(legacy)).toEqual({ from: '', to: '' })
+    expect(filterTransactions(rows, legacy, ctx)).toHaveLength(5)
+    expect(sameFilter(legacy, DEFAULT_FILTER)).toBe(true)
+    expect(isFilterActive(legacy)).toBe(false)
+    // 読み直しても既定と同じ条件のまま(日付だけが勝手に入ったりしない)
+    expect(parseHistoryFilter(legacy)).toEqual(DEFAULT_FILTER)
+  })
+
+  it('知らない期間は既定(すべて)に落ちる。「指定」は読める', () => {
+    expect(parseHistoryFilter({ period: 'week' }).period).toBe('all')
+    expect(parseHistoryFilter({ period: 'custom', from: '2026-09-10' })).toEqual({
+      ...DEFAULT_FILTER,
+      period: 'custom',
+      from: '2026-09-10',
+    })
+  })
+
+  // ---- 型が守ってくれない3箇所のうちの1つ。ここが落ちたら sameFilter への追記漏れ ----
+  it('日付の違いは「別の条件」として扱う(sameFilter に from / to を足し忘れると落ちる)', () => {
+    // 足し忘れると isFilterActive が false のままになり、
+    // 日付で絞ったのに一覧に切り替わらない(押しても何も起きない)
+    const trip: HistoryFilter = { ...DEFAULT_FILTER, period: 'custom', from: '2026-09-10', to: '2026-09-12' }
+    expect(isFilterActive(trip)).toBe(true)
+    expect(sameFilter(trip, DEFAULT_FILTER)).toBe(false)
+    // 日付だけが違う2つを「同じ条件」と言わない(保存済み条件の取り違え)
+    expect(sameFilter(trip, { ...trip, to: '2026-09-13' })).toBe(false)
+    expect(sameFilter(trip, { ...trip, from: '2026-09-11' })).toBe(false)
+    // 片方だけの指定も、未指定とは別の条件
+    expect(sameFilter({ ...DEFAULT_FILTER, period: 'custom', from: '2026-09-10' }, trip)).toBe(false)
+    // 同じ範囲を指しているものは同じ条件(逆に入れただけの条件も同じ)
+    expect(sameFilter(trip, { ...trip, from: '2026-09-12', to: '2026-09-10' })).toBe(true)
+  })
+
+  it('いま何で絞っているかに日付が出る(describeFilter / 保存名)', () => {
+    const trip: HistoryFilter = { ...DEFAULT_FILTER, period: 'custom', from: '2026-09-10', to: '2026-09-12' }
+    // 範囲そのものが期間を語るので、「指定」というチップ名は重ねて出さない
+    expect(describeFilter(trip, labelOf)).toBe('2026/9/10〜9/12')
+    expect(describeFilter({ ...trip, query: 'ラーメン' }, labelOf)).toBe('「ラーメン」 / 2026/9/10〜9/12')
+    // 年をまたぐときだけ両方に年を付ける
+    expect(describeRange({ ...trip, from: '2025-12-30', to: '2026-01-03' })).toBe(
+      '2025/12/30〜2026/1/3'
+    )
+    // 日付を入れていない「指定」は、絞っていないのと同じ言い方にする
+    expect(describeFilter({ ...DEFAULT_FILTER, period: 'custom', query: 'x' }, labelOf)).toBe(
+      '「x」 / すべて'
+    )
+  })
+
+  it('保存名は20文字に収まる(日付は検索語の次。後ろから切られても残る)', () => {
+    const trip: HistoryFilter = { ...DEFAULT_FILTER, period: 'custom', from: '2026-09-10', to: '2026-09-12' }
+    // 旅行1回ぶんを保存するときの初期値。年を繰り返さないので14文字
+    expect(suggestFilterName(trip, labelOf)).toBe('2026/9/10〜9/12')
+    // タグまで入れてちょうど20文字
+    expect(suggestFilterName({ ...trip, tags: ['旅行'] }, labelOf)).toBe('2026/9/10〜9/12 / #旅行')
+    // 条件が多いときに切られるのは後ろから。日付は消えない
+    const long = suggestFilterName(
+      { ...trip, stores: ['オカモトセルフ'], categories: ['food'], tags: ['旅行'] },
+      labelOf
+    )
+    expect(long).toHaveLength(20)
+    expect(long.startsWith('2026/9/10〜9/12')).toBe(true)
   })
 })
