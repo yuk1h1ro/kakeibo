@@ -499,6 +499,26 @@
   box-shadow: var(--shadow-2);
 }
 
+/* 複数選択の操作バーだけは2段。390px 幅では「N件を選択中 / 全部 / カテゴリ /
+   タグ / 削除 / やめる」が1行に収まらず、状態の文字が潰れて折り返していた。
+   上段=いまの状態と選択の操作 / 下段=選んだ記録に効く操作、で分ける */
+.hist-bottom-bar.hist-select-bar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.hist-bottom-bar .hist-bar-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 削除は右端に離す。押し間違いが痛いボタンを、隣と詰めて置かない */
+.hist-bottom-bar .hist-bar-apart {
+  margin-left: auto;
+}
+
 .hist-bottom-bar .hist-bar-text {
   flex: 1;
   min-width: 0;

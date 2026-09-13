@@ -41,6 +41,8 @@ import {
   type HistoryFilter,
 } from '../lib/historyFilter'
 import { categoryBulkTargets, duplicateInput, withCategory } from '../lib/txActions'
+import { bulkTagSuggestions } from '../lib/bulkTags'
+import { useSpecialTags } from '../lib/reportTagSettings'
 import { canStartPull, formatSyncedAt, pullOffset, shouldTriggerRefresh } from '../lib/pullRefresh'
 import { useChangeLogAvailable } from '../lib/changeLog'
 import { splitPositions } from '../lib/splits'
@@ -49,6 +51,7 @@ import HistoryFilterBar from './HistoryFilterBar'
 import MonthPickerSheet from './MonthPickerSheet'
 import RowActionMenu from './RowActionMenu'
 import BulkCategorySheet from './BulkCategorySheet'
+import BulkTagSheet from './BulkTagSheet'
 import ChangeLogSheet from './ChangeLogSheet'
 import { IconHistory, IconRefresh, IconUndo } from './historyIcons'
 import '../calendar.css'
@@ -92,6 +95,11 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
   const [pickedIds, setPickedIds] = useState<string[]>([])
   const [menuTx, setMenuTx] = useState<Transaction | null>(null)
   const [bulkOpen, setBulkOpen] = useState(false)
+  // タグのシートを開いたときの対象。選択そのもの(pickedIds)とは別に持つ —
+  // 絞り込み中にそのタグを外すと一覧から行が消え、選択が空になってシートの
+  // 対象まで 0件になってしまう(「35件に付けました」の隣で 0件と出る)
+  const [tagIds, setTagIds] = useState<string[] | null>(null)
+  const [tagApplied, setTagApplied] = useState(false)
   const [showPicker, setShowPicker] = useState(false)
   const [showLog, setShowLog] = useState(false)
   const [pull, setPull] = useState(0)
@@ -203,6 +211,35 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
   const exitSelect = () => {
     setSelectMode(false)
     setPickedIds([])
+  }
+
+  // ---------- 選んだ記録にまとめてタグを付ける / 外す ----------
+  //
+  // レポートの「回ごと」からの一括タグ付け(report/EventTagSheet)は、対象の記録に
+  // **すでに何かタグが付いている**ことが前提で、1つも付いていない旅行には入れない。
+  // 旅行モードを使い忘れて帰ってきた旅行に、あとから #旅行 や #2026北海道 を
+  // 付けられる場所がここ。日付やお店で絞ってから選べるので、複数選択が自然な置き場になる。
+  // 判断(誰に効くか・すでに付いている・上限で付けられない)は lib/bulkTags.ts、
+  // 画面は共通の BulkTagSheet。どちらもレポート側とまったく同じものを使う。
+  const specialTags = useSpecialTags()
+  const tagTargets = useMemo(() => {
+    if (tagIds === null) return []
+    const ids = new Set(tagIds)
+    return store.transactions.filter((t) => ids.has(t.id))
+  }, [store.transactions, tagIds])
+  // 候補は「いま実際に使われているタグ」+ 特別タグ(旅行・デート・出張)。
+  // 絞り込み(機能088)と同じ考え方で、使っていないタグは並べない
+  const tagChoices = useMemo(
+    () => bulkTagSuggestions(store.transactions, specialTags),
+    [store.transactions, specialTags]
+  )
+
+  const closeTagSheet = () => {
+    setTagIds(null)
+    // 付け外しをしたなら、カテゴリの一括変更と同じく選択モードから抜ける。
+    // 何もしていないときは選び直しの途中なので、選択はそのまま残す
+    if (tagApplied) exitSelect()
+    setTagApplied(false)
   }
 
   const togglePick = (t: Transaction) => {
@@ -523,33 +560,53 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
         </div>
       </div>
 
-      {/* ---------- 複数選択中の操作バー (機能151) ---------- */}
+      {/* ---------- 複数選択中の操作バー (機能151) ----------
+          390px 幅では、4つ並べた時点で「N件を選択中」が幅39pxまで潰れて3行に折れていた
+          (実測)。5つ目の「タグ」を足す余地は無いので **2段** にする。
+            上段 = いまの状態と、選択そのものの操作(全部 / やめる)
+            下段 = 選んだ記録に効く操作(カテゴリ / タグ / 削除)
+          削除は下段の右端に離して置く。同じ行に詰めると押し間違いが痛いので、
+          タグとの間は margin-left:auto で必ず空ける(元の10pxより広い)。 */}
       {selectMode && (
-        <div className="hist-bottom-bar">
-          <span className="hist-bar-text">{pickedIds.length}件を選択中</span>
-          <button className="hist-bar-ghost" onClick={pickAllVisible}>
-            全部
-          </button>
-          <button
-            className="hist-bar-undo"
-            disabled={pickedIds.length === 0}
-            onClick={() => setBulkOpen(true)}
-          >
-            カテゴリ
-          </button>
-          <button
-            className="hist-bar-danger"
-            disabled={pickedIds.length === 0}
-            onClick={() => {
-              deleteTxs(pickedTxs)
-              exitSelect()
-            }}
-          >
-            削除
-          </button>
-          <button className="hist-bar-ghost" onClick={exitSelect}>
-            やめる
-          </button>
+        <div className="hist-bottom-bar hist-select-bar">
+          <div className="hist-bar-line">
+            <span className="hist-bar-text">{pickedIds.length}件を選択中</span>
+            <button className="hist-bar-ghost" onClick={pickAllVisible}>
+              全部
+            </button>
+            <button className="hist-bar-ghost" onClick={exitSelect}>
+              やめる
+            </button>
+          </div>
+          <div className="hist-bar-line">
+            <button
+              className="hist-bar-undo"
+              disabled={pickedIds.length === 0}
+              onClick={() => setBulkOpen(true)}
+            >
+              カテゴリ
+            </button>
+            <button
+              className="hist-bar-undo"
+              disabled={pickedIds.length === 0}
+              onClick={() => {
+                setTagApplied(false)
+                setTagIds(pickedIds)
+              }}
+            >
+              タグ
+            </button>
+            <button
+              className="hist-bar-danger hist-bar-apart"
+              disabled={pickedIds.length === 0}
+              onClick={() => {
+                deleteTxs(pickedTxs)
+                exitSelect()
+              }}
+            >
+              削除
+            </button>
+          </div>
         </div>
       )}
 
@@ -597,6 +654,27 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
             exitSelect()
           }}
           onClose={() => setBulkOpen(false)}
+        />
+      )}
+
+      {tagIds !== null && (
+        <BulkTagSheet
+          targets={tagTargets}
+          scopeLabel={`選んだ${tagTargets.length}件`}
+          lead={
+            <>
+              選んだ <strong>{tagTargets.length}件</strong> にまとめてタグを付けます。
+              旅行モードを使い忘れた旅行でも、あとから「旅行」や行き先の名前(「2026北海道」など)を
+              付けておけば、レポートでその旅行だけを選んで見られます。
+            </>
+          }
+          suggestionsLabel="よく使うタグ"
+          suggestions={tagChoices}
+          onApply={(updates) => {
+            setTagApplied(true)
+            void store.updateMany(updates)
+          }}
+          onClose={closeTagSheet}
         />
       )}
 

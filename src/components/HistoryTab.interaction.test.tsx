@@ -307,3 +307,135 @@ describe('お店で絞り込む導線', () => {
     expect(filterState()).toBe('')
   })
 })
+
+// ============================================================
+// 複数選択 → まとめてタグを付ける / 外す。
+//
+// レポートの「回ごと」からの一括タグ付けは、**すでに何かタグが付いている記録**
+// にしか入れない(タグ別カードから掘って辿り着くため)。旅行モードを使い忘れて
+// 帰ってきた旅行 — つまりタグが1つも無い35件 — に #旅行 を付けられる場所は
+// ここしかないので、ここが塞がると機能そのものが使えない。
+//
+// 判断は lib/bulkTags.ts、画面は BulkTagSheet(レポートと共通)。
+// ここで固定するのは **履歴の複数選択から呼んだときの結び付き**:
+//   ・選んでいないときは押せない(カテゴリ・削除と同じ)
+//   ・すでに付いている記録は飛ばす
+//   ・上限(5個)で付けられなかった件数が画面に出る
+//   ・外す操作が効く
+// ============================================================
+describe('複数選択からのまとめてタグ付け', () => {
+  /** 一覧の行を選ぶ */
+  async function pickAll(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: '選択' }))
+    await user.click(screen.getByRole('button', { name: '全部' }))
+  }
+
+  const tagBtn = () => screen.getByRole('button', { name: 'タグ' }) as HTMLButtonElement
+
+  it('1件も選んでいないときは押せない(カテゴリ・削除と同じ)', async () => {
+    const { user } = setup([tx()])
+    await user.click(screen.getByRole('button', { name: '選択' }))
+
+    expect(tagBtn().disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'カテゴリ' }) as HTMLButtonElement).disabled).toBe(
+      true
+    )
+    await user.click(tagBtn())
+    expect(document.querySelector('.modal-sheet')).toBeNull()
+
+    // 1件選べば押せる
+    await user.click(screen.getByRole('button', { name: /スーパー を選ぶ/ }))
+    expect(tagBtn().disabled).toBe(false)
+  })
+
+  it('件数を見せて確認を取ってから、選んだ記録にだけ送る', async () => {
+    const { user, updated } = setup([
+      tx({ id: 't1', tags: [] }),
+      tx({ id: 't2', store: 'コンビニ', tags: [] }),
+    ])
+    await pickAll(user)
+    await user.click(tagBtn())
+    await user.type(within(sheet()).getByLabelText('付けるタグ'), '2026北海道1周')
+    await user.click(screen.getByRole('button', { name: '2件に #2026北海道1周 を付ける' }))
+
+    // 押した瞬間には書き換わらない。確認を1段挟む
+    expect(updated).toHaveLength(0)
+    expect(screen.getByText('2件に #2026北海道1周 を付けます')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: '付ける' }))
+    expect(updated.map((u) => u.id)).toEqual(['t1', 't2'])
+    // 記録が持っている事実は写す(手書きの payload に戻ると落ちる)
+    expect(updated[0].input).toMatchObject({ partner_paid: 2000, tags: ['2026北海道1周'] })
+    expect(screen.getByText(/2件に #2026北海道1周 を付けました/)).toBeTruthy()
+  })
+
+  it('すでに付いている記録は飛ばす(中身の無い変更履歴を残さない)', async () => {
+    const { user, updated } = setup([
+      tx({ id: 't1', tags: ['旅行'] }),
+      tx({ id: 't2', store: 'コンビニ', tags: [] }),
+    ])
+    await pickAll(user)
+    await user.click(tagBtn())
+    await user.click(within(sheet()).getByRole('button', { name: '#旅行' }))
+    await user.click(screen.getByRole('button', { name: '2件に #旅行 を付ける' }))
+
+    expect(screen.getByText('1件に #旅行 を付けます(すでに付いている1件はそのまま)')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: '付ける' }))
+    expect(updated.map((u) => u.id)).toEqual(['t2'])
+  })
+
+  it('タグが5個ある記録は付けられない。その件数を画面に出す(黙って飛ばさない)', async () => {
+    const { user, updated } = setup([
+      tx({ id: 't1', tags: [] }),
+      tx({ id: 't2', store: 'コンビニ', tags: ['a', 'b', 'c', 'd', 'e'] }),
+    ])
+    await pickAll(user)
+    await user.click(tagBtn())
+    await user.type(within(sheet()).getByLabelText('付けるタグ'), '旅行')
+    await user.click(screen.getByRole('button', { name: '2件に #旅行 を付ける' }))
+
+    expect(screen.getByText(/タグが5個ある1件は付けられません/)).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: '付ける' }))
+    expect(updated.map((u) => u.id)).toEqual(['t1'])
+    expect(screen.getByText(/1件は付けられませんでした/)).toBeTruthy()
+  })
+
+  it('付け間違えたら、同じ入り口からまとめて外せる', async () => {
+    const { user, updated } = setup([
+      tx({ id: 't1', tags: ['旅行', '2026北海道1周'] }),
+      tx({ id: 't2', store: 'コンビニ', tags: ['2026北海道1周'] }),
+    ])
+    await pickAll(user)
+    await user.click(tagBtn())
+    await user.click(within(sheet()).getByRole('button', { name: '#2026北海道1周(2)' }))
+
+    expect(screen.getByText('2件に #2026北海道1周 を外します')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: '外す' }))
+    expect(updated.map((u) => u.id)).toEqual(['t1', 't2'])
+    expect(updated[0].input.tags).toEqual(['旅行'])
+    expect(updated[1].input.tags).toEqual([])
+  })
+
+  it('候補には、使われているタグと特別タグ(旅行・デート・出張)が出る', async () => {
+    const { user } = setup([tx({ id: 't1', tags: ['2026和歌山'] })])
+    await pickAll(user)
+    await user.click(tagBtn())
+
+    const options = within(sheet()).getByRole('group', { name: 'よく使うタグ' })
+    expect(within(options).getAllByRole('button').map((b) => b.textContent)).toEqual([
+      '#2026和歌山',
+      '#旅行',
+      '#デート',
+      '#出張',
+    ])
+  })
+
+  it('タグを付けずに閉じたときは、選んだ記録をそのまま残す(選び直しの途中)', async () => {
+    const { user } = setup([tx()])
+    await pickAll(user)
+    await user.click(tagBtn())
+    await user.click(within(sheet()).getByRole('button', { name: '閉じる' }))
+
+    expect(screen.getByText('1件を選択中')).toBeTruthy()
+  })
+})
