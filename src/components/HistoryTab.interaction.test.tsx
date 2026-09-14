@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import HistoryTab from './HistoryTab'
 import type { TransactionInput, useTransactions } from '../hooks/useTransactions'
 import { LONG_PRESS_MS } from '../lib/rowGesture'
@@ -50,7 +50,12 @@ function tx(over: Partial<Transaction> = {}): Transaction {
   }
 }
 
-function setup(transactions: Transaction[], storePrefill?: { nonce: number; store: string }) {
+function setup(
+  transactions: Transaction[],
+  storePrefill?: { nonce: number; store: string },
+  // 削除直後の「元に戻す」が出ている状態から始めたいとき用
+  undoableDeletes: Transaction[] | null = null
+) {
   const added: TransactionInput[] = []
   const updated: { id: string; input: TransactionInput }[] = []
   const removed: Transaction[][] = []
@@ -65,21 +70,29 @@ function setup(transactions: Transaction[], storePrefill?: { nonce: number; stor
     removeMany: async (rows: Transaction[]) => {
       removed.push(rows)
     },
-    undoableDeletes: null,
+    undoableDeletes,
     undoDelete: async () => {},
     syncNow: async () => {},
     lastSyncedAt: null,
   } as unknown as ReturnType<typeof useTransactions>
 
-  render(
+  const view = (undoable: Transaction[] | null) => (
     <HistoryTab
-      store={store}
+      store={{ ...store, undoableDeletes: undoable } as ReturnType<typeof useTransactions>}
       onEdit={() => {}}
       onStartInput={() => {}}
       storePrefill={storePrefill}
     />
   )
-  return { user: userEvent.setup(), added, updated, removed }
+  const { rerender } = render(view(undoableDeletes))
+  return {
+    user: userEvent.setup(),
+    added,
+    updated,
+    removed,
+    /** 画面はそのままに「削除直後(元に戻せる)」へ差し替える */
+    setUndoable: (rows: Transaction[] | null) => rerender(view(rows)),
+  }
 }
 
 /** いま開いているシート(カテゴリの選択肢が履歴の絞り込みと同名なので範囲を絞る) */
@@ -562,5 +575,126 @@ describe('日付を指定した絞り込み (期間「指定」)', () => {
     // 範囲の外(出発前・帰宅後)は巻き込まない
     expect(updated.map((u) => u.id).sort()).toEqual(['d1', 'd2', 'd3'])
     expect(updated[0].input).toMatchObject({ tags: ['2026北海道'] })
+  })
+})
+
+// ============================================================
+// 画面下に浮かぶバー(複数選択 / 元に戻す)のぶん、一覧の下に余白を空ける。
+//
+// 利用者からの報告:「まとめてタグをつける際に、画面下部のポップアップに、
+// 元々の画面の下の部分が隠れてしまって、選択できない」。
+// バーは position: fixed なので一覧の上に重なる。余白が無いと最後の数行が
+// バーの下に入り、**見えているのにタップできない**(その行を選べない)。
+// 余白は .hist-root-barred が持つ(高さはバーの実測値 --hist-bar-h)。
+//
+// ここで固定するのは「バーが出ている間だけ、そのクラスが付くこと」。
+// **これは再発の検出器であって、重なっていないことの確認ではない。**
+// jsdom には配置計算が無く getBoundingClientRect はすべて 0 を返すので、
+// 行がバーに隠れるかどうかはここでは分からない。実際の重なりは実機幅
+// (iPhone 13 相当 390x844)のブラウザで、最後の行の中心座標を
+// document.elementFromPoint に引いて **バーではなくその行が返ること**、
+// および実際にタップしてチェックが入ることで確かめる必要がある。
+//
+// クラスを付ける条件を実測値(バーの高さ > 0)ではなく「バーが出ているか」に
+// しているのは、この検出器を成り立たせるため。実測を条件に混ぜると、
+// 配置の無い jsdom では常に 0 になり「バーが出ているのに余白が付かない」
+// という肝心の不具合を、ここで捕まえられなくなる。
+// ============================================================
+describe('下に浮かぶバーのぶんの余白 (機能151/159)', () => {
+  const root = () => document.querySelector('.hist-root') as HTMLElement
+  const barred = () => root().classList.contains('hist-root-barred')
+  const bar = () => document.querySelector('.hist-bottom-bar')
+
+  it('複数選択に入ると、一覧の下にバーぶんの余白が付く(付かないと最後の行がバーに隠れて選べない)', async () => {
+    const { user } = setup([tx()])
+    await user.click(screen.getByRole('button', { name: '選択' }))
+
+    expect(bar()).toBeTruthy()
+    expect(barred()).toBe(true)
+  })
+
+  it('選択をやめると余白は外れる(バーが消えたあとまで一覧の下を空けたままにしない)', async () => {
+    const { user } = setup([tx()])
+    await user.click(screen.getByRole('button', { name: '選択' }))
+    await user.click(screen.getByRole('button', { name: 'やめる' }))
+
+    expect(bar()).toBeNull()
+    expect(barred()).toBe(false)
+  })
+
+  it('削除直後の「元に戻す」が出ている間も余白が付く(同じ場所に浮かぶので、同じように隠す)', () => {
+    setup([tx()], undefined, [tx({ id: 'gone' })])
+
+    expect(screen.getByText('1件を削除しました')).toBeTruthy()
+    expect(bar()).toBeTruthy()
+    expect(barred()).toBe(true)
+  })
+
+  it('バーが出ていないときは付かない(いつも空けると、一覧の下が理由なく空く)', () => {
+    setup([tx()])
+
+    expect(bar()).toBeNull()
+    expect(barred()).toBe(false)
+  })
+
+  // ------------------------------------------------------------
+  // 余白の「高さ」のほう。ここだけは配置が要るので、バーの高さだけ jsdom に教える。
+  //
+  // 2種類のバーは同じ場所に浮かび、**片方からもう片方へ直接入れ替わる**
+  // (削除直後の「元に戻す」が出ている間に、もう一度「選択」へ入る/やめる)。
+  // どちらも「バーが出ている」なので、出ているかどうかの真偽では入れ替わりが見えない。
+  // 真偽で測り直しを決めていたときはここで測り直しが走らず、前のバーを見ていた
+  // ResizeObserver も画面から外れた要素を掴んだまま残って、以後いくらバーが伸びても
+  // 実測が更新されなかった。実機幅(390x844)では、バーが 174px に伸びた場面で
+  // 最後のカードがバーの下に 44px 潜った(=元の「隠れて押せない」に戻りかけた)。
+  // ------------------------------------------------------------
+  describe('バーが入れ替わったときの高さ', () => {
+    // 高さだけは配置が要るので jsdom に教える(2段の複数選択=118px / 1段の元に戻す=66px)
+    const HEIGHTS: [string, number][] = [
+      ['hist-select-bar', 118],
+      ['hist-undo-bar', 66],
+    ]
+    const barVar = () => root().style.getPropertyValue('--hist-bar-h')
+
+    beforeEach(() => {
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        const hit = HEIGHTS.find(([c]) => this.classList.contains(c))
+        const height = hit === undefined ? 0 : hit[1]
+        return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: height, width: 0, height } as DOMRect
+      })
+    })
+    afterEach(() => vi.restoreAllMocks())
+
+    it('バーの高さは実測して渡す(決め打ちに戻すと、伸びたぶんだけ行が隠れる)', async () => {
+      const { user } = setup([tx()])
+      await user.click(screen.getByRole('button', { name: '選択' }))
+
+      expect(barVar()).toBe('118px')
+    })
+
+    it('「元に戻す」が出ている間に複数選択へ入ったら、2段ぶんに測り直す(足りないと行が隠れる向き)', async () => {
+      const { user } = setup([tx()], undefined, [tx({ id: 'gone' })])
+      expect(barVar()).toBe('66px')
+
+      await user.click(screen.getByRole('button', { name: '選択' }))
+
+      expect(barVar()).toBe('118px')
+    })
+
+    it('複数選択をやめて「元に戻す」だけが残ったら、1段ぶんに測り直す(余白が余ったままにならない)', async () => {
+      const { user, setUndoable } = setup([tx()])
+      await user.click(screen.getByRole('button', { name: '選択' }))
+      expect(barVar()).toBe('118px')
+      // 選択中に削除して、消したぶんが元に戻せる状態になった(バーはまだ複数選択のまま)
+      setUndoable([tx({ id: 'gone' })])
+      expect(barVar()).toBe('118px')
+
+      await user.click(screen.getByRole('button', { name: 'やめる' }))
+
+      expect(screen.getByText('1件を削除しました')).toBeTruthy()
+      expect(barVar()).toBe('66px')
+    })
   })
 })

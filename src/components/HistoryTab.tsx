@@ -21,6 +21,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import type { Transaction } from '../lib/types'
 import { ownAmount } from '../lib/types'
 import {
@@ -301,6 +302,47 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
   const pullingRef = useRef(false)
   const busyRef = useRef(false)
   const rootRef = useRef<HTMLDivElement>(null)
+
+  // 画面下に浮かぶバー(複数選択・元に戻す)の高さを実測して、一覧の下に同じだけ余白を空ける。
+  //
+  // バーは position: fixed なので一覧の上に重なる。余白が無いと最後の数行がバーの下に隠れ、
+  // **見えているのにタップできない**(複数選択では、その行を選べない)。
+  // 高さを決め打ちにしないのは、件数の文字が折り返したり、iOS の文字サイズ設定を
+  // 大きくしたりすると伸びるため。実際、1段から2段に変えたときに隠れる量が倍になって
+  // この不具合が表に出た。測っておけば、次に中身が変わっても勝手に追従する。
+  const barRef = useRef<HTMLDivElement>(null)
+  const [barH, setBarH] = useState(0)
+  // **どの** バーが出ているか。「出ているか」の真偽ではなく種類で持つ。
+  // 複数選択バー(2段)と元に戻すバー(1段)は高さが違ううえ、削除すると
+  // 片方からもう片方へ直接入れ替わる。真偽で見ていると入れ替わりで測り直しが走らず、
+  // 前のバーを見ていた ResizeObserver が画面から外れた要素を掴んだまま残る。
+  // (実際そうなっていて、入れ替わったあとは実測が二度と更新されず、
+  //  CSS の既定値 118px 頼みに戻っていた。バーが 174px に伸びた場面で
+  //  最後のカードがバーの下に 44px 潜った)
+  const barKind = selectMode ? 'select' : undoTxs ? 'undo' : 'none'
+  // 余白を付ける条件はこちら。実測値(barH)は高さの調整だけに使う。
+  // 実測は配置の無い環境(テストの jsdom)では 0 になるので、条件に混ぜると
+  // 「バーが出ているのに余白が付かない」をテストで捕まえられなくなる
+  const barShown = barKind !== 'none'
+  useEffect(() => {
+    const el = barRef.current
+    if (el === null) {
+      setBarH(0)
+      return
+    }
+    const measure = () => setBarH(el.getBoundingClientRect().height)
+    measure()
+    // ResizeObserver が無い環境(テストの jsdom や古いブラウザ)では、
+    // 測り直しを諦めて初回の実測だけで動かす。余白が少しずれることはあっても、
+    // 隠れて押せないという元の不具合には戻らない(CSS 側に既定値も置いてある)
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+    // 測り直すのは、出ているバーが変わったときだけ。依存を空にすると毎レンダリングで
+    // getBoundingClientRect が走り、引き下げ更新の最中は指を動かすたびに測ることになる。
+    // 同じバーのまま中身が伸びた場合(文字サイズ・件数の折り返し)は ResizeObserver が拾う
+  }, [barKind])
   const settleRef = useRef<number | null>(null)
 
   const doRefresh = useCallback(async () => {
@@ -395,7 +437,11 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
   const syncedText = formatSyncedAt(store.lastSyncedAt, now)
 
   return (
-    <div className="hist-root" ref={rootRef}>
+    <div
+      className={`hist-root${barShown ? ' hist-root-barred' : ''}`}
+      ref={rootRef}
+      style={barH > 0 ? ({ '--hist-bar-h': `${barH}px` } as CSSProperties) : undefined}
+    >
       <div
         className="hist-pullable"
         style={{ transform: pull > 0 ? `translateY(${pull}px)` : undefined }}
@@ -586,7 +632,7 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
           削除は下段の右端に離して置く。同じ行に詰めると押し間違いが痛いので、
           タグとの間は margin-left:auto で必ず空ける(元の10pxより広い)。 */}
       {selectMode && (
-        <div className="hist-bottom-bar hist-select-bar">
+        <div ref={barRef} className="hist-bottom-bar hist-select-bar">
           <div className="hist-bar-line">
             <span className="hist-bar-text">{pickedIds.length}件を選択中</span>
             <button className="hist-bar-ghost" onClick={pickAllVisible}>
@@ -630,7 +676,7 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
 
       {/* ---------- 削除直後の「元に戻す」 (機能159) ---------- */}
       {!selectMode && undoTxs && (
-        <div className="hist-bottom-bar hist-undo-bar" role="status">
+        <div ref={barRef} className="hist-bottom-bar hist-undo-bar" role="status">
           <span className="hist-bar-text">
             {undoTxs.length === 1 ? '1件を削除しました' : `${undoTxs.length}件を削除しました`}
           </span>

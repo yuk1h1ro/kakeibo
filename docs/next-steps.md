@@ -18,7 +18,7 @@
 |---|---|---|---|
 | `src/lib` の純関数 | — | **685件・42ファイル** | 厚い。日付計算・集計・絞り込み・ジェスチャ判定・残高計算はほぼ完全に守られている |
 | `src/lib` のストア（購読・localStorage） | 14モジュール | 直列化の純関数のみ | `subscribe` / `notify` / `useSyncExternalStore` は未検証 |
-| `src/components` | 23ファイル・約5,500行 | **177件・14ファイル** | 段階1〜3まで対応済み（下記）。まだ入っていないのは資産の入力シート・レシートの連続撮影・繰り返し入力の設定 |
+| `src/components` | 23ファイル・約5,500行 | **177件・14ファイル** | 段階1〜3まで対応済み（下記）。まだ入っていないのは資産の入力シート・繰り返し入力の設定 |
 | CSS | 約5,000行 | **ゼロ** | 目視のみ |
 | Supabase 連携（init / CRUD） | — | 一部（モッククライアント） | `storeCategories` `recurringRules` `partnerComments` `shareLinks` `transactionTemplates` にあり |
 
@@ -51,7 +51,7 @@
 
 - **ストア（`useSyncExternalStore` 系）** — 購読・通知・localStorage の往復は未検証のまま
 - **CSS** — 見た目の回帰を検出する手段は無いまま（`.selected` / `.is-on` / `.on` の命名統一を保留している理由もこれ）
-- **資産の入力シート・レシートの連続撮影・繰り返し入力の設定** — 画面のテストが無い
+- **資産の入力シート・繰り返し入力の設定** — 画面のテストが無い
 
 ### 判断の目安
 
@@ -170,7 +170,7 @@
 - ~~**実機のタッチ挙動**~~ → **依然として検証できません。** この環境には Chromium しか無く、iOS のゴム跳ね・passive listener・引き下げ更新とスワイプの同時発火は WebKit でないと再現できません。**実機で触る以外に方法がありません**
 - ~~**本物の Supabase / RLS 環境**~~ → **依然として未検証。** ローカルの PostgreSQL 16 に `auth.uid()` と anon/authenticated ロールの shim を当てた代用で確認しただけで、本番の RLS の効き方（`security definer` 越しの読み取り範囲）は SQL を読んだだけです。**SQL Editor に貼って他人のデータが読めないことを確かめるスクリプトを用意する**のが次の一手（未着手）
 - ~~**真の圏外**~~ → **検証済み。問題なし。** 下記参照
-- ~~**Gemini のレシート読み取り**~~ → **凍結の方針**（保留中。下記「保留にしていること」）
+- ~~**Gemini のレシート読み取り**~~ → **凍結済み（2026-09-13）。** 作業ツリーから削除しました（下記「保留にしていること」）
 - ~~**分割保存時の Discord 通知の数**~~ → **検証済み。3通飛ぶことを実測。** 直すかは保留（下記）
 
 #### 真の圏外（検証済み・問題なし）
@@ -218,8 +218,8 @@ BOM 付き UTF-8・15列で、カテゴリ ID や分割の束ねも落として�
 
 ### セキュリティの残件
 
-- **`<user>.github.io` のオリジン共有** — 同じ GitHub アカウントで第三者のコードを含む Pages を1つでも公開すると、そこから Gemini キー・Discord Webhook URL・Supabase のセッションが読めます。**独自ドメインに移すのが確実**
-  - Webhook URL を Supabase(`discord_settings`)にも置くようにしましたが、**この危険は増えていません**。同じオリジンから Supabase のセッションが読めるなら、そもそも RLS 越しに何でも読めるからです。むしろ端末側は localStorage の控えだけになり、ログアウトの後始末で消せるようになりました。Gemini の APIキーは同期していません(撮るのはスマホだけで、鍵を持ち歩く必要がないため)
+- **`<user>.github.io` のオリジン共有** — 同じ GitHub アカウントで第三者のコードを含む Pages を1つでも公開すると、そこから Discord Webhook URL・Supabase のセッションが読めます。**独自ドメインに移すのが確実**
+  - Webhook URL を Supabase(`discord_settings`)にも置くようにしましたが、**この危険は増えていません**。同じオリジンから Supabase のセッションが読めるなら、そもそも RLS 越しに何でも読めるからです。むしろ端末側は localStorage の控えだけになり、ログアウトの後始末で消せるようになりました。**端末に残っていた Gemini の APIキーは、レシート読み取りの凍結にあわせて起動時に消すようにしました**（下記「保留にしていること」）。オリジンから読める鍵がその分1つ減っています
 - **Supabase の `Authentication → URL Configuration` の Redirect URLs** — ワイルドカードや不要なドメインが入っていないか一度確認すること。コード側は自分のオリジンしか送らないので、リスクは Supabase 側の設定にのみ存在する
 - **`npm audit` で6件**（vitest / vite / esbuild ほか）— **すべて開発用の依存**で、公開される `dist/` には1バイトも入りません。実際に意味があるのは「`npm run dev` 中に悪意あるサイトを別タブで開くと開発サーバーからソースを読まれうる」1件だけ。vite 5→7、vitest 2→3.2.6 はいずれも破壊的変更を含むので急ぐ必要はない
 
@@ -249,20 +249,39 @@ BOM 付き UTF-8・15列で、カテゴリ ID や分割の束ねも落として�
 
 まとめる場合の懸念: `buildPartnerOpMessage` の「1 op = 1通」という単純さが崩れ、**分割の一部だけ送信に失敗したときの扱い**を決める必要があります。
 
-### Gemini のレシート読み取りを凍結する
+### Gemini のレシート読み取りを凍結する → **凍結済み（2026-09-13）**
 
-ほとんど使っていないため。**方針は「git のタグで印を打ってから作業ツリーから消す」**（`archive/` フォルダに残すと、ビルドもテストもされないコードを抱え続け、依存の更新に追随せず腐ります。タグなら**その時点で確実に動いていた状態**がテストごと保存され、`git show archive/receipt-scan:src/lib/receiptScan.ts` で取り出せます）。
+ほとんど使っていないため、作業ツリーから削除しました。**`docs/feature-research.md` の機能060 / 064 の記述は調査記録なので触っていません**（あれは「世の中の家計簿アプリにどんな機能があるか」の記録で、このアプリの実装状況ではありません）。
 
-削除対象:
+#### 戻したいときは `490f93c` から取り出す
+
+**削除前のコミットは `490f93c`**（PR #33 のマージ）です。ファイル単位でそのまま取り出せます。
+
+```
+git show 490f93c:src/lib/receiptScan.ts
+git show 490f93c:src/components/GeminiKeySheet.tsx
+git show 490f93c -- src/components/InputTab.tsx   # 参照していた側の差分
+```
+
+**当初の方針だった「git のタグで印を打つ」はできませんでした。** このリポジトリは作業用ブランチ以外への push が制限されていて、`git push origin archive/receipt-scan` が通りません。**次に同じことをする人は、タグを試さずにコミットハッシュを控えてください**（`archive/` フォルダに残す案を採らなかった理由は変わりません。ビルドもテストもされないコードは依存の更新に追随せず腐ります）。
+
+#### 消したもの
 
 | 種別 | 対象 |
 |---|---|
-| 丸ごと削除 | `src/lib/receiptScan.ts` / `receiptBatch.ts` とテスト、`src/components/GeminiKeySheet.tsx` / `ReceiptBatchSheet.tsx` |
-| 参照を外す | `InputTab.tsx`(19箇所) / `TransactionForm.tsx` / `MainScreen.tsx` / `errorGuidance.ts` / `localData.ts` / `tags.ts` |
-| CSS | `settings.css`(18) / `styles.css` / `desktop.css` |
-| ドキュメント | `README.md` / この文書（`docs/feature-research.md` は**調査記録なので触らない**） |
+| 丸ごと削除 | `src/lib/receiptScan.ts` / `receiptBatch.ts` とそのテスト、`src/components/GeminiKeySheet.tsx` / `ReceiptBatchSheet.tsx` |
+| 参照を外す | `InputTab.tsx`（読み取りの導線・キー設定シート・連続撮影シート）、`TransactionForm.tsx`（`FormPrefill.date` は渡す側が居なくなったので削除）、`MainScreen.tsx` / `errorGuidance.ts` / `localData.ts` / `tags.ts`（いずれもコメントのみ） |
+| CSS | `settings.css`（`.gemini-*` と `.batch-*`）/ `styles.css`（`.scan-*`）/ `desktop.css`（hover 指定） |
+| CSP | `index.html` から `connect-src` の `https://generativelanguage.googleapis.com` と、`img-src` の `blob:`（読み取り画像の `<img>` フォールバック用だった） |
+| ドキュメント | `README.md`（「レシート読み取りの設定」の節ごと）/ この文書 |
 
-**端末に残る API キーの後始末を忘れないこと。** コードを消しても `kakeibo.geminiApiKey` / `kakeibo.geminiModel` は各端末の localStorage に残り続けます。使わない機能のために鍵を端末に残すのは損なので、次回起動時に消す処理を入れること（`localData.ts` に掃除の仕組みがあります）。
+`errorGuidance.ts` の `describeUnknownError`（日本語の文言をそのまま通す仕組み）と `tags.ts`、`localData.ts` の一括削除は**他の機能でも使う共通の仕組み**なので、Gemini に触れたコメントと例示だけを差し替えて残しています。
+
+#### 端末に残った APIキーの後始末
+
+コードを消しても `kakeibo.geminiApiKey` / `kakeibo.geminiModel` は各端末の localStorage に残り続けるため、**起動のたびにこの2つだけを名指しで消す** `clearRetiredKeys()` を `localData.ts` に置き、`main.tsx` の先頭から呼んでいます。消すだけなので何度走っても同じで、他の `kakeibo.*`（接続設定・目隠し・未同期の記録）は1つも巻き込みません（`localData.test.ts` で固定）。
+
+**このコードは、使っている端末（iPhone と PC）が一度ずつアプリを起動すれば要らなくなります。** そのあとは `RETIRED_KEYS` / `clearRetiredKeys` と `main.tsx` の呼び出し1行、対応するテストをまとめて消してください。消し忘れても害は「毎回 `removeItem` が2回空振りする」だけです。
 
 ---
 

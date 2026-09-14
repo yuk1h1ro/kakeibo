@@ -1,15 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import TransactionForm, { type DatePrefill, type FormPrefill } from './TransactionForm'
-import GeminiKeySheet from './GeminiKeySheet'
-import ReceiptBatchSheet from './ReceiptBatchSheet'
 import RecategorizeSheet from './RecategorizeSheet'
 import TripModeCard from './TripModeCard'
 import { todayISO, yen } from '../lib/format'
 import { categoryLabel, resolveCategoryVisual, useCategories } from '../lib/categories'
 import { CategoryVisualBadge } from './categoryIcons'
-import { IconGear } from './icons'
-import { hasGeminiKey, scanReceipt } from '../lib/receiptScan'
 import {
   normalizeStoreName,
   rememberStoreCategory,
@@ -27,7 +23,6 @@ import type { Transaction } from '../lib/types'
 import { withCategory } from '../lib/txActions'
 import type { TransactionInput, useTransactions } from '../hooks/useTransactions'
 import '../ledger.css'
-import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
 
 type Store = ReturnType<typeof useTransactions>
 
@@ -58,15 +53,6 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
   const templates = useTransactionTemplates()
   const [recategorize, setRecategorize] = useState<RecategorizeTarget | null>(null)
 
-  // ---------- レシート読み取り ----------
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [scanning, setScanning] = useState(false)
-  const [scanError, setScanError] = useState<string | null>(null)
-  const [scanNote, setScanNote] = useState(false)
-  const noteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [showGeminiSheet, setShowGeminiSheet] = useState(false)
-  const [showBatchSheet, setShowBatchSheet] = useState(false)
-
   // 残高の計算は partnerBalance.ts の純関数に一本化してある(画面ごとに書かない)
   const balance = partnerBalance(store.transactions)
   const wording = balanceWording(balance)
@@ -94,7 +80,7 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
   const handlePartnerImpactChange = useCallback((n: number) => setPendingPartner(n), [])
 
   // カレンダーから来たときは、入力フォームまで運んであげる
-  // (残高カードやレシートの導線が先にあるので、そのままだと入力欄が画面外にある)
+  // (残高カードや旅行モードが先にあるので、そのままだと入力欄が画面外にある)
   useEffect(() => {
     if (!datePrefill) return
     formCardRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
@@ -140,74 +126,6 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
     setRecategorize({ storeName: input.store, category: input.category, targets })
   }
 
-  // キー未設定なら設定シートへ誘導、設定済みならそのままカメラを起動する。
-  // 設定済みのときの設定シートへの導線は、隣の歯車ボタン(常設)が担う
-  const handleScanTap = () => {
-    if (!hasGeminiKey()) {
-      setShowGeminiSheet(true)
-      return
-    }
-    fileInputRef.current?.click()
-  }
-
-  const handleBatchTap = () => {
-    if (!hasGeminiKey()) {
-      setShowGeminiSheet(true)
-      return
-    }
-    setShowBatchSheet(true)
-  }
-
-  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    // 同じ画像をもう一度選び直せるように毎回リセット
-    e.target.value = ''
-    if (!file) return
-
-    setScanning(true)
-    setScanError(null)
-    setScanNote(false)
-    try {
-      const result = await scanReceipt(file)
-
-      if (result.store === null && result.total === null && result.date === null) {
-        setScanError('レシートを読み取れませんでした。明るい場所でもう一度撮影してください')
-        return
-      }
-
-      // 読めた項目だけフォームに反映(カテゴリは店名から学習済みならフォーム側で入る)
-      setPrefill((prev) => ({
-        nonce: (prev?.nonce ?? 0) + 1,
-        amount: result.total ?? 0,
-        category: null,
-        memo: '',
-        store: result.store ?? '',
-        partner_amount: 0,
-        ...(result.date ? { date: result.date } : {}),
-      }))
-
-      // 読めなかった項目のフィードバック(1行)
-      const missing: string[] = []
-      if (result.total === null) missing.push('合計金額')
-      if (result.store === null) missing.push('店名')
-      if (result.date === null) missing.push('日付')
-      setScanError(
-        missing.length > 0 ? `${missing.join('・')}を読み取れませんでした。手入力してください` : null
-      )
-
-      // 確認のうながし(数秒で消えるmutedな注意)
-      setScanNote(true)
-      if (noteTimerRef.current) clearTimeout(noteTimerRef.current)
-      noteTimerRef.current = setTimeout(() => setScanNote(false), 6000)
-    } catch (err) {
-      // レシート読み取りの自前の文言 (上限・読み取り失敗など) はそのまま通り、
-      // 生のサーバーエラーだけが原因と次の行動に置き換わる (機能161)
-      setScanError(describeUnknownError(err, isOnlineNow()))
-    } finally {
-      setScanning(false)
-    }
-  }
-
   return (
     <>
       {/* 旅行モード。オンの間は普段と違うタグが自動で付くので、
@@ -239,47 +157,6 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
                 : `残りが ${yen(threshold)} を下回りました。`}
             </span>
             <strong>次の預かりをお願いするタイミングです</strong>
-          </p>
-        )}
-      </div>
-
-      <div className="scan-block">
-        <div className="scan-row">
-          <button type="button" className="scan-btn" onClick={handleScanTap} disabled={scanning}>
-            {scanning ? (
-              <>
-                <span className="scan-spinner" aria-hidden="true" />
-                読み取り中…
-              </>
-            ) : (
-              <>📷 レシートを読み取る</>
-            )}
-          </button>
-          <button
-            type="button"
-            className="scan-settings-btn"
-            aria-label="レシート読み取りの設定"
-            onClick={() => setShowGeminiSheet(true)}
-            disabled={scanning}
-          >
-            <IconGear />
-          </button>
-        </div>
-        <button type="button" className="btn-ghost scan-batch-btn" onClick={handleBatchTap} disabled={scanning}>
-          レシートを続けて撮影する(最大5枚)
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          style={{ display: 'none' }}
-          onChange={(e) => void handleFileSelected(e)}
-        />
-        {scanError && <p className="error-text scan-feedback">{scanError}</p>}
-        {scanNote && (
-          <p className="muted scan-feedback">
-            読み取り結果を確認して、必要なら修正してから保存してください
           </p>
         )}
       </div>
@@ -358,26 +235,6 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
             ))}
           </div>
         </div>
-      )}
-
-      {showGeminiSheet && (
-        <GeminiKeySheet
-          onClose={() => setShowGeminiSheet(false)}
-          onSaved={() => setShowGeminiSheet(false)}
-        />
-      )}
-
-      {showBatchSheet && (
-        <ReceiptBatchSheet
-          onClose={() => setShowBatchSheet(false)}
-          onSaveAll={async (inputs) => {
-            for (const input of inputs) {
-              await store.add(input)
-              await learnFromInput(input)
-            }
-            noteSaved()
-          }}
-        />
       )}
 
       {recategorize && (

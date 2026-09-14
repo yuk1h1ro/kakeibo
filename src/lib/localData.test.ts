@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   KEEP_ON_SIGN_OUT,
+  RETIRED_KEYS,
   cleanupAfterSignOut,
   clearLocalData,
+  clearRetiredKeys,
   clearSupabaseSession,
   keysToClear,
   supabaseSessionKeys,
@@ -27,7 +29,9 @@ function fakeStorage(initial: Record<string, string> = {}): Storage {
 
 const stored = {
   'kakeibo.txCache': '[]',
+  // 凍結したレシート読み取りが置いたまま端末に残っている鍵
   'kakeibo.geminiApiKey': 'AIza...',
+  'kakeibo.geminiModel': 'models/gemini-2.0-flash',
   'kakeibo.discordWebhook': 'https://discord.com/api/webhooks/x',
   'kakeibo.savedFilters': '[]',
   'kakeibo.supabaseUrl': 'https://x.supabase.co',
@@ -42,7 +46,7 @@ describe('keysToClear', () => {
     const got = keysToClear(Object.keys(stored), [])
     expect(got).not.toContain('other-app.setting')
     expect(got).not.toContain('sb-abcdef-auth-token')
-    expect(got).toContain('kakeibo.geminiApiKey')
+    expect(got).toContain('kakeibo.discordWebhook')
   })
 
   it('残すキーは対象から外す', () => {
@@ -66,7 +70,7 @@ describe('clearLocalData / clearSupabaseSession', () => {
   it('消す対象だけを消す', () => {
     const storage = fakeStorage(stored)
     clearLocalData(KEEP_ON_SIGN_OUT, storage)
-    expect(storage.getItem('kakeibo.geminiApiKey')).toBeNull()
+    expect(storage.getItem('kakeibo.discordWebhook')).toBeNull()
     expect(storage.getItem('kakeibo.txCache')).toBeNull()
     expect(storage.getItem('kakeibo.supabaseUrl')).toBe('https://x.supabase.co')
     expect(storage.getItem('other-app.setting')).toBe('1')
@@ -111,13 +115,13 @@ describe('cleanupAfterSignOut', () => {
   it('確認でキャンセルすれば何も消さない', () => {
     const storage = stubQueue([])
     expect(cleanupAfterSignOut({ confirm: () => false, alert: () => {} }, storage)).toBe('kept')
-    expect(storage.getItem('kakeibo.geminiApiKey')).toBe('AIza...')
+    expect(storage.getItem('kakeibo.discordWebhook')).toBe('https://discord.com/api/webhooks/x')
   })
 
   it('確認して OK なら鍵とキャッシュを消す(接続設定は残す)', () => {
     const storage = stubQueue([])
     expect(cleanupAfterSignOut({ confirm: () => true, alert: () => {} }, storage)).toBe('cleared')
-    expect(storage.getItem('kakeibo.geminiApiKey')).toBeNull()
+    expect(storage.getItem('kakeibo.savedFilters')).toBeNull()
     expect(storage.getItem('kakeibo.discordWebhook')).toBeNull()
     expect(storage.getItem('kakeibo.txCache')).toBeNull()
     expect(storage.getItem('kakeibo.supabaseUrl')).toBe('https://x.supabase.co')
@@ -136,5 +140,66 @@ describe('ログアウトの意図', () => {
     expect(takeSignOutRequest()).toBe(true)
     // 2回目は倒れている(1回のログアウトで2回後始末しない)
     expect(takeSignOutRequest()).toBe(false)
+  })
+})
+
+// ============================================================
+// 凍結したレシート読み取り (Gemini) が端末に残した鍵の後始末。
+// 起動のたびに走るので、「消すべき物だけを消す」「何度走っても同じ」を固定する。
+// この節は、全端末が一度起動して鍵が消えたあと、本体の実装ごと消してよい。
+// ============================================================
+describe('clearRetiredKeys', () => {
+  it('凍結した機能の鍵(APIキーとモデル名)を消す', () => {
+    const storage = fakeStorage(stored)
+    expect(clearRetiredKeys(storage).sort()).toEqual([...RETIRED_KEYS].sort())
+    expect(storage.getItem('kakeibo.geminiApiKey')).toBeNull()
+    expect(storage.getItem('kakeibo.geminiModel')).toBeNull()
+  })
+
+  it('他の kakeibo.* は1つも巻き込まない(接続設定・目隠し・未同期の記録)', () => {
+    const storage = fakeStorage({ ...stored, 'kakeibo.pendingOps': '[{"opId":"o1"}]' })
+    clearRetiredKeys(storage)
+    expect(storage.getItem('kakeibo.supabaseUrl')).toBe('https://x.supabase.co')
+    expect(storage.getItem('kakeibo.supabaseAnonKey')).toBe('anon')
+    expect(storage.getItem('kakeibo.amountMask')).toBe('on')
+    expect(storage.getItem('kakeibo.txCache')).toBe('[]')
+    expect(storage.getItem('kakeibo.discordWebhook')).toBe('https://discord.com/api/webhooks/x')
+    expect(storage.getItem('kakeibo.savedFilters')).toBe('[]')
+    // この端末にしかない記録は、掃除のついでに消えたりしない
+    expect(storage.getItem('kakeibo.pendingOps')).toBe('[{"opId":"o1"}]')
+    // 他のアプリのキーも触らない
+    expect(storage.getItem('other-app.setting')).toBe('1')
+  })
+
+  it('起動のたびに走っても害がない(2回目以降は何も消さない)', () => {
+    const storage = fakeStorage(stored)
+    expect(clearRetiredKeys(storage)).toHaveLength(RETIRED_KEYS.length)
+    expect(clearRetiredKeys(storage)).toEqual([])
+    expect(clearRetiredKeys(storage)).toEqual([])
+  })
+
+  it('鍵がもともと無い端末では何も起きない', () => {
+    const storage = fakeStorage({ 'kakeibo.txCache': '[]' })
+    expect(clearRetiredKeys(storage)).toEqual([])
+    expect(storage.getItem('kakeibo.txCache')).toBe('[]')
+  })
+
+  it('localStorage が使えない端末でも例外を外に出さない(起動を止めない)', () => {
+    const broken = {
+      get length() {
+        return 0
+      },
+      key: () => null,
+      getItem: () => {
+        throw new Error('SecurityError')
+      },
+      setItem: () => {},
+      removeItem: () => {
+        throw new Error('SecurityError')
+      },
+      clear: () => {},
+    } as unknown as Storage
+    expect(() => clearRetiredKeys(broken)).not.toThrow()
+    expect(clearRetiredKeys(broken)).toEqual([])
   })
 })
