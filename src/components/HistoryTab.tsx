@@ -312,10 +312,18 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
   // この不具合が表に出た。測っておけば、次に中身が変わっても勝手に追従する。
   const barRef = useRef<HTMLDivElement>(null)
   const [barH, setBarH] = useState(0)
-  // バーが出ているか。余白を付ける条件はこちらで決め、実測値(barH)は幅の調整だけに使う。
+  // **どの** バーが出ているか。「出ているか」の真偽ではなく種類で持つ。
+  // 複数選択バー(2段)と元に戻すバー(1段)は高さが違ううえ、削除すると
+  // 片方からもう片方へ直接入れ替わる。真偽で見ていると入れ替わりで測り直しが走らず、
+  // 前のバーを見ていた ResizeObserver が画面から外れた要素を掴んだまま残る。
+  // (実際そうなっていて、入れ替わったあとは実測が二度と更新されず、
+  //  CSS の既定値 118px 頼みに戻っていた。バーが 174px に伸びた場面で
+  //  最後のカードがバーの下に 44px 潜った)
+  const barKind = selectMode ? 'select' : undoTxs ? 'undo' : 'none'
+  // 余白を付ける条件はこちら。実測値(barH)は高さの調整だけに使う。
   // 実測は配置の無い環境(テストの jsdom)では 0 になるので、条件に混ぜると
   // 「バーが出ているのに余白が付かない」をテストで捕まえられなくなる
-  const barShown = selectMode || (undoTxs !== null && undoTxs !== undefined)
+  const barShown = barKind !== 'none'
   useEffect(() => {
     const el = barRef.current
     if (el === null) {
@@ -331,10 +339,10 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
-    // バーの出入りでだけ測り直す。依存を空にすると毎レンダリングで
+    // 測り直すのは、出ているバーが変わったときだけ。依存を空にすると毎レンダリングで
     // getBoundingClientRect が走り、引き下げ更新の最中は指を動かすたびに測ることになる。
-    // 中身が伸びた場合(文字サイズ・件数の折り返し)は ResizeObserver が拾う
-  }, [barShown])
+    // 同じバーのまま中身が伸びた場合(文字サイズ・件数の折り返し)は ResizeObserver が拾う
+  }, [barKind])
   const settleRef = useRef<number | null>(null)
 
   const doRefresh = useCallback(async () => {
