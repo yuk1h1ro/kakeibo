@@ -1,5 +1,13 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { cleanupAfterSignOut, markSignOutRequested, takeSignOutRequest, clearLocalData, clearSupabaseSession } from './localData'
+import {
+  cleanupAfterSignOut,
+  markSignOutRequested,
+  takeSignOutRequest,
+  clearLocalData,
+  clearSupabaseSession,
+  signOutIntentText,
+  unsyncedCount,
+} from './localData'
 import {
   createRefresher,
   createSelfHealingFetch,
@@ -141,7 +149,15 @@ export function clearConfig(): void {
 }
 
 /**
- * 利用者が押したログアウト。
+ * 利用者が押したログアウト。**確認は二段。**
+ *
+ *   1段目(ここ)  … 「ログアウトしますか?」
+ *   2段目(後始末)… 「端末に残っているデータも消しますか?」
+ *
+ * 1段目が無かったころは、ヘッダーの小さなボタンに指が触れた瞬間に
+ * ログアウトが済み、次に出るのがいきなり消去の可否だった。
+ * **押すつもりが無かった人に消去を聞く** 並びになっていて、続けて OK を
+ * 押せば端末内が初期化される。段を分けて、まず「押したかどうか」を確かめる。
  *
  * ここを通ったときだけ端末内の後始末をする。素の signOut() を直に呼ぶと
  * 期限切れによる SIGNED_OUT と区別が付かず、何もしていないのに消去の
@@ -151,11 +167,21 @@ export function clearConfig(): void {
  * **このボタンを押さないと直らない場面は作らないこと。** 押した先で
  * 端末内の初期化を聞かれるボタンなので、期限切れのような「勝手に直せる
  * こと」の案内で押させてはいけない (authSession.ts / errorGuidance.ts)。
+ *
+ * @returns 'signed-out' ログアウトした / 'cancelled' 1段目で止めた
  */
-export async function signOutByUser(supabase: SupabaseClient): Promise<void> {
+export async function signOutByUser(
+  supabase: SupabaseClient,
+  // ダイアログは差し替えられるようにしてある(テストと、将来 UI を変えるとき用)
+  io: { confirm: (message: string) => boolean } = { confirm: (m) => window.confirm(m) }
+): Promise<'signed-out' | 'cancelled'> {
+  // 1段目。ここで止めたときは **セッションにも端末にも一切触らない**
+  if (!io.confirm(signOutIntentText(unsyncedCount()))) return 'cancelled'
+
   markSignOutRequested()
   const { error } = await supabase.auth.signOut()
   // 失敗して SIGNED_OUT が飛ばないときは、立てた意図を倒しておく
   // (次に SIGNED_OUT が来たときに後始末が誤発火しないようにする)
   if (error) takeSignOutRequest()
+  return 'signed-out'
 }

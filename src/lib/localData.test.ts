@@ -3,6 +3,7 @@ import {
   KEEP_ON_SIGN_OUT,
   RETIRED_KEYS,
   cleanupAfterSignOut,
+  signOutIntentText,
   clearLocalData,
   clearRetiredKeys,
   clearSupabaseSession,
@@ -125,6 +126,32 @@ describe('cleanupAfterSignOut', () => {
     expect(storage.getItem('kakeibo.discordWebhook')).toBeNull()
     expect(storage.getItem('kakeibo.txCache')).toBeNull()
     expect(storage.getItem('kakeibo.supabaseUrl')).toBe('https://x.supabase.co')
+  })
+})
+
+describe('signOutIntentText — 1段目の確認', () => {
+  it('まず「ログアウトするか」だけを聞く(消すかどうかはまだ聞かない)', () => {
+    const text = signOutIntentText(0)
+    expect(text).toContain('ログアウトしますか')
+    // ここで消去の可否まで聞いてしまうと、段を分けた意味が無くなる
+    expect(text).not.toContain('消しますか')
+    expect(text).toContain('このあと改めて確認')
+  })
+
+  it('サーバー上の記録が消えないことを、押す前に書く', () => {
+    expect(signOutIntentText(0)).toContain('サーバー上の記録は1件も消えません')
+  })
+
+  it('期限切れで押す必要が無いことを書く(ここが元の誤誘導の入口だった)', () => {
+    expect(signOutIntentText(0)).toContain('有効期限はありません')
+  })
+
+  it('未同期があるときは件数を出す', () => {
+    expect(signOutIntentText(3)).toContain('未同期の記録が 3件')
+  })
+
+  it('未同期が無いときは、無い話を読ませない', () => {
+    expect(signOutIntentText(0)).not.toContain('未同期')
   })
 })
 
