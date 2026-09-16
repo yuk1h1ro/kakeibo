@@ -21,7 +21,7 @@ export type GuidanceKind =
   | 'migration'
   /** 接続設定(Supabase の URL / anon キー)が違う */
   | 'connection'
-  /** ログインの期限切れ・権限(RLS) */
+  /** ログインの情報が古い・権限(RLS) */
   | 'auth'
   /** 通信できていない */
   | 'offline'
@@ -225,7 +225,7 @@ function isApiKeyError(text: string): boolean {
   return /invalid api key|no api key|apikey/i.test(text)
 }
 
-/** ログインの期限切れ・トークン不正 */
+/** ログインのトークンが古い・不正 */
 function isJwtError(text: string): boolean {
   return /jwt|jws|token is expired|invalid claim|not authenticated/i.test(text)
 }
@@ -343,14 +343,20 @@ export function guidanceForServerError(err: ServerErrorLike, online = true): Gui
     }
   }
 
-  // 3. ログインの期限切れ・トークン不正
+  // 3. ログインのトークンが古い・不正
+  //
+  // ここまで来るのは「自動で直せなかった」ときだけ (authSession.ts が
+  // 期限切れは黙って更新して送り直す)。**ログアウトは案内しない。**
+  // 押した先で端末内のデータの初期化を聞かれるボタンなので、
+  // 待てば直ることの案内で押させてはいけない。
   if (isJwtError(text)) {
     return {
       kind: 'auth',
-      summary: 'ログインの有効期限が切れているようです。',
+      summary: 'ログインの情報が古くなっています(自動で更新を試みています)。',
       actions: [
-        '右上のログアウトを押してから、もう一度 Google でログインし直してください。',
-        'ログインし直しても直らないときは、Supabase の Authentication → URL Configuration の Site URL / Redirect URLs がこのアプリの URL になっているか確かめてください。',
+        'そのまま少し待つか、この画面を読み込み直してください。ログインしたまま直るので、ログアウトは押さないでください。',
+        '読み込み直しても直らないときだけ、もう一度 Google でログインし直してください。',
+        'それでも直らないときは、Supabase の Authentication → URL Configuration の Site URL / Redirect URLs がこのアプリの URL になっているか確かめてください。',
       ],
       detail,
     }
@@ -361,9 +367,9 @@ export function guidanceForServerError(err: ServerErrorLike, online = true): Gui
     return {
       kind: 'auth',
       summary:
-        'データベースに拒否されました。ログインが切れているか、Supabase 側の行レベルセキュリティ(RLS)の設定が入っていない可能性があります。',
+        'データベースに拒否されました。ログインの情報が古いか、Supabase 側の行レベルセキュリティ(RLS)の設定が入っていない可能性があります。',
       actions: [
-        'いったんログアウトして、もう一度 Google でログインし直してください。',
+        'まずこの画面を読み込み直してください(ログインの更新は自動で行われます。ログアウトを押す必要はありません)。',
         'それでも直らないときは、supabase/schema.sql を SQL Editor で実行し直して、RLS のポリシーが作られているか確かめてください。',
       ],
       detail,

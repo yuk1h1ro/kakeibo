@@ -163,10 +163,27 @@ describe('guidanceForServerError — 接続設定・ログイン', () => {
     expect(g.actions.join(' ')).toContain('接続設定')
   })
 
-  it('ログインの期限切れは、ログインし直す導線を出す', () => {
+  it('ログインの期限切れは、待つか読み込み直す導線を出す', () => {
     const g = guidanceForServerError({ message: 'JWT expired' })
     expect(g.kind).toBe('auth')
-    expect(g.actions.join(' ')).toContain('ログイン')
+    expect(g.actions.join(' ')).toContain('読み込み直')
+  })
+
+  // 押した先で端末内のデータの初期化を聞かれるボタンなので、
+  // 「待てば直ること」の案内で押させてはいけない (authSession.ts)
+  it('ログイン周りの案内で、ログアウトを押させない', () => {
+    const messages = [
+      'JWT expired',
+      'invalid claim: missing sub claim',
+      'permission denied for table transactions',
+    ]
+    for (const message of messages) {
+      const g = guidanceForServerError({ message })
+      expect(g.kind).toBe('auth')
+      // 「押さないでください」「押す必要はありません」は通す。
+      // 禁じたいのは押させる言い回し(「ログアウトを押してから」「ログアウトして」)
+      expect(`${g.summary} ${g.actions.join(' ')}`).not.toMatch(/ログアウト(を押して|して)/)
+    }
   })
 
   it('RLS で拒否されたときは、原因を1つに断定しない', () => {
