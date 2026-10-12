@@ -3,12 +3,20 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { signOutByUser } from './supabaseClient'
 import { takeSignOutRequest } from './localData'
+import { VAULT_KEY, readVault } from './sessionVault'
 
-/** signOut だけを持つ最小のクライアント */
+/** signOut / getSession だけを持つ最小のクライアント */
 function stubSupabase(error: { message: string } | null = null) {
   const signOut = vi.fn(async () => ({ error }))
-  return { client: { auth: { signOut } } as unknown as SupabaseClient, signOut }
+  // 失敗したとき = ログインが続いているとき、控えを書き戻すのに読む
+  const getSession = vi.fn(async () => ({
+    data: { session: { refresh_token: 'rt-now', user: { id: 'u1' } } },
+  }))
+  return { client: { auth: { signOut, getSession } } as unknown as SupabaseClient, signOut }
 }
+
+const putVault = () =>
+  localStorage.setItem(VAULT_KEY, JSON.stringify({ refreshToken: 'rt-1', userId: 'u1', savedAt: 'x' }))
 
 describe('signOutByUser — 確認は二段', () => {
   beforeEach(() => {
@@ -47,6 +55,31 @@ describe('signOutByUser — 確認は二段', () => {
     await expect(signOutByUser(client, { confirm: () => true })).resolves.toBe('signed-out')
     expect(signOut).toHaveBeenCalledOnce()
     expect(takeSignOutRequest()).toBe(true)
+  })
+
+  // 控えが残っていると、押したのに App が「勝手にログアウトされた」と見て戻してしまう
+  it('ログアウトしたらログインの控えも消す(勝手にログインし直さない)', async () => {
+    putVault()
+    const { client } = stubSupabase()
+
+    await signOutByUser(client, { confirm: () => true })
+    expect(readVault()).toBeNull()
+  })
+
+  it('1段目でキャンセルしたら、ログインの控えには触らない', async () => {
+    putVault()
+    const { client } = stubSupabase()
+
+    await signOutByUser(client, { confirm: () => false })
+    expect(readVault()?.refreshToken).toBe('rt-1')
+  })
+
+  it('ログアウトに失敗したら、控えを今のセッションで書き戻す(ログインは続いている)', async () => {
+    putVault()
+    const { client } = stubSupabase({ message: 'network' })
+
+    await signOutByUser(client, { confirm: () => true })
+    expect(readVault()?.refreshToken).toBe('rt-now')
   })
 
   it('ログアウトに失敗したら意図を倒す(あとで消去の確認が誤発火しない)', async () => {

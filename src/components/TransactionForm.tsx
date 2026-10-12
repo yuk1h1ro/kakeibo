@@ -4,7 +4,6 @@ import { CategoryVisualBadge } from './categoryIcons'
 import { daysAgoISO, formatDate, maskAmountsIn, todayISO, yen } from '../lib/format'
 import {
   EMPTY_CALC,
-  OP_LABEL,
   clearAll,
   pressBackspace,
   pressDigits,
@@ -17,6 +16,7 @@ import {
 } from '../lib/calc'
 import { useKeypadEnabled } from '../lib/keypadSettings'
 import AmountKeypad from './AmountKeypad'
+import AmountCalcBar from './AmountCalcBar'
 import AmountTaxKeys from './AmountTaxKeys'
 import AmountTextInput from './AmountTextInput'
 import { normalizeAmountInput } from '../lib/amountFormat'
@@ -144,6 +144,9 @@ const PAYER_OPTIONS: readonly { id: Payer; label: string }[] = [
 /** タグの候補に出す件数。多すぎると詳細欄が縦に伸びて入力の邪魔になる */
 const TAG_SUGGESTION_LIMIT = 8
 
+/** 自前テンキー・電卓が打ち込む先の金額欄 */
+type AmountTarget = 'amount' | 'partner'
+
 export default function TransactionForm({
   initial,
   submitLabel,
@@ -238,6 +241,12 @@ export default function TransactionForm({
     pendingValue: null,
     pendingOp: null,
   })
+  // 彼女の負担分の電卓。支払い金額とは別に持つ — 片方で打ちかけた式が
+  // もう片方の金額に混ざると、保存される金額が黙って変わってしまうため
+  const [partnerCalc, setPartnerCalc] = useState<{ pendingValue: number | null; pendingOp: CalcOp | null }>({
+    pendingValue: null,
+    pendingOp: null,
+  })
 
   // 感情スタンプ (機能219)。列が無い環境では導線ごと出さない
   const satisfactionAvailable = useSatisfactionAvailable()
@@ -260,7 +269,11 @@ export default function TransactionForm({
   // 自前テンキー(機能052)。タッチ端末では既定で有効、PC では OS のキーボードのまま
   const keypadEnabled = useKeypadEnabled()
   const [keypadOpen, setKeypadOpen] = useState(false)
+  // テンキーがどの金額欄に打ち込むか。パッドは画面の下に1枚だけなので、
+  // 開くたびにタップされた欄へ向け直す
+  const [keypadTarget, setKeypadTarget] = useState<AmountTarget>('amount')
   const amountRef = useRef<HTMLInputElement | null>(null)
+  const partnerRef = useRef<HTMLInputElement | null>(null)
   // プログラムからフォーカスするとき、onFocus 経由でテンキーが開くのを抑える印
   const silentFocusRef = useRef(false)
 
@@ -319,7 +332,7 @@ export default function TransactionForm({
   const focusAmount = () => {
     const el = amountRef.current
     if (!el) return
-    if (keypadEnabled) setKeypadOpen(true)
+    openKeypadFor('amount')
     el.focus({ preventScroll: true })
     const len = el.value.length
     el.setSelectionRange(len, len)
@@ -339,6 +352,13 @@ export default function TransactionForm({
     el.select() // 打ち直しがそのまま置き換えになる
     silentFocusRef.current = false
   }, [initial])
+
+  /** 自前テンキーを、タップされた金額欄に向けて開く。無効な端末では何もしない */
+  function openKeypadFor(target: AmountTarget) {
+    if (!keypadEnabled) return
+    setKeypadTarget(target)
+    setKeypadOpen(true)
+  }
 
   /** まだ何も打っていない = 次の段へ自動で送ってよい状態か (機能047) */
   const amountUntouched = amount === '' && calc.pendingOp === null
@@ -372,6 +392,7 @@ export default function TransactionForm({
   // 編集モーダルの対象が変わったら計算途中の状態を持ち越さない
   useEffect(() => {
     setCalc(EMPTY_CALC)
+    setPartnerCalc(EMPTY_CALC)
   }, [initial])
 
   // テンキーの高さぶんの余白を本文に持たせる(保存ボタンがパッドの下に隠れないように)
@@ -396,6 +417,7 @@ export default function TransactionForm({
       // (閉じると押した直後に画面が跳ねて、出したばかりの結果が読めない)
       if (
         target === amountRef.current ||
+        target === partnerRef.current ||
         target.closest('.keypad-dock') ||
         target.closest('.save-continue') ||
         target.closest('.store-chip') ||
@@ -413,6 +435,7 @@ export default function TransactionForm({
   useEffect(() => {
     if (!prefill) return
     setCalc(EMPTY_CALC) // 計算途中の状態が混ざらないようにリセット
+    setPartnerCalc(EMPTY_CALC)
     setAmount(prefill.amount > 0 ? String(prefill.amount) : '')
     setMemo(prefill.memo)
     setStore(prefill.store)
@@ -455,7 +478,16 @@ export default function TransactionForm({
   // ＝ の押し忘れに備え、保留中の計算を評価した値を「確定した金額」として扱う
   const resolvedAmount = resolveForSubmit(calcState).input
   const amountNum = Number(resolvedAmount)
-  const partnerNum = withPartner ? Number(partnerAmount || 0) : 0
+  const partnerCalcState: CalcState = {
+    input: partnerAmount,
+    pendingValue: partnerCalc.pendingValue,
+    pendingOp: partnerCalc.pendingOp,
+  }
+  // 彼女の負担分も、＝ の押し忘れは保留中の計算を評価した値で扱う。
+  // 保存される額・残高の見込み・「支払い金額を超えていないか」の判定が
+  // すべてこの1つの値を見るので、どこか1か所だけ式のまま、ということが起きない
+  const resolvedPartner = resolveForSubmit(partnerCalcState).input
+  const partnerNum = withPartner ? Number(resolvedPartner || 0) : 0
 
   // 機能018: 彼女が実際に払った額。
   // 「彼女が全額」は金額を打ち直させない(支払い総額と必ず一致させる)
@@ -526,43 +558,38 @@ export default function TransactionForm({
     )
   }
 
-  const runOperator = (op: CalcOp) => {
-    const next = pressOperator(calcState, op)
-    setAmount(next.input)
-    setCalc({ pendingValue: next.pendingValue, pendingOp: next.pendingOp })
+  // 電卓の操作は、どの金額欄でも calc.ts の同じ状態機械を通す(挙動を1本に保つため)。
+  // 欄ごとに「入力中の文字列」と「保留中の式」を持ち、ここで取り替えるだけ。
+  // 行き先は必ず呼び出し側が名指しする — 省略できるようにすると、
+  // onClick にそのまま渡したときにイベントが行き先として紛れ込む
+  const calcOf = (target: AmountTarget): CalcState =>
+    target === 'partner' ? partnerCalcState : calcState
+
+  const applyTo = (target: AmountTarget, next: CalcState) => {
+    const pending = { pendingValue: next.pendingValue, pendingOp: next.pendingOp }
+    if (target === 'partner') {
+      setPartnerAmount(next.input)
+      setPartnerCalc(pending)
+    } else {
+      setAmount(next.input)
+      setCalc(pending)
+    }
   }
 
-  const runEquals = () => {
-    const next = pressEquals(calcState)
-    setAmount(next.input)
-    setCalc({ pendingValue: next.pendingValue, pendingOp: next.pendingOp })
-  }
+  const runOperator = (target: AmountTarget, op: CalcOp) => applyTo(target, pressOperator(calcOf(target), op))
+  const runEquals = (target: AmountTarget) => applyTo(target, pressEquals(calcOf(target)))
+  // ％キーと「税込にする」も同じ状態機械を通す
+  const runPercent = (target: AmountTarget) => applyTo(target, pressPercent(calcOf(target)))
+  const runClear = (target: AmountTarget) => applyTo(target, clearAll())
+  // テンキーの数字も演算子と同じ状態機械を通す
+  const runDigits = (target: AmountTarget, digits: string) =>
+    applyTo(target, pressDigits(calcOf(target), digits))
+  const runBackspace = (target: AmountTarget) => applyTo(target, pressBackspace(calcOf(target)))
 
-  // ％キーと「税込にする」も同じ状態機械を通す(挙動を1本に保つため)
-  const runPercent = () => {
-    const next = pressPercent(calcState)
-    setAmount(next.input)
-    setCalc({ pendingValue: next.pendingValue, pendingOp: next.pendingOp })
-  }
-
-  const applyCalcState = (next: CalcState) => {
-    setAmount(next.input)
-    setCalc({ pendingValue: next.pendingValue, pendingOp: next.pendingOp })
-  }
-
-  const runClear = () => {
-    const next = clearAll()
-    setAmount(next.input)
-    setCalc({ pendingValue: next.pendingValue, pendingOp: next.pendingOp })
-  }
-
-  // テンキーの数字も演算子と同じ状態機械を通す(挙動を1本に保つため)
-  const runDigits = (digits: string) => {
-    setAmount(pressDigits(calcState, digits).input)
-  }
-
-  const runBackspace = () => {
-    setAmount(pressBackspace(calcState).input)
+  /** 「半分」「全額」のように値を直接入れるとき。打ちかけの式は捨てる */
+  const setPartnerDirect = (raw: string) => {
+    setPartnerAmount(raw)
+    setPartnerCalc(EMPTY_CALC)
   }
 
   // 入力中の1件が残高に与える影響額を親に通知(残高カードの見込み表示用)。
@@ -584,14 +611,13 @@ export default function TransactionForm({
       onPartnerImpactChange(-sum)
       return
     }
-    const owed = withPartner ? Number(partnerAmount || 0) : 0
+    const owed = partnerNum
     const paid = Number.isFinite(partnerPaidNum) ? partnerPaidNum : 0
     const impact = paid - (Number.isFinite(owed) && owed > 0 ? owed : 0)
     onPartnerImpactChange(Number.isFinite(impact) ? impact : 0)
   }, [
     isExpense,
-    withPartner,
-    partnerAmount,
+    partnerNum,
     partnerPaidNum,
     splitting,
     splitParts,
@@ -675,6 +701,10 @@ export default function TransactionForm({
       setAmount(resolvedAmount)
       setCalc(EMPTY_CALC)
     }
+    if (partnerCalc.pendingOp !== null) {
+      setPartnerAmount(resolvedPartner)
+      setPartnerCalc(EMPTY_CALC)
+    }
     setBusy(true)
     setError(null)
     try {
@@ -713,6 +743,9 @@ export default function TransactionForm({
         setStore('')
         setWithPartner(false)
         setPartnerAmount('')
+        setPartnerCalc(EMPTY_CALC)
+        // 彼女の負担分の欄は閉じるので、パッドは支払い金額へ戻す
+        setKeypadTarget('amount')
         setAutoCategory(null)
         setAutoRivals([])
         setSatisfaction(null)
@@ -960,73 +993,45 @@ export default function TransactionForm({
             onChange={setAmount}
             onFocus={() => {
               if (silentFocusRef.current) return
-              if (keypadEnabled) setKeypadOpen(true)
+              openKeypadFor('amount')
             }}
             // すでにフォーカスがある(編集シートを開いた直後など)ときは
             // onFocus が来ないので、タップでも開けるようにしておく
-            onClick={() => keypadEnabled && setKeypadOpen(true)}
+            onClick={() => openKeypadFor('amount')}
           />
-          <button type="button" className="amount-clear" aria-label="金額をクリア" onClick={runClear}>
+          <button
+            type="button"
+            className="amount-clear"
+            aria-label="金額をクリア"
+            onClick={() => runClear('amount')}
+          >
             C
           </button>
         </div>
-        <div className="calc-bar">
-          <div className="calc-status" aria-live="polite">
-            {calc.pendingOp !== null && calc.pendingValue !== null && (
-              <span className="calc-pending">
-                {calc.pendingValue.toLocaleString('ja-JP')} {OP_LABEL[calc.pendingOp]}
-              </span>
-            )}
-            {amountNum < 0 && <span className="calc-warn">マイナスの金額は保存できません</span>}
-          </div>
-          {/* テンキーを開いている間は同じ演算子が下に出るので、こちらは畳む */}
-          {!keypadOpen && (
-            <div className="calc-keys">
-              <button type="button" className="calc-key" aria-label="足す" onClick={() => runOperator('+')}>
-                ＋
-              </button>
-              <button type="button" className="calc-key" aria-label="引く" onClick={() => runOperator('-')}>
-                −
-              </button>
-              <button type="button" className="calc-key" aria-label="掛ける" onClick={() => runOperator('×')}>
-                ×
-              </button>
-              <button
-                type="button"
-                className="calc-key calc-key-equals"
-                aria-label="計算する"
-                onClick={runEquals}
-              >
-                ＝
-              </button>
-            </div>
-          )}
-          {/* ％と税込は、テンキーを開いている間も畳まない。
-              テンキー側に同じボタンを重ねると押した結果の表示が2か所に分かれるので、
-              ここ1か所に置いて、OSキーボードでも自前テンキーでも同じ場所を押させる。
-              金額欄のすぐ下なので、パッドを開いていても画面から外れない */}
-          <AmountTaxKeys
-            state={calcState}
-            onApply={applyCalcState}
-            onPercent={runPercent}
-            /* 保留中の演算子が無いと ％ は何も起きないので、押す前にそう見せる */
-            percentDisabled={calc.pendingOp === null}
-          />
-        </div>
+        {/* テンキーを開いている間は同じ演算子が下に出るので、＋ − × ＝ は畳む */}
+        <AmountCalcBar
+          state={calcState}
+          showKeys={!keypadOpen}
+          onOperator={(op) => runOperator('amount', op)}
+          onEquals={() => runEquals('amount')}
+          onPercent={() => runPercent('amount')}
+          onApply={(next) => applyTo('amount', next)}
+          warning={amountNum < 0 && <span className="calc-warn">マイナスの金額は保存できません</span>}
+        />
       </div>
 
       {keypadEnabled && keypadOpen && (
         <AmountKeypad
-          pending={
-            calc.pendingOp !== null && calc.pendingValue !== null
-              ? { value: calc.pendingValue, op: calc.pendingOp }
-              : null
-          }
-          onDigits={runDigits}
-          onBackspace={runBackspace}
-          onOperator={runOperator}
-          onEquals={runEquals}
-          onClear={runClear}
+          pending={(() => {
+            const { pendingValue, pendingOp } = calcOf(keypadTarget)
+            return pendingOp !== null && pendingValue !== null ? { value: pendingValue, op: pendingOp } : null
+          })()}
+          targetLabel={keypadTarget === 'partner' ? '彼女の負担分' : undefined}
+          onDigits={(digits) => runDigits(keypadTarget, digits)}
+          onBackspace={() => runBackspace(keypadTarget)}
+          onOperator={(op) => runOperator(keypadTarget, op)}
+          onEquals={() => runEquals(keypadTarget)}
+          onClear={() => runClear(keypadTarget)}
           onDone={() => {
             setKeypadOpen(false)
             // フォーカスが金額欄に残ったままだと、もう一度タップしても開き直せない
@@ -1079,7 +1084,18 @@ export default function TransactionForm({
           <button
             type="button"
             className={`partner-toggle ${withPartner ? 'on' : ''}`}
-            onClick={() => setWithPartner(!withPartner)}
+            onClick={() => {
+              // 外すと欄ごと消えるので、打ちかけの式とパッドの行き先も片付ける
+              // (消えた欄に向いたままのパッドで打つと、見えない所に数字が入る)
+              if (withPartner) {
+                setPartnerCalc(EMPTY_CALC)
+                if (keypadTarget === 'partner') {
+                  setKeypadOpen(false)
+                  setKeypadTarget('amount')
+                }
+              }
+              setWithPartner(!withPartner)
+            }}
           >
             <span>二人で使った</span>
             <span className="toggle-check">{withPartner ? '✓' : ''}</span>
@@ -1088,19 +1104,29 @@ export default function TransactionForm({
             <>
               <div className="field">
                 <span>彼女の負担分(円) — 預かり残高から差し引かれます</span>
+                {/* 支払い金額と同じ電卓が使える。
+                    「彼女が頼んだ 1,280 と 450」のように、レシートの何行かを
+                    足して負担分を出す場面が多いので、アプリの外の電卓に
+                    行き来しなくて済むようにする。パッドは支払い金額と共有で、
+                    この欄をタップするとこちらに向き直る */}
                 <AmountTextInput
+                  inputRef={partnerRef}
                   ariaLabel="彼女の負担分"
-                  inputMode="numeric"
+                  inputMode={keypadEnabled ? 'none' : 'numeric'}
                   placeholder="0"
                   value={partnerAmount}
                   onChange={setPartnerAmount}
+                  onFocus={() => openKeypadFor('partner')}
+                  onClick={() => openKeypadFor('partner')}
                 />
-                {/* ここも税抜きの値段を打つ場所なので、税込を同じ形で置く。
-                    電卓(＋ − ×)はこの欄には無いので ％ は出さない */}
-                <AmountTaxKeys
-                  state={{ input: partnerAmount, pendingValue: null, pendingOp: null }}
-                  onApply={(next) => setPartnerAmount(next.input)}
+                <AmountCalcBar
+                  state={partnerCalcState}
+                  showKeys={!keypadOpen}
                   fieldLabel="彼女の負担分"
+                  onOperator={(op) => runOperator('partner', op)}
+                  onEquals={() => runEquals('partner')}
+                  onPercent={() => runPercent('partner')}
+                  onApply={(next) => applyTo('partner', next)}
                 />
               </div>
               <div className="quick-row">
@@ -1109,7 +1135,7 @@ export default function TransactionForm({
                   className="btn-ghost"
                   disabled={!amountNum}
                   onClick={() =>
-                    setPartnerAmount(normalizeAmountInput(String(Math.round(amountNum / 2))))
+                    setPartnerDirect(normalizeAmountInput(String(Math.round(amountNum / 2))))
                   }
                 >
                   半分
@@ -1118,7 +1144,7 @@ export default function TransactionForm({
                   type="button"
                   className="btn-ghost"
                   disabled={!amountNum}
-                  onClick={() => setPartnerAmount(normalizeAmountInput(String(amountNum)))}
+                  onClick={() => setPartnerDirect(normalizeAmountInput(String(amountNum)))}
                 >
                   全額
                 </button>
