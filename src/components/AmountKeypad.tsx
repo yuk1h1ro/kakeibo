@@ -4,6 +4,11 @@ import { OP_LABEL, type CalcOp } from '../lib/calc'
 interface Props {
   /** 保留中の式(例: 350 ＋)。無ければ null */
   pending: { value: number; op: CalcOp } | null
+  /**
+   * 支払い金額以外の欄に打ち込んでいるときの、その欄の名前。
+   * パッドは画面の下に1枚しか無いので、どの欄に入るのかをパッドの上で見せる
+   */
+  targetLabel?: string
   onDigits: (digits: string) => void
   onBackspace: () => void
   onOperator: (op: CalcOp) => void
@@ -36,6 +41,7 @@ const SIDE_KEYS: { op: CalcOp; label: string }[] = [
  */
 export default function AmountKeypad({
   pending,
+  targetLabel,
   onDigits,
   onBackspace,
   onOperator,
@@ -51,6 +57,7 @@ export default function AmountKeypad({
       aria-label="金額入力のテンキー"
     >
       <div className="keypad-status" aria-live="polite">
+        {targetLabel && <span className="keypad-target">{targetLabel}に入力中</span>}
         {pending && (
           <span className="calc-pending">
             {pending.value.toLocaleString('ja-JP')} {OP_LABEL[pending.op]}

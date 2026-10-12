@@ -3,7 +3,7 @@ import { TAX_RATES, pressTax, taxNoticeText, type CalcState, type TaxApplied } f
 
 interface Props {
   /**
-   * 対象の金額欄の状態。電卓を持たない欄(彼女の負担分など)は
+   * 対象の金額欄の状態。電卓を持たない欄(分割の内訳など)は
    * input だけを詰めて渡す(pendingValue / pendingOp は null)。
    */
   state: CalcState
@@ -70,7 +70,7 @@ export default function AmountTaxKeys({
           <button
             type="button"
             className="calc-key"
-            aria-label="パーセント"
+            aria-label={fieldLabel ? `${fieldLabel}のパーセント` : 'パーセント'}
             disabled={percentDisabled}
             onClick={onPercent}
           >

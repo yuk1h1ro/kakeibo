@@ -1339,6 +1339,13 @@ textarea:focus {
   font-size: 13px;
 }
 
+/* 支払い金額以外の欄(彼女の負担分)に打ち込んでいるときの目印。左に寄せる */
+.keypad-target {
+  margin-right: auto;
+  color: var(--accent);
+  font-weight: 700;
+}
+
 .keypad-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

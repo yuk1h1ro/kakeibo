@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import TransactionForm from './TransactionForm'
@@ -963,5 +963,163 @@ describe('お店のチップを押してもテンキーが閉じない', () => {
 
     await user.click(button('昨日'))
     expect(keypad()).toBeNull()
+  })
+})
+
+// ============================================================
+// 彼女の負担分の電卓
+//
+// 要望は「二人で使ったを押して彼女の分を入れるとき、アプリ内の電卓を
+// 使いたい」。レシートの何行かを足して負担分を出す場面が多いのに、
+// この欄だけ OS の数字キーボードで、＋ も自前テンキーも無かった。
+//
+// 守ること:
+//   - 支払い金額と同じ電卓(＋ − × ＝ ％ 税込)が、この欄でも同じ結果を出す
+//   - 2つの欄の打ちかけの式が混ざらない(片方の式でもう片方の金額が変わらない)
+//   - パッドは1枚。タップした欄に向き直り、どちらに入るかをパッドに出す
+// ============================================================
+describe('彼女の負担分の電卓', () => {
+  const amountLabel = '支払い金額(円)'
+  const partnerLabel = '彼女の負担分'
+  const keypad = () => screen.queryByRole('group', { name: '金額入力のテンキー' })
+  const padKey = (name: string) =>
+    within(screen.getByRole('group', { name: '金額入力のテンキー' })).getByRole('button', { name })
+
+  // テンキーの設定は端末に残る。前のテストが 'on' のまま終わっていると、
+  // パッドが開いて ＋ − × ＝ の段が畳まれるので、毎回 OS キーボードの側から始める
+  beforeEach(() => setKeypadPreference('off'))
+  afterEach(() => setKeypadPreference('auto'))
+
+  /** カテゴリと支払い金額を入れて「二人で使った」を開くところまで */
+  async function openPartner(user: User, amount = '3000') {
+    await user.click(button(/食費/))
+    await typeAmount(user, amountLabel, amount)
+    await user.click(button('二人で使った'))
+  }
+
+  it('足し算で負担分を出せる(＝を押し忘れても確定してから保存する)', async () => {
+    const { user, submitted } = setup()
+    await openPartner(user)
+    await typeAmount(user, partnerLabel, '1280')
+    await user.click(button('彼女の負担分に足す'))
+    await typeAmount(user, partnerLabel, '450')
+    // 保留中の式が欄の下に出ている
+    expect(screen.getByText('1,280 ＋')).toBeTruthy()
+    await user.click(saveButton())
+
+    expect(submitted[0].partner_amount).toBe(1730)
+    // 支払い金額は1円も動かない
+    expect(submitted[0].amount).toBe(3000)
+  })
+
+  it('＝ で確定すると欄に結果が入る', async () => {
+    const { user } = setup()
+    await openPartner(user)
+    await typeAmount(user, partnerLabel, '600')
+    await user.click(button('彼女の負担分に掛ける'))
+    await typeAmount(user, partnerLabel, '2')
+    await user.click(button('彼女の負担分を計算する'))
+    expect(field(partnerLabel).value).toBe('1,200')
+  })
+
+  it('％も支払い金額と同じ結果になる(1000 − 10 ％ → 900)', async () => {
+    const { user, submitted } = setup()
+    await openPartner(user)
+    await typeAmount(user, partnerLabel, '1000')
+    await user.click(button('彼女の負担分から引く'))
+    await typeAmount(user, partnerLabel, '10')
+    await user.click(button('彼女の負担分のパーセント'))
+    expect(field(partnerLabel).value).toBe('900')
+    await user.click(saveButton())
+    expect(submitted[0].partner_amount).toBe(900)
+  })
+
+  it('支払い金額で打ちかけた式は、彼女の負担分に混ざらない', async () => {
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, amountLabel, '2000')
+    await user.click(button('足す'))
+    await typeAmount(user, amountLabel, '1000')
+    await user.click(button('二人で使った'))
+    await typeAmount(user, partnerLabel, '500')
+    await user.click(saveButton())
+
+    expect(submitted[0].amount).toBe(3000)
+    expect(submitted[0].partner_amount).toBe(500)
+  })
+
+  it('式のままでも「支払い金額を超えていないか」は確定値で判定する', async () => {
+    const { user } = setup()
+    await openPartner(user, '1000')
+    await typeAmount(user, partnerLabel, '800')
+    await user.click(button('彼女の負担分に足す'))
+    await typeAmount(user, partnerLabel, '300')
+    // 800 ＋ 300 = 1100 > 1000。式のまま保存させると上限を素通りする
+    expect(saveButton().disabled).toBe(true)
+  })
+
+  it('「半分」を押したら、打ちかけの式は捨てて半分の額にする', async () => {
+    const { user, submitted } = setup()
+    await openPartner(user, '3000')
+    await typeAmount(user, partnerLabel, '100')
+    await user.click(button('彼女の負担分に足す'))
+    await user.click(button('半分'))
+    expect(screen.queryByText('100 ＋')).toBeNull()
+    await user.click(saveButton())
+    expect(submitted[0].partner_amount).toBe(1500)
+  })
+
+  describe('自前テンキー', () => {
+    it('彼女の負担分をタップすると、パッドがそちらに向いて開く', async () => {
+      setKeypadPreference('on')
+      const { user, submitted } = setup()
+      await openPartner(user)
+      await user.click(field(partnerLabel))
+
+      expect(keypad()).not.toBeNull()
+      // パッドは1枚なので、どちらの欄に入るのかをパッドの上に出す
+      expect(within(keypad()!).getByText('彼女の負担分に入力中')).toBeTruthy()
+
+      await user.click(padKey('1'))
+      await user.click(padKey('2'))
+      await user.click(padKey('足す'))
+      await user.click(padKey('3'))
+      await user.click(padKey('計算する'))
+
+      expect(field(partnerLabel).value).toBe('15')
+      // 支払い金額には1文字も入らない
+      expect(field(amountLabel).value).toBe('3,000')
+      await user.click(saveButton())
+      expect(submitted[0].partner_amount).toBe(15)
+    })
+
+    it('支払い金額をタップし直すと、パッドも支払い金額へ向き直る', async () => {
+      setKeypadPreference('on')
+      const { user } = setup()
+      await openPartner(user, '1000')
+      await user.click(field(partnerLabel))
+      await user.click(padKey('5'))
+
+      await user.click(field(amountLabel))
+      expect(within(keypad()!).queryByText('彼女の負担分に入力中')).toBeNull()
+      await user.click(padKey('9'))
+
+      // 9 は支払い金額の末尾に付き、彼女の負担分は 5 のまま
+      expect(field(amountLabel).value).toBe('10,009')
+      expect(field(partnerLabel).value).toBe('5')
+    })
+
+    it('「二人で使った」を外したら、彼女の負担分に向いたパッドは閉じる', async () => {
+      setKeypadPreference('on')
+      const { user } = setup()
+      await openPartner(user)
+      await user.click(field(partnerLabel))
+      expect(keypad()).not.toBeNull()
+
+      // オンの間は名前に ✓ が付く
+      await user.click(button(/二人で使った/))
+      // 消えた欄に向いたまま打てると、見えない所に数字が入る
+      expect(keypad()).toBeNull()
+    })
   })
 })
