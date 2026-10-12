@@ -14,6 +14,7 @@ import {
   startSessionKeepAlive,
   type SessionRefresher,
 } from './authSession'
+import { clearVault, writeVault } from './sessionVault'
 
 const URL_KEY = 'kakeibo.supabaseUrl'
 const ANON_KEY = 'kakeibo.supabaseAnonKey'
@@ -105,7 +106,10 @@ export function getSupabase(): SupabaseClient | null {
   // ただし SIGNED_OUT は、更新トークンごと失効したときにも飛ぶ。
   // 意図を立てたときだけ後始末する(そうしないと、何もしていないのに
   // 消去の確認が出る)
-  client.auth.onAuthStateChange((event) => {
+  client.auth.onAuthStateChange((event, session) => {
+    // ログインの控えを、いつも最新の更新トークンにしておく (sessionVault.ts)。
+    // supabase-js がセッションを勝手に手放したとき、ここから戻す
+    if (session) writeVault(session)
     if (event === 'SIGNED_OUT' && takeSignOutRequest()) cleanupAfterSignOut()
   })
 
@@ -178,10 +182,18 @@ export async function signOutByUser(
   // 1段目。ここで止めたときは **セッションにも端末にも一切触らない**
   if (!io.confirm(signOutIntentText(unsyncedCount()))) return 'cancelled'
 
+  // ログインの控えを先に消す (sessionVault.ts)。残っていると、
+  // 押したのに App が「勝手にログアウトされた」と見て控えから戻してしまう
+  clearVault()
   markSignOutRequested()
   const { error } = await supabase.auth.signOut()
-  // 失敗して SIGNED_OUT が飛ばないときは、立てた意図を倒しておく
-  // (次に SIGNED_OUT が来たときに後始末が誤発火しないようにする)
-  if (error) takeSignOutRequest()
+  if (error) {
+    // 失敗して SIGNED_OUT が飛ばないときは、立てた意図を倒しておく
+    // (次に SIGNED_OUT が来たときに後始末が誤発火しないようにする)
+    takeSignOutRequest()
+    // ログインは続いているので、消した控えも戻しておく
+    const { data } = await supabase.auth.getSession()
+    if (data.session) writeVault(data.session)
+  }
   return 'signed-out'
 }
