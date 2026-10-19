@@ -1,5 +1,5 @@
 # プルリクエスト用のビルド検証
-# PR と main への push で型チェックとビルドを実行し、
+# PR と main への push で型チェック・テスト・ビルドを実行し、
 # 壊れた変更がマージ (= 公開) される前に検出する。
 name: CI
 
@@ -36,6 +36,11 @@ jobs:
 
       - name: Type check
         run: npx tsc -b
+
+      # テストは手元で回すだけでは、回し忘れた変更がそのまま公開される。
+      # ここで落ちれば PR の build が赤になり、マージ (= 公開) の前に止まる
+      - name: Test
+        run: npm test
 
       # deploy.yml と同様に secrets を渡すが、
       # secrets が未設定でもビルドは成功する
