@@ -34,9 +34,13 @@ import {
   withoutSatisfaction,
 } from '../lib/satisfaction'
 import {
+  addSplitPart,
   buildPartnerOpMessage,
+  formatSplitNotification,
   notifyLowBalanceIfNeeded,
   sendDiscordMessage,
+  splitGroupOfOp,
+  type SplitNotice,
 } from '../lib/discordNotify'
 import { partnerBalance } from '../lib/partnerBalance'
 import {
@@ -335,11 +339,27 @@ export function useTransactions(supabase: SupabaseClient) {
     // update/delete の旧行の検索と「op適用後の残高」の計算に使う
     // (厳密な整合性より、通知が記録を止めないことを優先する)
     let localRows = serverTxRef.current
+    // 分割の会計は内訳が揃ってから1通にまとめて送る (discordNotify.ts)。
+    // まとめている途中の会計と、取り消された内訳の行ID(その削除は知らせない)
+    let pendingSplit: SplitNotice | null = null
+    const silencedIds = new Set<string>()
+    const sendPendingSplit = () => {
+      if (pendingSplit === null) return
+      const message = formatSplitNotification(pendingSplit)
+      if (message) {
+        void sendDiscordMessage(message) // 投げっぱなし。失敗しても記録は止めない
+        notifyLowBalanceIfNeeded(pendingSplit.balance)
+      }
+      pendingSplit = null
+    }
     try {
       for (;;) {
         const queue = loadQueue()
         if (queue.length === 0) break
         const op = queue[0]
+        // 別の op に移る前に、まとめていた会計を送り出す(届いた順を崩さない)。
+        // 同じ会計の内訳が続くうちは待つ
+        if (pendingSplit !== null && splitGroupOfOp(op) !== pendingSplit.group) sendPendingSplit()
         // code/details/hint まで保持する(スキーマ関連エラーの判定に使う)
         let err: ServerErrorLike | null = null
         try {
@@ -445,6 +465,14 @@ export function useTransactions(supabase: SupabaseClient) {
           if (!retryable || reachedAttemptLimit(attempts)) {
             // 同じ op が何度も断られると、その後ろの記録がすべて送れなくなる。
             // 記録は隔離箱(localStorage)に移して必ず残したうえで、先へ進む
+            // 断られた内訳の会計は、先に入った内訳ごと取り消される。
+            // まとめていた通知は **送らずに捨てる**(無かったことになる会計)。
+            // 取り消しの削除も知らせない — 彼女から見ると、聞いたことの無い
+            // 記録が消えたという知らせになる
+            if (pendingSplit !== null && splitGroupOfOp(op) === pendingSplit.group) {
+              for (const id of pendingSplit.ids) silencedIds.add(id)
+              pendingSplit = null
+            }
             const moved = quarantineFromQueue(
               op,
               retryable ? 'repeated' : 'rejected',
@@ -467,11 +495,17 @@ export function useTransactions(supabase: SupabaseClient) {
           // 同期成功 — 彼女残高に影響する op なら Discord に通知する。
           // 旧行の参照(localRows)は「キューから op を消す前」に確保する
           const nextRows = applyPendingOps(localRows, [op])
-          const message = buildPartnerOpMessage(op, localRows, nextRows)
-          if (message) void sendDiscordMessage(message) // 投げっぱなし。失敗しても記録は止めない
-          // 機能010: 残高がしきい値をまたいだときだけ低下アラートを送る。
-          // 個々の op の通知とは別に、確定した残高そのものを見て判断する
-          if (message) notifyLowBalanceIfNeeded(partnerBalance(nextRows))
+          if (splitGroupOfOp(op) !== null) {
+            // 分割の内訳は、会計が揃うまで手元にまとめる(送るのは次の op に
+            // 移るときか、この flush を抜けるとき)
+            pendingSplit = addSplitPart(pendingSplit, op, partnerBalance(nextRows))
+          } else if (!(op.kind === 'delete' && silencedIds.has(op.id))) {
+            const message = buildPartnerOpMessage(op, localRows, nextRows)
+            if (message) void sendDiscordMessage(message) // 投げっぱなし。失敗しても記録は止めない
+            // 機能010: 残高がしきい値をまたいだときだけ低下アラートを送る。
+            // 個々の op の通知とは別に、確定した残高そのものを見て判断する
+            if (message) notifyLowBalanceIfNeeded(partnerBalance(nextRows))
+          }
           localRows = nextRows
           // 進めた手元のスナップショットは、この flush を抜けても引き継ぐ。
           // ここを flush の中の変数だけに留めていたころは、serverTxRef が
@@ -492,6 +526,9 @@ export function useTransactions(supabase: SupabaseClient) {
         }
       }
     } finally {
+      // 圏外で途中まで送れた会計も、送れた分だけで1通にして出す
+      // (残りは次の同期で、もう1通になる)。待ち続けると知らせが出ない
+      sendPendingSplit()
       flushingRef.current = false
       setSyncing(false)
     }

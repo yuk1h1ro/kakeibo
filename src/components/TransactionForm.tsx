@@ -144,8 +144,29 @@ const PAYER_OPTIONS: readonly { id: Payer; label: string }[] = [
 /** タグの候補に出す件数。多すぎると詳細欄が縦に伸びて入力の邪魔になる */
 const TAG_SUGGESTION_LIMIT = 8
 
-/** 自前テンキー・電卓が打ち込む先の金額欄 */
-type AmountTarget = 'amount' | 'partner'
+/** 分割の内訳で、電卓が打ち込める欄 (SplitPart の数値の列) */
+type SplitField = 'amount' | 'partnerAmount'
+
+/**
+ * 自前テンキー・電卓が打ち込む先の金額欄。
+ * 分割の内訳は何行もあるので、行の番号と欄で指す(`split:0:partnerAmount`)
+ */
+type AmountTarget = 'amount' | 'partner' | `split:${number}:${SplitField}`
+
+const splitTarget = (index: number, field: SplitField): AmountTarget => `split:${index}:${field}`
+
+function parseSplitTarget(target: AmountTarget): { index: number; field: SplitField } | null {
+  const m = /^split:(\d+):(amount|partnerAmount)$/.exec(target)
+  return m ? { index: Number(m[1]), field: m[2] as SplitField } : null
+}
+
+/** パッドの上に出す「どの欄に入力中か」。支払い金額のときは出さない */
+function keypadTargetLabel(target: AmountTarget): string | undefined {
+  if (target === 'partner') return '彼女の負担分'
+  const split = parseSplitTarget(target)
+  if (split) return `内訳 ${split.index + 1} の${split.field === 'amount' ? '金額' : '彼女の負担分'}`
+  return undefined
+}
 
 export default function TransactionForm({
   initial,
@@ -233,6 +254,11 @@ export default function TransactionForm({
 
   // 機能096: 分割。開いている間だけ内訳を持つ(閉じれば普通の1件に戻る)
   const [splitParts, setSplitParts] = useState<SplitPart[] | null>(null)
+  // 内訳で打ちかけの式。内訳の値は数値で持つので、式の途中の文字列
+  // (「100 ＋」の直後は空欄)は、いま打っている1欄ぶんだけここに置く。
+  // 内訳の数値には常に「その式を今確定したらいくつか」を入れておく —
+  // だから合計の確認・残高の見込み・保存・内訳の削除は、この状態を知らなくてよい
+  const [splitCalc, setSplitCalc] = useState<(CalcState & { target: AmountTarget }) | null>(null)
   // 分割を開いたときに「上段の入力をどう扱ったか」を伝える1行。
   // 支払った人・彼女の負担分は分割では使えないので、黙って捨てないための表示
   const [splitNotice, setSplitNotice] = useState<string | null>(null)
@@ -356,6 +382,10 @@ export default function TransactionForm({
   /** 自前テンキーを、タップされた金額欄に向けて開く。無効な端末では何もしない */
   function openKeypadFor(target: AmountTarget) {
     if (!keypadEnabled) return
+    // 内訳の打ちかけの式は、パッドがその欄を離れたら畳む。
+    // 内訳の値には確定後の数値が入っているので、何も失われない
+    // (残すと「100 ＋」の直後の空欄のまま、100 が入っているのに見えなくなる)
+    if (splitCalc && splitCalc.target !== target) setSplitCalc(null)
     setKeypadTarget(target)
     setKeypadOpen(true)
   }
@@ -395,6 +425,11 @@ export default function TransactionForm({
     setPartnerCalc(EMPTY_CALC)
   }, [initial])
 
+  // パッドを閉じたら、内訳の打ちかけの式も畳む(理由は openKeypadFor と同じ)
+  useEffect(() => {
+    if (!keypadOpen) setSplitCalc(null)
+  }, [keypadOpen])
+
   // テンキーの高さぶんの余白を本文に持たせる(保存ボタンがパッドの下に隠れないように)
   useEffect(() => {
     if (!keypadOpen) return
@@ -418,6 +453,7 @@ export default function TransactionForm({
       if (
         target === amountRef.current ||
         target === partnerRef.current ||
+        target.closest('.keypad-field') ||
         target.closest('.keypad-dock') ||
         target.closest('.save-continue') ||
         target.closest('.store-chip') ||
@@ -450,6 +486,7 @@ export default function TransactionForm({
     setFavorKind(null)
     setFavorAmountInput('')
     setFavorFrom('')
+    setSplitCalc(null)
     setSplitParts(null)
     setSplitNotice(null)
     setTripTagSkipped(false)
@@ -547,8 +584,22 @@ export default function TransactionForm({
   }
 
   const closeSplit = () => {
+    releaseSplitTargets()
     setSplitParts(null)
     setSplitNotice(null)
+  }
+
+  /**
+   * 内訳の並びが変わるとき(削除・分割をやめる・保存のあと)。
+   * 打ちかけの式とパッドの行き先は行の番号で指しているので、番号がずれる前に
+   * 片付ける。内訳の値は確定後の数値が入っているので、片付けても失われない
+   */
+  function releaseSplitTargets() {
+    setSplitCalc(null)
+    if (parseSplitTarget(keypadTarget)) {
+      setKeypadOpen(false)
+      setKeypadTarget('amount')
+    }
   }
 
   // 機能096: 内訳の1つを書き換える
@@ -562,10 +613,27 @@ export default function TransactionForm({
   // 欄ごとに「入力中の文字列」と「保留中の式」を持ち、ここで取り替えるだけ。
   // 行き先は必ず呼び出し側が名指しする — 省略できるようにすると、
   // onClick にそのまま渡したときにイベントが行き先として紛れ込む
-  const calcOf = (target: AmountTarget): CalcState =>
-    target === 'partner' ? partnerCalcState : calcState
+  const calcOf = (target: AmountTarget): CalcState => {
+    const split = parseSplitTarget(target)
+    if (split) {
+      const part = splitParts?.[split.index]
+      if (!part) return EMPTY_CALC
+      if (splitCalc?.target === target) return splitCalc
+      const value = part[split.field]
+      return { input: value !== 0 ? String(value) : '', pendingValue: null, pendingOp: null }
+    }
+    return target === 'partner' ? partnerCalcState : calcState
+  }
 
   const applyTo = (target: AmountTarget, next: CalcState) => {
+    const split = parseSplitTarget(target)
+    if (split) {
+      if (!splitParts?.[split.index]) return
+      // 式が残っている間だけ文字列を持つ。確定したら内訳の数値だけで足りる
+      setSplitCalc(next.pendingOp === null ? null : { ...next, target })
+      updatePart(split.index, { [split.field]: Number(resolveForSubmit(next).input || 0) })
+      return
+    }
     const pending = { pendingValue: next.pendingValue, pendingOp: next.pendingOp }
     if (target === 'partner') {
       setPartnerAmount(next.input)
@@ -759,6 +827,7 @@ export default function TransactionForm({
         setFavorKind(null)
         setFavorAmountInput('')
         setFavorFrom('')
+        releaseSplitTargets()
         setSplitParts(null)
         setSplitNotice(null)
         // 「この1件だけ旅行タグを外す」も1件ごとの判断。次の記録には持ち越さない
@@ -1026,7 +1095,7 @@ export default function TransactionForm({
             const { pendingValue, pendingOp } = calcOf(keypadTarget)
             return pendingOp !== null && pendingValue !== null ? { value: pendingValue, op: pendingOp } : null
           })()}
-          targetLabel={keypadTarget === 'partner' ? '彼女の負担分' : undefined}
+          targetLabel={keypadTargetLabel(keypadTarget)}
           onDigits={(digits) => runDigits(keypadTarget, digits)}
           onBackspace={() => runBackspace(keypadTarget)}
           onOperator={(op) => runOperator(keypadTarget, op)}
@@ -1475,7 +1544,10 @@ export default function TransactionForm({
                               <button
                                 type="button"
                                 className="btn-ghost"
-                                onClick={() => setSplitParts(splitParts.filter((_, j) => j !== i))}
+                                onClick={() => {
+                                  releaseSplitTargets()
+                                  setSplitParts(splitParts.filter((_, j) => j !== i))
+                                }}
                               >
                                 削除
                               </button>
@@ -1496,20 +1568,29 @@ export default function TransactionForm({
                               </option>
                             ))}
                           </select>
-                          <AmountTextInput
-                            ariaLabel={`内訳 ${i + 1} の金額`}
-                            inputMode="numeric"
-                            placeholder="金額"
-                            value={p.amount > 0 ? String(p.amount) : ''}
-                            onChange={(v) => updatePart(i, { amount: Number(v || 0) })}
-                          />
-                          <AmountTextInput
-                            ariaLabel={`内訳 ${i + 1} の彼女の負担分`}
-                            inputMode="numeric"
-                            placeholder="彼女の負担分(任意)"
-                            value={p.partnerAmount > 0 ? String(p.partnerAmount) : ''}
-                            onChange={(v) => updatePart(i, { partnerAmount: Number(v || 0) })}
-                          />
+                          {/* 内訳の金額・負担分も、パッドの電卓で足し引きできる。
+                              行が多くなるので ＋ − × ＝ の段は置かず、パッドだけで扱う
+                              (PC では設定でテンキーをオンにすると使える) */}
+                          {(['amount', 'partnerAmount'] as const).map((field) => {
+                            const target = splitTarget(i, field)
+                            return (
+                              <AmountTextInput
+                                key={field}
+                                className="keypad-field"
+                                ariaLabel={`内訳 ${i + 1} の${field === 'amount' ? '金額' : '彼女の負担分'}`}
+                                inputMode={keypadEnabled ? 'none' : 'numeric'}
+                                placeholder={field === 'amount' ? '金額' : '彼女の負担分(任意)'}
+                                value={calcOf(target).input}
+                                onChange={(v) => {
+                                  // 手で打ち直したら、その欄の打ちかけの式は捨てる
+                                  if (splitCalc?.target === target) setSplitCalc(null)
+                                  updatePart(i, { [field]: Number(v || 0) })
+                                }}
+                                onFocus={() => openKeypadFor(target)}
+                                onClick={() => openKeypadFor(target)}
+                              />
+                            )
+                          })}
                         </div>
                       ))}
                       <p

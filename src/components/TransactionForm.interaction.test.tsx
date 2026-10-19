@@ -1123,3 +1123,89 @@ describe('彼女の負担分の電卓', () => {
     })
   })
 })
+
+// ============================================================
+// 分割の内訳でも、パッドの電卓が使える
+//
+// 内訳は値を数値で持っているので、式の途中(「300 ＋」の直後は空欄)を
+// どう扱うかが要。内訳の数値には常に「今確定したらいくつか」を入れておき、
+// 打ちかけの文字列は、いま打っている1欄ぶんだけ別に持つ。
+// ============================================================
+describe('分割の内訳の電卓', () => {
+  const keypad = () => screen.queryByRole('group', { name: '金額入力のテンキー' })
+  const padKey = (name: string) =>
+    within(screen.getByRole('group', { name: '金額入力のテンキー' })).getByRole('button', { name })
+  async function press(user: User, ...keys: string[]) {
+    for (const k of keys) await user.click(padKey(k))
+  }
+
+  beforeEach(() => setKeypadPreference('on'))
+  afterEach(() => setKeypadPreference('auto'))
+
+  /** ¥3,000 を2つに分けたところまで(内訳は ¥1,500 ずつ、内訳1の負担分 ¥1,000) */
+  async function openSplitWithKeypad() {
+    const ctx = setup()
+    const { user } = ctx
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '3000')
+    await user.click(button('二人で使った'))
+    await typeAmount(user, '彼女の負担分', '1000')
+    await openOptions(user)
+    await user.click(button('カテゴリを分けて記録する'))
+    await user.selectOptions(screen.getByLabelText('内訳 2 のカテゴリ'), 'daily')
+    return ctx
+  }
+
+  it('内訳の負担分をタップすると、パッドがその欄に向き、足し算した額で保存される', async () => {
+    const { user, splitSubmitted } = await openSplitWithKeypad()
+    await user.click(field('内訳 2 の彼女の負担分'))
+    expect(within(keypad()!).getByText('内訳 2 の彼女の負担分に入力中')).toBeTruthy()
+
+    await press(user, '3', '00', '足す')
+    // 式の途中。欄は次の数字を待って空になり、式はパッドの上に出る
+    expect(field('内訳 2 の彼女の負担分').value).toBe('')
+    expect(within(keypad()!).getByText('300 ＋')).toBeTruthy()
+
+    await press(user, '2', '00')
+    // ＝ を押し忘れたまま保存しても、確定した 500 が入る
+    await user.click(saveButton())
+    expect(splitSubmitted[0][1].partner_amount).toBe(500)
+    // 内訳1の負担分には混ざらない
+    expect(splitSubmitted[0][0].partner_amount).toBe(1000)
+  })
+
+  it('内訳の金額でも計算できる', async () => {
+    const { user } = await openSplitWithKeypad()
+    await user.click(field('内訳 1 の金額'))
+    expect(within(keypad()!).getByText('内訳 1 の金額に入力中')).toBeTruthy()
+    await press(user, '金額をクリア', '1', '00', '0', '足す', '5', '00', '計算する')
+    expect(field('内訳 1 の金額').value).toBe('1,500')
+  })
+
+  it('式の途中で別の欄へ移っても、確定した額のまま残る', async () => {
+    const { user } = await openSplitWithKeypad()
+    await user.click(field('内訳 2 の彼女の負担分'))
+    await press(user, '3', '00', '足す')
+    expect(field('内訳 2 の彼女の負担分').value).toBe('')
+
+    await user.click(field('内訳 1 の金額'))
+    // 「300 ＋」は 300 として確定し、空欄のまま見えなくなったりしない
+    expect(field('内訳 2 の彼女の負担分').value).toBe('300')
+    expect(within(keypad()!).queryByText('300 ＋')).toBeNull()
+  })
+
+  it('打っている内訳を削除したら、パッドは閉じる(番号がずれた行に打ち込まない)', async () => {
+    const { user } = await openSplitWithKeypad()
+    await user.click(button('内訳を足す'))
+    await user.click(field('内訳 3 の金額'))
+    await press(user, '5')
+    expect(keypad()).not.toBeNull()
+
+    await user.click(screen.getAllByRole('button', { name: '削除' })[2])
+    expect(keypad()).toBeNull()
+    expect(screen.queryByLabelText('内訳 3 の金額')).toBeNull()
+    // 残った内訳はそのまま
+    expect(field('内訳 1 の金額').value).toBe('1,500')
+    expect(field('内訳 2 の金額').value).toBe('1,500')
+  })
+})

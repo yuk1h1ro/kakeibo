@@ -246,7 +246,13 @@ export function notifyLowBalanceIfNeeded(balance: number): boolean {
 export interface PartnerOpLike {
   kind: 'insert' | 'update' | 'delete'
   id: string
-  payload?: PartnerTxLike & { category: string | null; memo: string; store?: string }
+  payload?: PartnerTxLike & {
+    category: string | null
+    memo: string
+    store?: string
+    /** 分割 (機能096) の束ね。同じ値の内訳は1つの会計 */
+    split_group?: string | null
+  }
 }
 
 /**
@@ -316,4 +322,98 @@ export function buildPartnerOpMessage(
   }
   // 旧行が見つからない削除 — 影響の有無を判定できないので汎用文
   return formatPartnerNotification({ kind: 'generic', balance })
+}
+
+// ---------- 分割の会計は1通にまとめる ----------
+//
+// 「1 op = 1通」はこのアプリの方針だが、分割 (機能096) とは噛み合っていなかった。
+// ¥3,000 を3つの内訳に分けて保存すると、
+//
+//   🍽️ スーパーA −¥700   残高: ¥19,300
+//   🍽️ スーパーA −¥500   残高: ¥18,800
+//   🍽️ スーパーA −¥250   残高: ¥18,550
+//
+// と、同じ店名の通知が3通、途中の残高つきで届いていた。受け取る側からは
+// 「同じ店で3回買い物をして、残高が3回動いた」としか読めない。
+// 分割は「1回の会計をカテゴリごとに分けた」ものなので、会計1つにつき1通にする。
+//
+// ---- 一部だけ届かなかったとき ----
+// まとめるには「内訳が揃うまで待つ」必要がある。途中で
+//   - 圏外で切れた   → 送れた分だけで1通出す。残りは次の同期でもう1通になる
+//                      (待ち続けると、届いた記録の知らせがいつまでも出ない)
+//   - サーバーに断られた → 分割は会計まるごと隔離され、先に入った内訳も
+//                      取り消される (useTransactions の quarantineFromQueue)。
+//                      **無かったことになる会計なので、何も知らせない。**
+//                      取り消しの削除についても知らせない(彼女から見ると
+//                      聞いたことのない記録が消えた、という知らせになるため)
+// これまでは内訳ごとに先に送っていたので、断られた会計でも「−¥700」が届き、
+// あとから「🗑 記録が削除されました」が届いていた。
+
+/** まとめている途中の分割の会計 */
+export interface SplitNotice {
+  group: string
+  /** 会計の表題(お店 → メモ)。分割の内訳はこの2つを共有している */
+  title: string
+  /** 彼女の残高に効く内訳だけ。効かない内訳は載せない */
+  parts: { label: string; impact: number }[]
+  /** 送れた内訳の行ID。取り消されたときに、その削除を黙らせるのに使う */
+  ids: string[]
+  /** 最後の内訳を入れたあとの残高 */
+  balance: number
+}
+
+/** この op は分割の内訳の追加か。そうなら束ねの値を返す。(純粋関数) */
+export function splitGroupOfOp(op: PartnerOpLike): string | null {
+  if (op.kind !== 'insert') return null
+  const group = op.payload?.split_group
+  return typeof group === 'string' && group !== '' ? group : null
+}
+
+/**
+ * 送れた内訳を、まとめている会計に足す。(純粋関数)
+ * 呼び出し側は、別の会計の内訳が来る前に手元の会計を送り出しておくこと。
+ * 内訳ではない op を渡したときは acc をそのまま返す。
+ */
+export function addSplitPart(
+  acc: SplitNotice | null,
+  op: PartnerOpLike,
+  balance: number
+): SplitNotice | null {
+  const group = splitGroupOfOp(op)
+  const p = op.payload
+  if (group === null || !p) return acc
+  const base: SplitNotice =
+    acc !== null && acc.group === group
+      ? acc
+      : { group, title: p.store || p.memo || '', parts: [], ids: [], balance }
+  const impact = partnerImpact(p)
+  return {
+    ...base,
+    parts: impact === 0 ? base.parts : [...base.parts, { label: categoryLabel(p.category), impact }],
+    ids: [...base.ids, op.id],
+    balance,
+  }
+}
+
+/**
+ * まとめた会計の通知文。彼女の残高に効く内訳が無ければ null。(純粋関数)
+ *
+ * 効く内訳が1つだけなら、分割していない1件と同じ形にする
+ * (「分けた会計」と書くと、1行しか無いのに何を分けたのかと読ませてしまう)。
+ */
+export function formatSplitNotification(n: SplitNotice): string | null {
+  if (n.parts.length === 0) return null
+  const total = n.parts.reduce((sum, part) => sum + part.impact, 0)
+  if (n.parts.length === 1) {
+    const only = n.parts[0]
+    const label = n.title ? `${n.title}(${only.label})` : only.label
+    return formatPartnerNotification(
+      only.impact > 0
+        ? { kind: 'partnerPaid', label, amount: only.impact, balance: n.balance }
+        : { kind: 'expense', label, amount: -only.impact, balance: n.balance }
+    )
+  }
+  const head = `${total > 0 ? '🙏' : '🍽️'} ${n.title || '分けた会計'} ${signedDelta(total)}(${n.parts.length}つに分けた会計)`
+  const lines = n.parts.map((part) => `・${part.label} ${signedDelta(part.impact)}`)
+  return [head, ...lines, balanceLine(n.balance)].join('\n')
 }

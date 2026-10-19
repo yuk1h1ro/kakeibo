@@ -217,9 +217,11 @@ describe('送信が中断されたあとの残高通知', () => {
 
     const supabase = fakeSupabase(server)
     const { result } = renderHook(() => useTransactions(supabase))
-    // 1件目だけが通り、キューには2件残る
+    // 1件目だけが通り、キューには2件残る。
+    // 分割の会計は揃うまで待つが、切れたら送れた分だけで1通にする
+    // (待ち続けると、届いた記録の知らせがいつまでも出ない)
     await waitFor(() => expect(result.current.pendingCount).toBe(2))
-    expect(sent).toEqual(['🍽️ 応答喪失スーパー −¥700\n残高: ¥49,300(預かり中)'])
+    expect(sent).toEqual(['🍽️ 応答喪失スーパー(食費) −¥700\n残高: ¥49,300(預かり中)'])
 
     // 圏外を抜けて残りを送る
     server.unreachable.clear()
@@ -228,11 +230,96 @@ describe('送信が中断されたあとの残高通知', () => {
     })
     await waitFor(() => expect(result.current.pendingCount).toBe(0))
 
-    // 50,000 − 700 − 500 − 250。中断をまたいでも彼女に届く残高は続きから
+    // 50,000 − 700 − 500 − 250。中断をまたいでも彼女に届く残高は続きから。
+    // 残りの2つは1通にまとまる
     expect(sent).toEqual([
-      '🍽️ 応答喪失スーパー −¥700\n残高: ¥49,300(預かり中)',
-      '🍽️ 応答喪失スーパー −¥500\n残高: ¥48,800(預かり中)',
-      '🍽️ 応答喪失スーパー −¥250\n残高: ¥48,550(預かり中)',
+      '🍽️ 応答喪失スーパー(食費) −¥700\n残高: ¥49,300(預かり中)',
+      '🍽️ 応答喪失スーパー −¥750(2つに分けた会計)\n・日用品 −¥500\n・交通費 −¥250\n残高: ¥48,550(預かり中)',
     ])
+  })
+})
+
+// ============================================================
+// 分割の会計は1通にまとめる
+//
+// これまでは内訳ごとに1通ずつ、途中の残高つきで届いていた。彼女からは
+// 「同じ店で3回買い物して、残高が3回動いた」としか読めなかった。
+// ============================================================
+describe('分割の会計の Discord 通知', () => {
+  it('3つの内訳が1通にまとまり、残高は最後の1回だけ', async () => {
+    const server = newServer([DEPOSIT])
+    saveQueue(SPLIT)
+
+    const { result } = renderHook(() => useTransactions(fakeSupabase(server)))
+    await waitFor(() => expect(result.current.pendingCount).toBe(0))
+
+    expect(sent).toEqual([
+      '🍽️ 応答喪失スーパー −¥1,450(3つに分けた会計)\n' +
+        '・食費 −¥700\n・日用品 −¥500\n・交通費 −¥250\n' +
+        '残高: ¥48,550(預かり中)',
+    ])
+  })
+
+  it('彼女の負担が無い内訳は載せない。効く内訳が1つなら分割していない1件と同じ形', async () => {
+    const server = newServer([DEPOSIT])
+    saveQueue([
+      insertOp('r1', expense({ amount: 1500, partner_amount: 700, split_group: GROUP })),
+      insertOp('r2', expense({ amount: 1000, partner_amount: 0, category: 'daily', split_group: GROUP })),
+    ])
+
+    const { result } = renderHook(() => useTransactions(fakeSupabase(server)))
+    await waitFor(() => expect(result.current.pendingCount).toBe(0))
+
+    expect(sent).toEqual(['🍽️ 応答喪失スーパー(食費) −¥700\n残高: ¥49,300(預かり中)'])
+  })
+
+  it('分割の後ろに続く別の記録は、会計の通知のあとに別の1通で届く(順番を崩さない)', async () => {
+    const server = newServer([DEPOSIT])
+    saveQueue([...SPLIT, insertOp('solo', expense({ store: '別のお店', partner_amount: 100 }))])
+
+    const { result } = renderHook(() => useTransactions(fakeSupabase(server)))
+    await waitFor(() => expect(result.current.pendingCount).toBe(0))
+
+    expect(sent).toHaveLength(2)
+    expect(sent[0]).toContain('3つに分けた会計')
+    expect(sent[1]).toBe('🍽️ 別のお店 −¥100\n残高: ¥48,450(預かり中)')
+  })
+
+  it('途中の内訳が断られて会計ごと取り消されたら、何も知らせない', async () => {
+    const server = newServer([DEPOSIT])
+    const supabase = fakeSupabase(server)
+    // 2つ目の内訳だけ、届いたうえで断られる(送り直しても通らない種類)
+    const rejectingSecond = {
+      from: (table: string) => {
+        const base = supabase.from(table) as unknown as Record<string, unknown> & {
+          insert: (row: Transaction) => Promise<unknown>
+        }
+        return {
+          ...base,
+          insert: (row: Transaction) =>
+            row.id === 'r2'
+              ? Promise.resolve({
+                  error: {
+                    code: '23502',
+                    message: 'null value in column "date" violates not-null constraint',
+                    details: null,
+                    hint: null,
+                  },
+                })
+              : base.insert(row),
+        }
+      },
+    } as unknown as SupabaseClient
+    saveQueue(SPLIT)
+
+    const { result } = renderHook(() => useTransactions(rejectingSecond))
+    await waitFor(() => expect(result.current.pendingCount).toBe(0))
+
+    // 先に入った1つ目は取り消され、会計まるごと隔離箱へ
+    expect(server.deletes).toEqual(['r1'])
+    expect(server.rows.map((r) => r.id)).toEqual(['deposit'])
+    expect(loadQuarantine()).toHaveLength(1)
+    // 無かったことになる会計なので、「−¥700」も「🗑 削除されました」も届かない
+    expect(sent).toEqual([])
   })
 })

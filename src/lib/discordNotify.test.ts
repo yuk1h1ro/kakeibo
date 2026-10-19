@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { classifyDiscordStatus, discordFailureMessage } from './discordNotify'
+import {
+  addSplitPart,
+  classifyDiscordStatus,
+  discordFailureMessage,
+  formatSplitNotification,
+  splitGroupOfOp,
+} from './discordNotify'
 
 describe('classifyDiscordStatus', () => {
   it('401 / 403 / 404 は Webhook が無効になった側の失敗', () => {
@@ -45,5 +51,55 @@ describe('discordFailureMessage', () => {
     for (const f of all) {
       expect(discordFailureMessage(f)).toMatch(/ください/)
     }
+  })
+})
+
+describe('分割の会計の通知(純粋関数)', () => {
+  const part = (id: string, over: Record<string, unknown> = {}) => ({
+    kind: 'insert' as const,
+    id,
+    payload: {
+      type: 'expense' as const,
+      amount: 1000,
+      partner_amount: 300,
+      partner_paid: 0,
+      category: 'food',
+      memo: '',
+      store: 'お店',
+      split_group: 'g1',
+      ...over,
+    },
+  })
+
+  it('束ねを持つ追加だけが内訳。修正・削除・束ね無しは対象外', () => {
+    expect(splitGroupOfOp(part('a'))).toBe('g1')
+    expect(splitGroupOfOp({ ...part('a'), kind: 'update' })).toBeNull()
+    expect(splitGroupOfOp({ kind: 'delete', id: 'a' })).toBeNull()
+    expect(splitGroupOfOp(part('a', { split_group: null }))).toBeNull()
+    expect(splitGroupOfOp(part('a', { split_group: '' }))).toBeNull()
+  })
+
+  it('内訳ではない op を足しても、まとめている会計は変わらない', () => {
+    const acc = addSplitPart(null, part('a'), 100)
+    expect(addSplitPart(acc, { kind: 'delete', id: 'x' }, 50)).toBe(acc)
+  })
+
+  it('残高は最後に足した内訳のあとの値。負担の無い内訳も行IDは控える', () => {
+    let acc = addSplitPart(null, part('a'), 700)
+    acc = addSplitPart(acc, part('b', { partner_amount: 0 }), 700)
+    expect(acc?.parts).toHaveLength(1)
+    expect(acc?.ids).toEqual(['a', 'b'])
+    expect(acc?.balance).toBe(700)
+  })
+
+  it('効く内訳が無ければ通知しない', () => {
+    const acc = addSplitPart(null, part('a', { partner_amount: 0 }), 0)
+    expect(formatSplitNotification(acc!)).toBeNull()
+  })
+
+  it('お店もメモも無いときは「分けた会計」と書く', () => {
+    let acc = addSplitPart(null, part('a', { store: '' }), 0)
+    acc = addSplitPart(acc, part('b', { store: '', category: 'daily' }), 0)
+    expect(formatSplitNotification(acc!)?.split('\n')[0]).toBe('🍽️ 分けた会計 −¥600(2つに分けた会計)')
   })
 })
