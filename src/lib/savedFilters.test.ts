@@ -3,7 +3,6 @@ import { DEFAULT_FILTER, type HistoryFilter } from './historyFilter'
 import {
   MAX_SAVED_FILTERS,
   addSavedFilter,
-  canSaveFilter,
   findMatchingFilter,
   parseSavedFilters,
   removeSavedFilter,
@@ -62,13 +61,6 @@ describe('removeSavedFilter / findMatchingFilter', () => {
 
   it('一致しなければ null', () => {
     expect(findMatchingFilter(list, DEFAULT_FILTER)).toBeNull()
-  })
-})
-
-describe('canSaveFilter', () => {
-  it('何も絞っていない状態は保存させない', () => {
-    expect(canSaveFilter(DEFAULT_FILTER)).toBe(false)
-    expect(canSaveFilter({ ...DEFAULT_FILTER, query: 'スタバ' })).toBe(true)
   })
 })
 

@@ -13,7 +13,6 @@
 // ============================================================
 
 import {
-  DEFAULT_FILTER,
   parseHistoryFilter,
   sameFilter,
   type HistoryFilter,
@@ -55,11 +54,6 @@ export function findMatchingFilter(
   filter: HistoryFilter
 ): SavedFilter | null {
   return list.find((s) => sameFilter(s.filter, filter)) ?? null
-}
-
-/** 保存できる状態か。既定のまま(= 何も絞っていない)を保存させない。(純粋関数) */
-export function canSaveFilter(filter: HistoryFilter): boolean {
-  return !sameFilter(filter, DEFAULT_FILTER)
 }
 
 /**
