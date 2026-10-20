@@ -73,6 +73,13 @@ create table if not exists public.partner_share_links (
 
 alter table public.partner_share_links enable row level security;
 
+-- API(supabase-js)から使うための権限。2026-10-30 以降に作る Supabase プロジェクトでは
+-- 新しいテーブルに自動で付かないので、ここで明示する(付け忘れると permission denied)。
+-- 何回実行しても同じ。anon(ログインしていない人)には付けない — このアプリは
+-- ログインしてから読み書きし、彼女の共有ページは security definer の関数だけを通る
+grant select, insert, update, delete on table public.partner_share_links to authenticated;
+grant select, insert, update, delete on table public.partner_share_links to service_role;
+
 -- 本人(ログインした利用者)だけが自分のリンクを読み書きできる。
 -- anon 向けのポリシーは1つも作らない = トークンの直接照会は不可能。
 drop policy if exists "select_own_partner_share_links" on public.partner_share_links;
@@ -144,6 +151,13 @@ create table if not exists public.partner_share_comments (
 );
 
 alter table public.partner_share_comments enable row level security;
+
+-- API(supabase-js)から使うための権限。2026-10-30 以降に作る Supabase プロジェクトでは
+-- 新しいテーブルに自動で付かないので、ここで明示する(付け忘れると permission denied)。
+-- 何回実行しても同じ。anon(ログインしていない人)には付けない — このアプリは
+-- ログインしてから読み書きし、彼女の共有ページは security definer の関数だけを通る
+grant select, insert, update, delete on table public.partner_share_comments to authenticated;
+grant select, insert, update, delete on table public.partner_share_comments to service_role;
 
 -- 本人だけが読み書きできる。彼女(anon)向けのポリシーは作らない。
 drop policy if exists "select_own_partner_share_comments" on public.partner_share_comments;
@@ -245,6 +259,13 @@ create table if not exists public.partner_summary_sends (
 );
 
 alter table public.partner_summary_sends enable row level security;
+
+-- API(supabase-js)から使うための権限。2026-10-30 以降に作る Supabase プロジェクトでは
+-- 新しいテーブルに自動で付かないので、ここで明示する(付け忘れると permission denied)。
+-- 何回実行しても同じ。anon(ログインしていない人)には付けない — このアプリは
+-- ログインしてから読み書きし、彼女の共有ページは security definer の関数だけを通る
+grant select, insert, update, delete on table public.partner_summary_sends to authenticated;
+grant select, insert, update, delete on table public.partner_summary_sends to service_role;
 
 drop policy if exists "select_own_partner_summary_sends" on public.partner_summary_sends;
 create policy "select_own_partner_summary_sends"

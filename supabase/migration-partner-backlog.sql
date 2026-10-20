@@ -75,6 +75,13 @@ comment on column public.partner_backlog_sends.last_tx_id is
 -- ------------------------------------------------------------
 alter table public.partner_backlog_sends enable row level security;
 
+-- API(supabase-js)から使うための権限。2026-10-30 以降に作る Supabase プロジェクトでは
+-- 新しいテーブルに自動で付かないので、ここで明示する(付け忘れると permission denied)。
+-- 何回実行しても同じ。anon(ログインしていない人)には付けない — このアプリは
+-- ログインしてから読み書きし、彼女の共有ページは security definer の関数だけを通る
+grant select, insert, update, delete on table public.partner_backlog_sends to authenticated;
+grant select, insert, update, delete on table public.partner_backlog_sends to service_role;
+
 drop policy if exists "select_own_partner_backlog_sends" on public.partner_backlog_sends;
 create policy "select_own_partner_backlog_sends"
   on public.partner_backlog_sends
