@@ -15,7 +15,7 @@
 // ============================================================
 
 import type { AssetDef, BalanceSnapshot } from './assets'
-import { monthEndISO, shiftMonth } from './calendar'
+import { daysBetween, monthEndISO, shiftMonth } from './calendar'
 
 /** ある基準日時点の純資産 */
 export interface NetWorthPoint {
@@ -45,13 +45,6 @@ export interface AssetRow {
 /** 'YYYY-MM' の月キー */
 export function monthOf(iso: string): string {
   return iso.slice(0, 7)
-}
-
-/** 日数の差(from → to)。夏時間の無い日本でも安全側に倒して UTC で引く */
-export function daysBetween(from: string, to: string): number {
-  const [y1, m1, d1] = from.split('-').map(Number)
-  const [y2, m2, d2] = to.split('-').map(Number)
-  return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86_400_000)
 }
 
 // ---------- 残高の解決 ----------

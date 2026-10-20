@@ -4,7 +4,6 @@ import {
   assetRows,
   balanceHistory,
   compactYen,
-  daysBetween,
   latestBalanceAsOf,
   monthlyNetWorthSeries,
   netWorthAt,
@@ -38,13 +37,6 @@ function snap(assetId: string, asOf: string, balance: number, createdAt?: string
     createdAt: createdAt ?? `${asOf}T00:00:00.000Z`,
   }
 }
-
-describe('日付ユーティリティ', () => {
-  it('日数の差を返す', () => {
-    expect(daysBetween('2026-07-01', '2026-08-04')).toBe(34)
-    expect(daysBetween('2026-08-04', '2026-08-04')).toBe(0)
-  })
-})
 
 describe('latestBalanceAsOf', () => {
   const balances = [

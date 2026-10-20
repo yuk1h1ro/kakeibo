@@ -38,6 +38,7 @@ import { useSyncExternalStore } from 'react'
 import { createLocalSetting } from './localSetting'
 import { DEFAULT_SPECIAL_TAGS } from './reportTagSettings'
 import { todayISO } from './format'
+import { daysBetween } from './calendar'
 import { normalizeTag, sanitizeTags } from './tags'
 import { tagsOf, type Transaction } from './types'
 
@@ -139,18 +140,13 @@ export function beginTripMode(
 
 // ---------- 純粋関数(表示と判断) ----------
 
-function toUTCms(iso: string): number {
-  const [y, m, d] = iso.split('-').map(Number)
-  return Date.UTC(y, m - 1, d)
-}
-
 /**
  * 開始日を1日目とした経過日数。(純粋関数)
  * 端末の日付が戻されている等で開始日が未来になっていても 1 を下回らせない
  * (「-3日目」という表示のほうが、ずれそのものより不安にさせる)。
  */
 export function tripDayCount(mode: TripMode, today: string): number {
-  const diff = Math.round((toUTCms(today) - toUTCms(mode.startedOn)) / 86_400_000)
+  const diff = daysBetween(mode.startedOn, today)
   return diff < 0 ? 1 : diff + 1
 }
 

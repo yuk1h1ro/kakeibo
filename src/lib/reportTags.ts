@@ -32,6 +32,7 @@ import {
   totalOwn,
 } from './report'
 import { collectTags, hasAnyTag } from './tags'
+import { daysBetween } from './calendar'
 
 /** タグが1つも付いていない支出をまとめる見出し */
 export const NO_TAG_LABEL = 'タグなし'
@@ -203,11 +204,6 @@ export interface TagEvent {
   total: number
   count: number
   categories: RankItem[]
-}
-
-/** 'YYYY-MM-DD' の差(日) */
-function daysBetween(from: string, to: string): number {
-  return rangeDays({ start: from, end: to }) - 1
 }
 
 /**
