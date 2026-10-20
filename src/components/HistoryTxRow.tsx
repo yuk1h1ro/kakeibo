@@ -230,7 +230,13 @@ function RowBody({
   } else {
     if (tx.store && tx.memo) subParts.push(tx.memo)
     if (tx.store || tx.memo) subParts.push(categoryLabel(tx.category))
-    if (tx.partner_amount > 0) subParts.push(`うち彼女分 ${yen(tx.partner_amount)}`)
+    // 右端の金額は「自分の分」(月の合計・レポートと同じ物差し)なので、
+    // 彼女の分があるときは **会計の総額** もここに出す。総額がどこにも無いと
+    // レシートと突き合わせられず、3,621円と打った記録が -¥1,810 に見えて
+    // 「保存が間違った」と思って直したり、二重に入れたりしかねない
+    if (tx.partner_amount > 0) {
+      subParts.push(`会計 ${yen(tx.amount)}(うち彼女分 ${yen(tx.partner_amount)})`)
+    }
     // 機能018: 彼女が払った回。書かないと「実質支出」との差が読めない
     if (partnerPaid(tx) > 0) subParts.push(`彼女が ${yen(partnerPaid(tx))} 支払い`)
     // おごり・値引き。**相手の名前まで出す** — 一覧を眺めているだけで

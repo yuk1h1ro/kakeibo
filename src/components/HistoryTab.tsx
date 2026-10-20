@@ -509,7 +509,9 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
           <>
             <div className="card month-summary">
               <div className="ms-item">
-                <span className="ms-label">支出</span>
+                {/* 合計は彼女の負担分を除いた「自分の分」。会計の総額の合計ではないことを
+                    見出しで言う(検索結果のときだけ注記が出ていて、ふだんは読めなかった) */}
+                <span className="ms-label">支出(自分の分)</span>
                 <span className="ms-value ms-expense">{yen(expenseTotal)}</span>
               </div>
               <div className="ms-divider" />
@@ -580,7 +582,7 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
           <div className="hist-result-head">
             <span>{searching ? `検索結果 ${results.length}件` : formatDate(selected)}</span>
             <span className="hist-result-total">
-              合計 {yen(searching ? resultTotal : dayTotal)}
+              自分の分 {yen(searching ? resultTotal : dayTotal)}
             </span>
             {visibleRows.length > 0 && !selectMode && (
               <button className="hist-head-btn" onClick={() => setSelectMode(true)}>
