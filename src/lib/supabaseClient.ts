@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { withHttps } from './setupValidation'
 import {
   cleanupAfterSignOut,
   markSignOutRequested,
@@ -23,10 +24,11 @@ const ANON_KEY = 'kakeibo.supabaseAnonKey'
  * Project URL を正規化する。
  * 末尾スラッシュや `/auth/v1/callback` のようなパスを取り除き、オリジンだけを返す。
  * (パスが残っていると supabase-js が不正なURLを組み立ててしまうため)
- * パースできない入力は trim しただけの文字列をそのまま返す。
+ * `xxxx.supabase.co` のように https:// が無ければ補う(そのまま保存すると
+ * 二度とつながらない値が残る)。パースできない入力は trim しただけの文字列を返す。
  */
 export function normalizeUrl(input: string): string {
-  const trimmed = input.trim().replace(/\/+$/, '')
+  const trimmed = withHttps(input).replace(/\/+$/, '')
   try {
     return new URL(trimmed).origin
   } catch {

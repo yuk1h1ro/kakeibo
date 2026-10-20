@@ -15,6 +15,7 @@ import {
   normalizeFavorFrom,
   personLineText,
   treatFromOptions,
+  withHonorific,
 } from './favors'
 import { ownAmount, type Transaction } from './types'
 
@@ -323,5 +324,19 @@ describe('personLineText', () => {
     expect(personLineText({ name: '', count: 1, total: 500, lastDate: '2026-07-12' })).toBe(
       '名前を書いていない回 1回・¥500'
     )
+  })
+})
+
+describe('withHonorific — 「さん」を重ねない', () => {
+  it('敬称が無ければ「さん」を付ける(これまでどおり)', () => {
+    expect(withHonorific('田中')).toBe('田中さん')
+    expect(withHonorific('部長')).toBe('部長さん')
+  })
+
+  it('もう敬称が付いていれば重ねない(「田中さんさん」にしない)', () => {
+    expect(withHonorific('田中さん')).toBe('田中さん')
+    expect(withHonorific('佐藤先輩')).toBe('佐藤先輩')
+    expect(withHonorific('鈴木様')).toBe('鈴木様')
+    expect(withHonorific('ゆうちゃん')).toBe('ゆうちゃん')
   })
 })

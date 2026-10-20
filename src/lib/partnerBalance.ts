@@ -163,6 +163,29 @@ export const DEFAULT_LOW_BALANCE_THRESHOLD = 1000
 /** しきい値として受け付ける上限。誤入力で常時アラートになるのを防ぐ */
 export const MAX_LOW_BALANCE_THRESHOLD = 1_000_000
 
+/**
+ * 預かりを1回でも受け取ったことがあるか。(純粋関数)
+ *
+ * 低下アラートは「次の預かりをお願いする」ための知らせなので、預かりの
+ * 仕組みをまだ使っていない人には意味が無い。記録0件の ¥0 で
+ * 「次の預かりをお願いするタイミングです」と出ていたのはこのため。
+ */
+export function hasDeposits(rows: readonly { type: string }[]): boolean {
+  return rows.some((t) => t.type === 'partner_deposit')
+}
+
+/**
+ * 画面に低下アラートを出すか。(純粋関数)
+ * 預かりを使っていない人には出さない(hasDeposits)。
+ */
+export function shouldWarnLowBalance(
+  rows: readonly { type: string }[],
+  balance: number,
+  threshold: number
+): boolean {
+  return hasDeposits(rows) && isLowBalance(balance, threshold)
+}
+
 /** 入力された値をしきい値として使える形に丸める。(純粋関数) */
 export function normalizeThreshold(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_LOW_BALANCE_THRESHOLD

@@ -1,9 +1,10 @@
 // 通知文は目隠し(機能169)の対象外。彼女の端末に届く文章なので、
 // こちらの画面が伏字になっているかどうかで中身が変わってはいけない
-import { yenPlain as yen } from './format'
+import { todayISO, yenPlain as yen } from './format'
 import { categoryLabel } from './categories'
 import {
   balanceWording,
+  ledgerRowTitle,
   lowBalanceAction,
   partnerBalance,
   partnerImpact,
@@ -147,35 +148,75 @@ export function balanceLine(balance: number): string {
   return balance === 0 ? `残高: ${yen(0)}(${w.title})` : `残高: ${yen(w.magnitude)}(${w.title})`
 }
 
+// 「どの記録の話か」(label) と「いつの記録か」(when) を必ず添える。
+// 以前は削除が「🗑 記録が削除されました(差分 +¥1,811)」だけで、彼女には
+// どの記録が消えたのか分からなかった。日付も無いので、昨日以前の記録も
+// 今日のことのように読めた。when は今日の記録なら空(毎回書くと読み飛ばされる)
 export type PartnerNotification =
-  | { kind: 'deposit'; amount: number; balance: number } // 預かり追加(現金で受け取った場合も同じ)
+  | { kind: 'deposit'; amount: number; balance: number; when?: string } // 預かり追加(現金で受け取った場合も同じ)
   | { kind: 'expense'; label: string; amount: number; balance: number } // 支出の差引
   | { kind: 'partnerPaid'; label: string; amount: number; balance: number } // 彼女が払った回 (機能018)
-  | { kind: 'refund'; amount: number; balance: number } // 彼女に返した (機能012)
-  | { kind: 'adjust'; delta: number; reason: string; balance: number } // 手動調整 (機能012)
-  | { kind: 'update'; delta: number; balance: number } // 修正で残高が変わった
-  | { kind: 'delete'; delta: number; balance: number } // 削除で残高が変わった
+  | { kind: 'refund'; amount: number; balance: number; when?: string } // 彼女に返した (機能012)
+  | { kind: 'adjust'; delta: number; reason: string; balance: number; when?: string } // 手動調整 (機能012)
+  | { kind: 'update'; delta: number; balance: number; label?: string } // 修正で残高が変わった
+  | { kind: 'delete'; delta: number; balance: number; label?: string } // 削除で残高が変わった
+  | { kind: 'restore'; delta: number; balance: number; label: string } // 削除の取り消し (機能159)
   | { kind: 'generic'; balance: number } // 旧行不明などで差分を出せないとき
+
+/** 預かり・返金・調整の1行目の末尾に付ける「(9月30日の記録)」。今日なら付けない */
+function whenSuffix(when: string | undefined): string {
+  return when ? `(${when}の記録)` : ''
+}
 
 export function formatPartnerNotification(n: PartnerNotification): string {
   switch (n.kind) {
     case 'deposit':
-      return `💰 預かりを受け取りました +${yen(n.amount)}\n${balanceLine(n.balance)}`
+      return `💰 預かりを受け取りました +${yen(n.amount)}${whenSuffix(n.when)}\n${balanceLine(n.balance)}`
     case 'expense':
       return `🍽️ ${n.label} −${yen(n.amount)}\n${balanceLine(n.balance)}`
     case 'partnerPaid':
       return `🙏 ${n.label} は彼女が払いました +${yen(n.amount)}\n${balanceLine(n.balance)}`
     case 'refund':
-      return `↩️ 預かりを返しました −${yen(n.amount)}\n${balanceLine(n.balance)}`
+      return `↩️ 預かりを返しました −${yen(n.amount)}${whenSuffix(n.when)}\n${balanceLine(n.balance)}`
     case 'adjust':
-      return `🛠 残高を調整しました(${signedDelta(n.delta)}${n.reason ? ` / ${n.reason}` : ''})\n${balanceLine(n.balance)}`
+      return `🛠 残高を調整しました(${signedDelta(n.delta)}${n.reason ? ` / ${n.reason}` : ''})${whenSuffix(n.when)}\n${balanceLine(n.balance)}`
     case 'update':
-      return `✏️ 記録が修正されました(差分 ${signedDelta(n.delta)})\n${balanceLine(n.balance)}`
+      return `✏️ 記録が修正されました${n.label ? `: ${n.label}` : ''}(差分 ${signedDelta(n.delta)})\n${balanceLine(n.balance)}`
     case 'delete':
-      return `🗑 記録が削除されました(差分 ${signedDelta(n.delta)})\n${balanceLine(n.balance)}`
+      return `🗑 記録が削除されました${n.label ? `: ${n.label}` : ''}(差分 ${signedDelta(n.delta)})\n${balanceLine(n.balance)}`
+    case 'restore':
+      // 削除の取り消しを新しい支出と同じ形で送ると、彼女からは
+      // 「消して、また使った」に見える。取り消したことをそのまま書く
+      return `↩️ 削除した記録を元に戻しました: ${n.label}(差分 ${signedDelta(n.delta)})\n${balanceLine(n.balance)}`
     case 'generic':
       return `🔔 預かり残高が更新されました\n${balanceLine(n.balance)}`
   }
+}
+
+/**
+ * 'YYYY-MM-DD' を通知用の「10月12日」に。今日・読めない値なら空文字。(純粋関数)
+ */
+export function notifyDate(date: string | null | undefined, today: string): string {
+  if (!date || date === today) return ''
+  const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(date)
+  return m ? `${Number(m[1])}月${Number(m[2])}日` : ''
+}
+
+/** 通知に出す記録の名前(日付つき)。支出は お店 → メモ → カテゴリ、それ以外は預かり等の見出し */
+function rowLabel(
+  r: {
+    type: PartnerTxLike['type']
+    amount: number
+    store?: string
+    memo?: string
+    category?: string | null
+    date?: string | null
+  },
+  today: string
+): string {
+  const title = r.type === 'expense' ? r.store || r.memo || categoryLabel(r.category ?? null) : ledgerRowTitle(r)
+  const when = notifyDate(r.date, today)
+  return when ? `${when} ${title}` : title
 }
 
 // ---------- 残高の低下アラート (機能010) ----------
@@ -250,9 +291,22 @@ export interface PartnerOpLike {
     category: string | null
     memo: string
     store?: string
+    /** 記録の日付 'YYYY-MM-DD'。今日以外なら通知に添える */
+    date?: string
     /** 分割 (機能096) の束ね。同じ値の内訳は1つの会計 */
     split_group?: string | null
   }
+  /** 削除の取り消し (機能159) で積み直した追加。新しい記録とは別の言い方で知らせる */
+  restore?: boolean
+}
+
+/** 通知で旧行を引くときの形(修正・削除で「どの記録か」を書くのに使う) */
+type OldRowLike = PartnerTxLike & {
+  id: string
+  date?: string
+  store?: string
+  memo?: string
+  category?: string | null
 }
 
 /**
@@ -263,20 +317,28 @@ export interface PartnerOpLike {
  */
 export function buildPartnerOpMessage(
   op: PartnerOpLike,
-  oldRows: (PartnerTxLike & { id: string })[],
-  newRows: PartnerTxLike[]
+  oldRows: OldRowLike[],
+  newRows: PartnerTxLike[],
+  today: string = todayISO()
 ): string | null {
   const balance = partnerBalance(newRows)
 
   if (op.kind === 'insert') {
     const p = op.payload
     if (!p) return null
+    // 削除の取り消し。どの種類の記録でも同じ言い方にする
+    if (op.restore) {
+      const delta = partnerImpact(p)
+      if (delta === 0) return null
+      return formatPartnerNotification({ kind: 'restore', delta, label: rowLabel(p, today), balance })
+    }
+    const when = notifyDate(p.date, today) || undefined
     if (p.type === 'partner_deposit') {
-      return formatPartnerNotification({ kind: 'deposit', amount: p.amount, balance })
+      return formatPartnerNotification({ kind: 'deposit', amount: p.amount, balance, when })
     }
     // 機能012: 返金・手動調整。残高が動いた理由をそのまま伝える
     if (p.type === 'partner_refund') {
-      return formatPartnerNotification({ kind: 'refund', amount: p.amount, balance })
+      return formatPartnerNotification({ kind: 'refund', amount: p.amount, balance, when })
     }
     if (p.type === 'partner_adjust') {
       return formatPartnerNotification({
@@ -284,10 +346,11 @@ export function buildPartnerOpMessage(
         delta: p.amount,
         reason: p.memo,
         balance,
+        when,
       })
     }
-    // 表題の優先順位: お店 → メモ → カテゴリ名
-    const label = p.store || p.memo || categoryLabel(p.category)
+    // 表題の優先順位: お店 → メモ → カテゴリ名(今日以外の記録は頭に日付)
+    const label = rowLabel(p, today)
     const impact = partnerImpact(p)
     // 機能018: 彼女が払いすぎた回は残高が増えるので、差引とは別の文言にする
     if (impact > 0) {
@@ -307,7 +370,8 @@ export function buildPartnerOpMessage(
     if (old) {
       const delta = partnerImpact(p) - partnerImpact(old)
       if (delta === 0) return null
-      return formatPartnerNotification({ kind: 'update', delta, balance })
+      // 名前は直したあとの内容で書く(お店の名前を直した回なら、新しい名前で通じる)
+      return formatPartnerNotification({ kind: 'update', delta, balance, label: rowLabel(p, today) })
     }
     // 旧行が見つからない(キャッシュに未反映等)— 差分は出せないので汎用文
     if (partnerImpact(p) === 0) return null
@@ -318,7 +382,7 @@ export function buildPartnerOpMessage(
   if (old) {
     const delta = -partnerImpact(old)
     if (delta === 0) return null
-    return formatPartnerNotification({ kind: 'delete', delta, balance })
+    return formatPartnerNotification({ kind: 'delete', delta, balance, label: rowLabel(old, today) })
   }
   // 旧行が見つからない削除 — 影響の有無を判定できないので汎用文
   return formatPartnerNotification({ kind: 'generic', balance })
@@ -354,6 +418,8 @@ export interface SplitNotice {
   group: string
   /** 会計の表題(お店 → メモ)。分割の内訳はこの2つを共有している */
   title: string
+  /** 今日以外の会計なら「10月12日」。今日なら空 */
+  when: string
   /** 彼女の残高に効く内訳だけ。効かない内訳は載せない */
   parts: { label: string; impact: number }[]
   /** 送れた内訳の行ID。取り消されたときに、その削除を黙らせるのに使う */
@@ -365,6 +431,9 @@ export interface SplitNotice {
 /** この op は分割の内訳の追加か。そうなら束ねの値を返す。(純粋関数) */
 export function splitGroupOfOp(op: PartnerOpLike): string | null {
   if (op.kind !== 'insert') return null
+  // 削除の取り消しは「元に戻しました」として1件ずつ知らせる。まとめると
+  // 新しい会計と同じ形になり、「消して、また使った」に見える
+  if (op.restore) return null
   const group = op.payload?.split_group
   return typeof group === 'string' && group !== '' ? group : null
 }
@@ -377,7 +446,8 @@ export function splitGroupOfOp(op: PartnerOpLike): string | null {
 export function addSplitPart(
   acc: SplitNotice | null,
   op: PartnerOpLike,
-  balance: number
+  balance: number,
+  today: string = todayISO()
 ): SplitNotice | null {
   const group = splitGroupOfOp(op)
   const p = op.payload
@@ -385,7 +455,7 @@ export function addSplitPart(
   const base: SplitNotice =
     acc !== null && acc.group === group
       ? acc
-      : { group, title: p.store || p.memo || '', parts: [], ids: [], balance }
+      : { group, title: p.store || p.memo || '', when: notifyDate(p.date, today), parts: [], ids: [], balance }
   const impact = partnerImpact(p)
   return {
     ...base,
@@ -404,16 +474,17 @@ export function addSplitPart(
 export function formatSplitNotification(n: SplitNotice): string | null {
   if (n.parts.length === 0) return null
   const total = n.parts.reduce((sum, part) => sum + part.impact, 0)
+  const lead = n.when ? `${n.when} ` : ''
   if (n.parts.length === 1) {
     const only = n.parts[0]
-    const label = n.title ? `${n.title}(${only.label})` : only.label
+    const label = lead + (n.title ? `${n.title}(${only.label})` : only.label)
     return formatPartnerNotification(
       only.impact > 0
         ? { kind: 'partnerPaid', label, amount: only.impact, balance: n.balance }
         : { kind: 'expense', label, amount: -only.impact, balance: n.balance }
     )
   }
-  const head = `${total > 0 ? '🙏' : '🍽️'} ${n.title || '分けた会計'} ${signedDelta(total)}(${n.parts.length}つに分けた会計)`
+  const head = `${total > 0 ? '🙏' : '🍽️'} ${lead}${n.title || '分けた会計'} ${signedDelta(total)}(${n.parts.length}つに分けた会計)`
   const lines = n.parts.map((part) => `・${part.label} ${signedDelta(part.impact)}`)
   return [head, ...lines, balanceLine(n.balance)].join('\n')
 }

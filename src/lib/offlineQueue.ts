@@ -8,6 +8,12 @@ export interface PendingOp {
   id: string // 対象行のID(クライアント側で採番した uuid)
   payload?: TransactionInput // insert / update のときの内容
   queuedAt: string // ISO8601。insert の楽観表示では created_at の仮置きに使う
+  /**
+   * 削除の取り消し (機能159) で積み直した追加か。彼女への通知を
+   * 「元に戻しました」にするためだけに使う(無ければ新しい記録として扱う)。
+   * 以前の版で積まれたキューには無いので、必ず省略可のまま扱うこと
+   */
+  restore?: boolean
 }
 
 const QUEUE_KEY = 'kakeibo.pendingOps'

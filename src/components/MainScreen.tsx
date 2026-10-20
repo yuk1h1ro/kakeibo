@@ -24,6 +24,7 @@ import TransactionForm, { type DatePrefill } from './TransactionForm'
 import SettingsSheet from './SettingsSheet'
 import QuarantineSheet from './QuarantineSheet'
 import TemplateSaveSheet from './TemplateSaveSheet'
+import UndoDeleteBar from './UndoDeleteBar'
 import { IconCalendar, IconChart, IconGear, IconHeart, IconLogout, IconPen } from './icons'
 import { IconAssets } from './assetIcons'
 import { IconEye, IconEyeOff } from './maskIcons'
@@ -95,6 +96,9 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
 
   // 後から足したマスタデータ。いずれもテーブルが無ければ静かに無効化されるので、
   // マイグレーション未実行でも記録・入力には影響しない
+  // Discord の Webhook URL をサーバーから読み終わったか(月末サマリーはこれを待つ)
+  const webhookReadyRef = useRef<Promise<void>>(Promise.resolve())
+
   useEffect(() => {
     void initStoreCategories(supabase)
     void initTransactionTemplates(supabase)
@@ -106,7 +110,7 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
     // この端末にしか無かった URL はここでサーバーへ引き上げる。
     // テーブルが無い/通信できないときはキャッシュに触らないので、
     // **通知はどの場合でも従来どおり飛び続ける**(discordWebhook.ts を参照)
-    void initDiscordWebhook(supabase)
+    webhookReadyRef.current = initDiscordWebhook(supabase)
   }, [supabase])
 
   // 感情スタンプの付け直し(機能143)。編集と同じ update 経路なので
@@ -160,8 +164,14 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
   useEffect(() => {
     if (summaryTriedRef.current || store.loading) return
     summaryTriedRef.current = true
-    // 投げっぱなし。失敗しても記録・同期には一切影響しない
-    void sendDueMonthlySummaries(supabase, store.transactions, todayISO(), categoryLabel)
+    // 投げっぱなし。失敗しても記録・同期には一切影響しない。
+    // Webhook URL がサーバーから届くのを待ってから送る — 待たないと、URL が
+    // サーバーにだけある端末(初めて開いたスマホなど)では「未設定」と見て
+    // その起動では送らず、次に開くまで遅れていた
+    const rows = store.transactions
+    void webhookReadyRef.current.then(() =>
+      sendDueMonthlySummaries(supabase, rows, todayISO(), categoryLabel)
+    )
   }, [supabase, store.loading, store.transactions])
 
   // オンラインなのに同期が詰まっている(= 記録は保持されているが送れていない)状態。
@@ -285,6 +295,13 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
         )}
         {activeTab === 'assets' && <AssetsTab supabase={supabase} />}
       </main>
+      {/* 削除直後の「元に戻す」(機能159)。履歴タブは自分で出す(一覧の下に
+          バーの高さぶんの余白を空けるため)。それ以外のタブ — たとえば彼女タブ
+          から開いた編集シートで消したとき — はここで出す。これが無かったころは、
+          確認も取り消しも無いまま消え、彼女にも削除の通知が飛んでいた */}
+      {activeTab !== 'history' && store.undoableDeletes && (
+        <UndoDeleteBar count={store.undoableDeletes.length} onUndo={() => void store.undoDelete()} />
+      )}
       <nav className="tab-bar">
         {tabs.map((t) => (
           <button
@@ -323,7 +340,15 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
         <div className="modal-backdrop" onClick={() => setEditing(null)}>
           <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="sheet-header">
-              <h2>{editing.type === 'expense' ? '支出を編集' : '預かりを編集'}</h2>
+              <h2>
+                {editing.type === 'expense'
+                  ? '支出を編集'
+                  : editing.type === 'partner_refund'
+                    ? '返金を編集'
+                    : editing.type === 'partner_adjust'
+                      ? '調整を編集'
+                      : '預かりを編集'}
+              </h2>
               <button className="btn-ghost" onClick={() => setEditing(null)}>
                 閉じる
               </button>

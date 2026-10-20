@@ -15,6 +15,11 @@ interface Props {
   percentDisabled?: boolean
   /** 金額欄は画面に複数あるので、読み上げ名を欄ごとに分ける */
   fieldLabel?: string
+  /**
+   * 「税込」ボタンを出すか(既定は出す)。預かり・返金・調整の金額には
+   * 消費税が掛からないので出さない(README の「掛ける対象が無い欄には置かない」)
+   */
+  showTax?: boolean
 }
 
 /**
@@ -43,6 +48,7 @@ export default function AmountTaxKeys({
   onPercent,
   percentDisabled,
   fieldLabel,
+  showTax = true,
 }: Props) {
   const [applied, setApplied] = useState<TaxApplied | null>(null)
 
@@ -77,14 +83,17 @@ export default function AmountTaxKeys({
             ％
           </button>
         )}
-        {TAX_RATES.map((rate) => (
+        {showTax && TAX_RATES.map((rate) => (
           <button
             key={rate}
             type="button"
             className="calc-key tax-key"
             aria-label={`${prefix}税込にする(${rate}%)`}
-            /* 押せない状態(空欄・0円)を押す前に見せる。押してから無反応より分かる */
-            disabled={pressTax(state, rate) === null}
+            /* 押せない状態(空欄・0円)を押す前に見せる。押してから無反応より分かる。
+               押した直後(結果の説明が出ている間)も押せなくする — もう一度押すと
+               税込の額にさらに税が掛かる(1,430 → 1,573 → 1,730)。金額を打ち直せば
+               説明が消えて、また押せるようになる */
+            disabled={notice !== '' || pressTax(state, rate) === null}
             onClick={() => run(rate)}
           >
             税込 +{rate}%

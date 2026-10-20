@@ -49,7 +49,11 @@ export default function RowActionMenu({
         </div>
 
         <p className="hist-menu-target">
-          {formatDate(tx.date)} ・ {what} ・ {yen(amount)}
+          {formatDate(tx.date)} ・ {what} ・{' '}
+          {/* 彼女の分がある会計は、総額と自分の分を並べる(一覧の行と同じ考え方) */}
+          {isExpense && tx.partner_amount > 0
+            ? `会計 ${yen(tx.amount)}(自分の分 ${yen(amount)})`
+            : yen(amount)}
         </p>
 
         <div className="hist-menu-sheet" style={{ marginTop: 12 }}>

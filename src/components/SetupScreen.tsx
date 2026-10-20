@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { saveConfig, normalizeUrl } from '../lib/supabaseClient'
+import { setupProblem } from '../lib/setupValidation'
 
 export default function SetupScreen({ onSaved }: { onSaved: () => void }) {
   const [url, setUrl] = useState('')
   const [anonKey, setAnonKey] = useState('')
 
-  const valid = url.trim().startsWith('https://') && anonKey.trim().length > 20
+  // 保存できない理由。ボタンを灰色にするだけでは、何が足りないのか分からない
+  const problem = setupProblem(normalizeUrl(url), anonKey)
+  const valid = problem === null
 
   // パス付きURL(Callback URL など)や見慣れないホストが貼られた場合に、
   // 保存時の自動調整結果をプレビュー表示する(エラーにはしない)
@@ -44,13 +47,24 @@ export default function SetupScreen({ onSaved }: { onSaved: () => void }) {
         </label>
         <label className="field">
           <span>anon public キー</span>
+          {/* 新しいダッシュボードでは名前が違って見えることがある */}
+          <span className="muted">
+            新しい Supabase の画面では「Publishable key」(<code>sb_publishable_</code>
+            で始まる)という名前で出ていることがあります。anon public キーの新しい呼び名なので、
+            その値を貼ってください。
+          </span>
           <textarea
             rows={4}
-            placeholder="eyJhbGciOi..."
+            placeholder="eyJhbGciOi... または sb_publishable_..."
             value={anonKey}
             onChange={(e) => setAnonKey(e.target.value)}
           />
         </label>
+        {problem && (url.trim() !== '' || anonKey.trim() !== '') && (
+          <p className="muted" aria-live="polite">
+            {problem}
+          </p>
+        )}
         <button
           className="btn-primary"
           disabled={!valid}

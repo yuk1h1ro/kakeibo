@@ -1614,6 +1614,56 @@ body.keypad-open .modal-sheet {
   min-width: 0;
 }
 
+/* 「保存して続ける」は 390px 幅で2行に折り返していた。1行に収める。
+   320px 幅では文字を詰めても入りきらず、折り返しを止めるとボタンの外へ
+   はみ出すので、そこでは今までどおり折り返させる */
+.save-row .save-continue {
+  font-size: clamp(13px, 3.8vw, 16px);
+}
+
+@media (min-width: 360px) {
+  .save-row .save-continue {
+    white-space: nowrap;
+  }
+}
+
+/* 保存ボタンが押せない理由(灰色になるだけでは何が足りないか分からない) */
+.save-blocked {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* 「彼女が払った」のに「二人で使った」がオフのときの注意 */
+.payer-warn {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-btn);
+  background: var(--warning-bg);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* 保存した手応え。押した位置から見えるよう、画面の下(タブバーの上)に浮かべる */
+.saved-toast {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(80px + env(safe-area-inset-bottom));
+  z-index: 30;
+  margin: 0;
+  padding: 10px 16px;
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
+  color: var(--income);
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .btn-secondary {
   flex: 1;
   min-width: 0;

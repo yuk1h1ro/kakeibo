@@ -19,7 +19,7 @@ export default function AuthScreen({ supabase }: { supabase: SupabaseClient }) {
     const ok = window.confirm(
       'Supabaseの接続設定を消して初期設定からやり直しますか?\n' +
         'この端末に残っている接続情報・ログイン状態・明細のキャッシュ・' +
-        'APIキー等も消えます(サーバー上の家計簿のデータは消えません)',
+        '設定も消えます(サーバー上の家計簿のデータは消えません)',
     )
     if (!ok) return
     clearConfig()

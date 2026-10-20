@@ -20,6 +20,7 @@ import AmountCalcBar from './AmountCalcBar'
 import AmountTaxKeys from './AmountTaxKeys'
 import AmountTextInput from './AmountTextInput'
 import { normalizeAmountInput } from '../lib/amountFormat'
+import { revealAboveKeypad } from '../lib/keypadReveal'
 import { SATISFACTION_OPTIONS, useSatisfactionAvailable } from '../lib/satisfaction'
 import {
   FAVOR_OPTIONS,
@@ -196,6 +197,10 @@ export default function TransactionForm({
   )
   const [category, setCategory] = useState<string | null>(initial?.category ?? null)
   const [date, setDate] = useState(initial?.date ?? todayISO())
+  // 「自動で入れた今日」。利用者が選んだ日付と区別するために持つ。
+  // 開きっぱなしで日付をまたいだとき、まだ自動のままなら新しい今日へ進める
+  // (選んだ日付は動かさない)。編集シートは記録の日付そのものなので対象外
+  const autoDateRef = useRef<string | null>(initial ? null : date)
   const [memo, setMemo] = useState(initial?.memo ?? '')
   const [store, setStore] = useState(initial?.store ?? '')
   const [withPartner, setWithPartner] = useState((initial?.partner_amount ?? 0) > 0)
@@ -300,6 +305,7 @@ export default function TransactionForm({
   const [keypadTarget, setKeypadTarget] = useState<AmountTarget>('amount')
   const amountRef = useRef<HTMLInputElement | null>(null)
   const partnerRef = useRef<HTMLInputElement | null>(null)
+  const dateLeadRef = useRef<HTMLParagraphElement | null>(null)
   // プログラムからフォーカスするとき、onFocus 経由でテンキーが開くのを抑える印
   const silentFocusRef = useRef(false)
 
@@ -425,6 +431,25 @@ export default function TransactionForm({
     setPartnerCalc(EMPTY_CALC)
   }, [initial])
 
+  // 開きっぱなしで日付をまたいだら、自動で入れた「今日」を新しい今日へ進める。
+  // ホーム画面のアプリは閉じずに何日も残るので、起動のたびには作り直されない
+  useEffect(() => {
+    const roll = () => {
+      if (document.visibilityState === 'hidden') return
+      const today = todayISO()
+      const auto = autoDateRef.current
+      if (auto === null || auto === today) return
+      autoDateRef.current = today
+      setDate((current) => (current === auto ? today : current))
+    }
+    document.addEventListener('visibilitychange', roll)
+    window.addEventListener('focus', roll)
+    return () => {
+      document.removeEventListener('visibilitychange', roll)
+      window.removeEventListener('focus', roll)
+    }
+  }, [])
+
   // パッドを閉じたら、内訳の打ちかけの式も畳む(理由は openKeypadFor と同じ)
   useEffect(() => {
     if (!keypadOpen) setSplitCalc(null)
@@ -437,35 +462,72 @@ export default function TransactionForm({
     return () => document.body.classList.remove('keypad-open')
   }, [keypadOpen])
 
+  // タップが **どこで始まったか**。
+  // 画面の下半分にある金額欄をタップすると、指を置いた瞬間にテンキーが開いて
+  // 欄を覆い、指を離す位置がテンキーのキーになる。ブラウザはこの click を
+  // 「押した所と離した所の共通の祖先」に届けるので、下の「外側を押したら
+  // 閉じる」に引っかかり、テンキーが一瞬開いてすぐ閉じていた。
+  // 始まりが金額欄なら、それは外側のタップではない。
+  // テンキーが開く前の押し下げも拾う必要があるので、こちらは常に聞いておく
+  const pointerOriginRef = useRef<EventTarget | null>(null)
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      pointerOriginRef.current = e.target
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
+  }, [])
+
   // 金額欄・テンキー以外を触ったら閉じる。
   // blur ではなく click で閉じるのは、押した相手の onClick が先に走るようにするため
   // (先に閉じると余白が消えてボタンが指の下からずれることがある)
   useEffect(() => {
     if (!keypadOpen) return
+    // 「保存して続ける」は次の1件をそのまま打つためのボタンなので、閉じない。
+    // お店のチップも同じ — 押すとその場で金額へ進む(=パッドを開く)ので、
+    // 開けたのと同じタップで閉じてしまわないように除外する。
+    // ％・税込のボタンは金額欄そのものへの操作なので、押しても閉じない
+    // (閉じると押した直後に画面が跳ねて、出したばかりの結果が読めない)
+    // SVG のアイコン(カテゴリの絵など)も外側として数えるので、HTMLElement ではなく Element で見る
+    const keepsOpen = (el: EventTarget | null): boolean =>
+      el instanceof Element &&
+      (el === amountRef.current ||
+        el === partnerRef.current ||
+        el.closest('.keypad-field') !== null ||
+        el.closest('.keypad-dock') !== null ||
+        el.closest('.save-continue') !== null ||
+        el.closest('.store-chip') !== null ||
+        el.closest('.percent-block') !== null)
     const onDocumentClick = (e: MouseEvent) => {
-      const target = e.target
-      if (!(target instanceof HTMLElement)) return
-      // 「保存して続ける」は次の1件をそのまま打つためのボタンなので、閉じない。
-      // お店のチップも同じ — 押すとその場で金額へ進む(=パッドを開く)ので、
-      // 開けたのと同じタップで閉じてしまわないように除外する。
-      // ％・税込のボタンは金額欄そのものへの操作なので、押しても閉じない
-      // (閉じると押した直後に画面が跳ねて、出したばかりの結果が読めない)
-      if (
-        target === amountRef.current ||
-        target === partnerRef.current ||
-        target.closest('.keypad-field') ||
-        target.closest('.keypad-dock') ||
-        target.closest('.save-continue') ||
-        target.closest('.store-chip') ||
-        target.closest('.percent-block')
-      ) {
-        return
-      }
+      if (keepsOpen(e.target) || keepsOpen(pointerOriginRef.current)) return
       setKeypadOpen(false)
     }
-    document.addEventListener('click', onDocumentClick)
-    return () => document.removeEventListener('click', onDocumentClick)
+    // 聞き始めるのは、テンキーを開いたタップが終わってから。
+    // React はタップで起きた変更をそのタップの最中に反映するので、ここで
+    // すぐ聞き始めると、**開いたタップそのもの** が document まで上ってきて
+    // 「外側を押した」と数えられ、開いた瞬間に閉じる(カテゴリの文字の
+    // 部分を押したときがそうだった。絵の部分は SVG なので、たまたま
+    // 見逃されていただけ)
+    const timer = window.setTimeout(() => document.addEventListener('click', onDocumentClick), 0)
+    return () => {
+      window.clearTimeout(timer)
+      document.removeEventListener('click', onDocumentClick)
+    }
   }, [keypadOpen])
+
+  // テンキーを開いた・別の欄へ向け直したら、その欄をテンキーより上に見せる
+  // (keypadReveal.ts)。支払い金額のときは、すぐ下の「この記録は 昨日 で
+  // 保存されます」まで見せる — 日付の取り違えに気付ける最後の場所なので
+  useEffect(() => {
+    if (!keypadOpen) return
+    const active = document.activeElement
+    const field = active instanceof HTMLInputElement ? active : amountRef.current
+    if (!field) return
+    const frame = requestAnimationFrame(() =>
+      revealAboveKeypad(field, keypadTarget === 'amount' ? dateLeadRef.current : null)
+    )
+    return () => cancelAnimationFrame(frame)
+  }, [keypadOpen, keypadTarget])
 
   // 外部プリフィル適用(日付は現在の選択を維持する。差し替えたいときは DatePrefill を使う)
   useEffect(() => {
@@ -722,6 +784,28 @@ export default function TransactionForm({
     // ここを緩めると支出の合計と預かり残高が静かにずれる
     (!splitting ? !isExpense || category !== null : (splitValidation?.ok ?? false))
 
+  // 保存ボタンが押せない理由。灰色になるだけでは、初めての人は何が足りないのか
+  // 分からない。上の `valid` と同じ順に、最初に引っかかった1つだけを言う。
+  // 分割の内訳・彼女が払った額・マイナスの金額は、それぞれの欄の近くにもう理由が
+  // 出ているが、ボタンの近くにも同じことを短く出す(画面の外にあることが多い)
+  const saveBlockedReason: string | null = valid
+    ? null
+    : !splitting && isExpense && category === null
+      ? 'カテゴリを選んでください'
+      : amountNum < 0
+        ? '金額がマイナスになっています(電卓の計算を見直してください)'
+        : !Number.isInteger(amountNum) || (amountNum === 0 && !zeroAllowed)
+          ? '金額を入れてください'
+          : isExpense && withPartner && partnerNum > amountNum
+            ? '彼女の負担分が支払い金額を超えています'
+            : !partnerPaidValid
+              ? payer === 'both' && partnerPaidNum <= 0
+                ? '彼女が払った額を入れてください'
+                : '彼女が払った額が支払い金額を超えています'
+              : splitting
+                ? '分割の内訳がそろっていません(内訳の欄の下を見てください)'
+                : null
+
   const dateChips = [
     { label: '今日', value: daysAgoISO(0) },
     { label: '昨日', value: daysAgoISO(1) },
@@ -842,6 +926,13 @@ export default function TransactionForm({
           setStreak(0)
           setOptionsOpen(false)
           setKeypadOpen(false)
+          // 「保存して続ける」だけが日付とカテゴリを残す(README の約束)。
+          // 「記録する」で残すと、昨日の分を入れたあとの次の1件が、
+          // 気付かないまま昨日の日付・同じカテゴリで保存される
+          const today = todayISO()
+          setDate(today)
+          autoDateRef.current = today
+          setCategory(null)
         }
       }
     } catch (e) {
@@ -1086,6 +1177,8 @@ export default function TransactionForm({
           onPercent={() => runPercent('amount')}
           onApply={(next) => applyTo('amount', next)}
           warning={amountNum < 0 && <span className="calc-warn">マイナスの金額は保存できません</span>}
+          // 預かり・返金・調整の金額には消費税が掛からない
+          showTax={isExpense}
         />
       </div>
 
@@ -1113,7 +1206,7 @@ export default function TransactionForm({
           金額のすぐ下にも出しておく — カレンダーから始めた入力(機能053)で
           「いつの記録なのか」が画面の外に行ったままにならないように */}
       {!dateIsToday && (
-        <p className="date-lead" aria-live="polite">
+        <p className="date-lead" aria-live="polite" ref={dateLeadRef}>
           この記録は <strong>{dateShortLabel}</strong> で保存されます(日付は下で変えられます)
         </p>
       )}
@@ -1172,7 +1265,11 @@ export default function TransactionForm({
           {withPartner && (
             <>
               <div className="field">
-                <span>彼女の負担分(円) — 預かり残高から差し引かれます</span>
+                <span>
+                  彼女の負担分(円)
+                  {/* 彼女が払った回は「差し引かれる」とは限らない(下の支払った人の説明に任せる) */}
+                  {payer === 'me' && ' — 預かり残高から差し引かれます'}
+                </span>
                 {/* 支払い金額と同じ電卓が使える。
                     「彼女が頼んだ 1,280 と 450」のように、レシートの何行かを
                     足して負担分を出す場面が多いので、アプリの外の電卓に
@@ -1266,8 +1363,18 @@ export default function TransactionForm({
           )}
           {payer !== 'me' && (
             <p className="muted payer-note">
-              彼女が払った {yen(partnerPaidNum || 0)} と負担分 {yen(partnerNum)} の差が、
-              預かり残高に反映されます
+              {`彼女が払った ${yen(partnerPaidNum || 0)} と負担分 ${yen(partnerNum)} の差が、預かり残高に反映されます`}
+            </p>
+          )}
+          {/* 「支払った人」と「二人で使った」は別々のスイッチなので、片方だけ押すと
+              意図と逆に残高が動く。彼女がおごってくれた夕食で「彼女が全額」だけ押し、
+              「二人で使った」を忘れると、総額がまるごと「彼女に返すお金」として
+              残高に足される(彼女の分の差し引きが 0 になるため)。押せなくはしない —
+              「自分ひとりの買い物を彼女が立て替えてくれた」も正しい使い方なので */}
+          {payer !== 'me' && !withPartner && partnerPaidNum > 0 && (
+            <p className="payer-warn" role="note">
+              {`「二人で使った」がオフなので、彼女の負担は 0円 として扱われ、彼女が払った ${yen(partnerPaidNum)} がまるごと預かり残高に足されます。` +
+                '彼女の分も含まれる会計なら、上の「二人で使った」をオンにして負担分を入れてください。'}
             </p>
           )}
         </div>
@@ -1421,7 +1528,7 @@ export default function TransactionForm({
                           <input
                             type="text"
                             aria-label="おごってくれた人"
-                            placeholder="例: 田中さん / 部長 / 父"
+                            placeholder="例: 田中 / 部長 / 先輩"
                             value={favorFrom}
                             autoComplete="off"
                             maxLength={MAX_FAVOR_FROM_LENGTH}
@@ -1664,6 +1771,12 @@ export default function TransactionForm({
       )}
 
       {error && <p className="error-text">{error}</p>}
+
+      {saveBlockedReason && !busy && (
+        <p className="save-blocked" aria-live="polite">
+          {saveBlockedReason}
+        </p>
+      )}
 
       {/* 機能048: 主は「記録する」、副が「保存して続ける」 */}
       <div className="save-row">

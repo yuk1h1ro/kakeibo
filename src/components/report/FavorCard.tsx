@@ -3,7 +3,7 @@ import type { Transaction } from '../../lib/types'
 import type { DateRange } from '../../lib/report'
 import { formatDate, yen } from '../../lib/format'
 import { categoryLabel } from '../../lib/categories'
-import { favorCategoryBreakdown, favorSummary } from '../../lib/favors'
+import { favorCategoryBreakdown, favorSummary, withHonorific } from '../../lib/favors'
 
 interface Props {
   transactions: Transaction[]
@@ -69,7 +69,7 @@ export default function FavorCard({ transactions, range, periodLabel }: Props) {
             {summary.people.map((p) => (
               <li key={p.name} className="favor-person">
                 <span className="favor-person-name">
-                  {p.name === '' ? '(名前を書いていない回)' : `${p.name}さん`}
+                  {p.name === '' ? '(名前を書いていない回)' : withHonorific(p.name)}
                 </span>
                 <span className="favor-person-sub">
                   {p.count}回・最後は {formatDate(p.lastDate)}

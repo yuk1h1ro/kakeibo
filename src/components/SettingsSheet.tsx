@@ -114,7 +114,7 @@ export default function SettingsSheet({
             <li>
               <button className="settings-row" onClick={() => setChild('category')}>
                 <span className="settings-row-title">カテゴリ設定</span>
-                <span className="settings-row-sub">追加・名前の変更・並べ替え・削除</span>
+                <span className="settings-row-sub">追加・名前の変更・並べ替え・隠す</span>
               </button>
             </li>
             {!isRecurringUnavailable() && (

@@ -280,6 +280,8 @@ describe('formatMonthlySummary', () => {
     categories: [],
     hasActivity: true,
     ...over,
+    // 月末の残高は、指定が無ければいまの残高と同じ(= 遅れずに送った月)
+    monthEndBalance: over.monthEndBalance ?? over.balance ?? 0,
   })
 
   it('合計・残高・内訳が入る', () => {
@@ -295,7 +297,9 @@ describe('formatMonthlySummary', () => {
     expect(text).toContain('2026年2月のまとめ')
     expect(text).toContain('使った分の合計: ¥3,500')
     expect(text).toContain('預かった合計: ¥30,000')
-    expect(text).toContain('いまの残高: ¥21,500')
+    expect(text).toContain('2月末の残高: ¥21,500')
+    // いまと同じなら、いまの残高は重ねて書かない
+    expect(text).not.toContain('いまの残高')
     expect(text).toContain('・食費 ¥3,500')
   })
 
@@ -341,7 +345,46 @@ describe('formatMonthlySummary', () => {
     const text = formatMonthlySummary(summary({ withdrawTotal: 100, balance: -500 }), labelOf)
     // マイナスは「立て替え中(彼女への貸し)」。符号だけだと預かりが減ったのか
     // 貸しが増えたのか読めないので、絶対値 + 言葉で出す
-    expect(text).toContain('いまの残高: ¥500(立て替え中(彼女への貸し))')
+    expect(text).toContain('2月末の残高: ¥500(立て替え中(彼女への貸し))')
     expect(text).not.toContain('−¥500')
+  })
+})
+
+// ============================================================
+// 送るのが遅れた月の残高
+//
+// 8月分を10月に送ると、全期間の残高には9月・10月の動きまで混ざる。
+// それを「いまの残高」だけで載せると、8月の話として読めてしまう。
+// ============================================================
+describe('月末の残高', () => {
+  it('その月の終わりまでの動きだけで数える(翌月以降は混ぜない)', () => {
+    const rows = [
+      { id: 'd', date: '2026-08-01', type: 'partner_deposit' as const, amount: 30000, partner_amount: 0, category: null },
+      { id: 'e', date: '2026-08-20', type: 'expense' as const, amount: 3000, partner_amount: 1000, category: 'food' },
+      { id: 'f', date: '2026-09-05', type: 'expense' as const, amount: 5000, partner_amount: 2000, category: 'food' },
+    ]
+    const s = buildMonthlySummary(rows, '2026-08')
+    expect(s.monthEndBalance).toBe(29000)
+    expect(s.balance).toBe(27000)
+  })
+
+  it('いまと違うときは、月末の残高といまの残高を両方書く', () => {
+    const text = formatMonthlySummary(
+      {
+        month: '2026-08',
+        withdrawTotal: 1000,
+        depositTotal: 30000,
+        refundTotal: 0,
+        adjustTotal: 0,
+        partnerPaidTotal: 0,
+        balance: 27000,
+        monthEndBalance: 29000,
+        categories: [],
+        hasActivity: true,
+      },
+      (c) => c ?? 'その他'
+    )
+    expect(text).toContain('8月末の残高: ¥29,000')
+    expect(text).toContain('いまの残高: ¥27,000')
   })
 })

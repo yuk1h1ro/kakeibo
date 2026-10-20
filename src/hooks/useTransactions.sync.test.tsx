@@ -221,7 +221,7 @@ describe('送信が中断されたあとの残高通知', () => {
     // 分割の会計は揃うまで待つが、切れたら送れた分だけで1通にする
     // (待ち続けると、届いた記録の知らせがいつまでも出ない)
     await waitFor(() => expect(result.current.pendingCount).toBe(2))
-    expect(sent).toEqual(['🍽️ 応答喪失スーパー(食費) −¥700\n残高: ¥49,300(預かり中)'])
+    expect(sent).toEqual(['🍽️ 9月2日 応答喪失スーパー(食費) −¥700\n残高: ¥49,300(預かり中)'])
 
     // 圏外を抜けて残りを送る
     server.unreachable.clear()
@@ -233,8 +233,8 @@ describe('送信が中断されたあとの残高通知', () => {
     // 50,000 − 700 − 500 − 250。中断をまたいでも彼女に届く残高は続きから。
     // 残りの2つは1通にまとまる
     expect(sent).toEqual([
-      '🍽️ 応答喪失スーパー(食費) −¥700\n残高: ¥49,300(預かり中)',
-      '🍽️ 応答喪失スーパー −¥750(2つに分けた会計)\n・日用品 −¥500\n・交通費 −¥250\n残高: ¥48,550(預かり中)',
+      '🍽️ 9月2日 応答喪失スーパー(食費) −¥700\n残高: ¥49,300(預かり中)',
+      '🍽️ 9月2日 応答喪失スーパー −¥750(2つに分けた会計)\n・日用品 −¥500\n・交通費 −¥250\n残高: ¥48,550(預かり中)',
     ])
   })
 })
@@ -254,7 +254,7 @@ describe('分割の会計の Discord 通知', () => {
     await waitFor(() => expect(result.current.pendingCount).toBe(0))
 
     expect(sent).toEqual([
-      '🍽️ 応答喪失スーパー −¥1,450(3つに分けた会計)\n' +
+      '🍽️ 9月2日 応答喪失スーパー −¥1,450(3つに分けた会計)\n' +
         '・食費 −¥700\n・日用品 −¥500\n・交通費 −¥250\n' +
         '残高: ¥48,550(預かり中)',
     ])
@@ -270,7 +270,7 @@ describe('分割の会計の Discord 通知', () => {
     const { result } = renderHook(() => useTransactions(fakeSupabase(server)))
     await waitFor(() => expect(result.current.pendingCount).toBe(0))
 
-    expect(sent).toEqual(['🍽️ 応答喪失スーパー(食費) −¥700\n残高: ¥49,300(預かり中)'])
+    expect(sent).toEqual(['🍽️ 9月2日 応答喪失スーパー(食費) −¥700\n残高: ¥49,300(預かり中)'])
   })
 
   it('分割の後ろに続く別の記録は、会計の通知のあとに別の1通で届く(順番を崩さない)', async () => {
@@ -282,7 +282,7 @@ describe('分割の会計の Discord 通知', () => {
 
     expect(sent).toHaveLength(2)
     expect(sent[0]).toContain('3つに分けた会計')
-    expect(sent[1]).toBe('🍽️ 別のお店 −¥100\n残高: ¥48,450(預かり中)')
+    expect(sent[1]).toBe('🍽️ 9月2日 別のお店 −¥100\n残高: ¥48,450(預かり中)')
   })
 
   it('途中の内訳が断られて会計ごと取り消されたら、何も知らせない', async () => {

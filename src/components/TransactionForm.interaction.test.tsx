@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import TransactionForm from './TransactionForm'
 import { setKeypadPreference } from '../lib/keypadSettings'
+import { daysAgoISO } from '../lib/format'
 import { endTripMode, startTripMode } from '../lib/tripMode'
 import type { TransactionInput } from '../hooks/useTransactions'
 import type { Transaction } from '../lib/types'
@@ -169,6 +170,8 @@ describe('入力フォームが保存する内容', () => {
     await user.click(button('彼女が全額'))
     await user.click(saveButton())
 
+    // 「記録する」はカテゴリを残さない(残すのは「保存して続ける」だけ)
+    await user.click(button(/食費/))
     await typeAmount(user, '支払い金額(円)', '500')
     await user.click(saveButton())
 
@@ -286,6 +289,8 @@ describe('おごり・値引き', () => {
     await user.type(field('おごってくれた人'), '田中')
     await user.click(saveButton())
 
+    // 「記録する」はカテゴリを残さない(残すのは「保存して続ける」だけ)
+    await user.click(button(/食費/))
     await typeAmount(user, '支払い金額(円)', '800')
     await user.click(saveButton())
 
@@ -381,6 +386,8 @@ describe('旅行モードの自動タグ', () => {
     await user.click(button('この1件だけ外す'))
     await user.click(saveButton())
 
+    // 「記録する」はカテゴリを残さない(残すのは「保存して続ける」だけ)
+    await user.click(button(/食費/))
     await typeAmount(user, '支払い金額(円)', '2000')
     await user.click(saveButton())
 
@@ -1207,5 +1214,196 @@ describe('分割の内訳の電卓', () => {
     // 残った内訳はそのまま
     expect(field('内訳 1 の金額').value).toBe('1,500')
     expect(field('内訳 2 の金額').value).toBe('1,500')
+  })
+})
+
+// ============================================================
+// テンキーが開いた瞬間に閉じない
+//
+// テンキーを開いたタップそのものが「外側のタップ」として数えられ、
+// 開いた瞬間に閉じていた(カテゴリの文字の部分を押したとき。絵の部分は
+// SVG なのでたまたま見逃されていた)。
+//
+// **注意: 1つ目のテストは、直す前のコードでも通る。** jsdom では React の
+// act() が副作用をタップの処理が終わるまで遅らせるので、「開いたタップが
+// そのまま document に届く」順番を再現できない。不具合は Chromium の実機相当
+// (Playwright)でだけ再現し、直ったこともそこで確かめた。ここに残すのは、
+// 直し方(聞き始めを遅らせる)で外側のタップまで効かなくなっていないことの見張り。
+// ============================================================
+describe('テンキーが開いた瞬間に閉じない', () => {
+  beforeEach(() => setKeypadPreference('on'))
+  afterEach(() => setKeypadPreference('auto'))
+
+  it('カテゴリの文字の部分を押しても、開いたテンキーはそのまま', async () => {
+    const { user } = setup()
+    // ボタンの中の文字(span)を押す
+    await user.click(screen.getByText('外食'))
+    expect(screen.queryByRole('group', { name: '金額入力のテンキー' })).not.toBeNull()
+  })
+
+  it('開いたあとで本当に外側を押せば閉じる', async () => {
+    const { user } = setup()
+    await user.click(screen.getByText('外食'))
+    await user.click(screen.getByText('メモ(任意)'))
+    expect(screen.queryByRole('group', { name: '金額入力のテンキー' })).toBeNull()
+  })
+})
+
+// ============================================================
+// 「記録する」のあとに残すもの・残さないもの
+//
+// 日付とカテゴリを残すのは「保存して続ける」だけ(README の約束)。
+// 「記録する」で日付が残っていたので、昨日の分を入れたあとの次の1件が、
+// 気付かないまま昨日の日付で保存されえた。
+// ============================================================
+describe('「記録する」のあと', () => {
+  it('日付は今日に、カテゴリは未選択に戻る', async () => {
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await user.click(button('昨日'))
+    await typeAmount(user, '支払い金額(円)', '1000')
+    await user.click(saveButton())
+
+    // 1件目は昨日で保存された
+    expect(submitted[0].date).toBe(daysAgoISO(1))
+    // 日付の注意書き(今日以外のときだけ出る)が消えている = 今日に戻った
+    expect(screen.queryByText(/で保存されます/)).toBeNull()
+    expect(screen.getByText('カテゴリを選んでください')).toBeTruthy()
+  })
+
+  it('開きっぱなしで日付をまたいだら、自動で入れた今日は新しい今日へ進む', async () => {
+    setup()
+    const today = daysAgoISO(0)
+    expect(screen.getByDisplayValue(today)).toBeTruthy()
+    // 時計だけを翌日へ進める(user-event のタイマーは動かさない)
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date(Date.now() + 24 * 60 * 60 * 1000))
+      const tomorrow = daysAgoISO(0)
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'))
+      })
+      expect(screen.getByDisplayValue(tomorrow)).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('自分で選んだ日付は、日付をまたいでも動かさない', async () => {
+    const { user } = setup()
+    await user.click(button('昨日'))
+    const chosen = daysAgoISO(1)
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date(Date.now() + 24 * 60 * 60 * 1000))
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'))
+      })
+      expect(screen.getByDisplayValue(chosen)).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('「保存して続ける」なら日付とカテゴリを残す', async () => {
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await user.click(button('昨日'))
+    await typeAmount(user, '支払い金額(円)', '1000')
+    await user.click(button('保存して続ける'))
+    await typeAmount(user, '支払い金額(円)', '500')
+    await user.click(saveButton())
+
+    expect(submitted).toHaveLength(2)
+    expect(submitted[1].date).toBe(submitted[0].date)
+    expect(submitted[1].category).toBe('food')
+  })
+})
+
+// ============================================================
+// 保存ボタンが押せない理由を、ボタンの近くに出す
+// ============================================================
+describe('保存できない理由', () => {
+  it('カテゴリを選んでいないとき', async () => {
+    const { user } = setup()
+    await typeAmount(user, '支払い金額(円)', '1000')
+    expect(saveButton().disabled).toBe(true)
+    expect(screen.getByText('カテゴリを選んでください')).toBeTruthy()
+  })
+
+  it('金額を入れていないとき', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    expect(screen.getByText('金額を入れてください')).toBeTruthy()
+  })
+
+  it('彼女の負担分が支払い金額を超えているとき', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '1280')
+    await user.click(button('二人で使った'))
+    await typeAmount(user, '彼女の負担分', '2000')
+    expect(screen.getByText('彼女の負担分が支払い金額を超えています')).toBeTruthy()
+  })
+
+  it('保存できるようになったら理由は消える', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '1000')
+    expect(saveButton().disabled).toBe(false)
+    expect(screen.queryByText('金額を入れてください')).toBeNull()
+    expect(screen.queryByText('カテゴリを選んでください')).toBeNull()
+  })
+})
+
+// ============================================================
+// 「彼女が払った」のに「二人で使った」がオフ
+//
+// 別々のスイッチなので、片方だけ押すと意図と逆に残高が動く。
+// 押せなくはしない(自分ひとりの買い物を彼女が立て替えた、も正しい使い方)。
+// ============================================================
+describe('支払った人と「二人で使った」の組み合わせ', () => {
+  it('「彼女が全額」だけで「二人で使った」がオフなら、総額が残高に足されることを知らせる', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '6000')
+    await user.click(button('彼女が全額'))
+    expect(screen.getByText(/まるごと預かり残高に足されます/)).toBeTruthy()
+    // 保存は止めない
+    expect(saveButton().disabled).toBe(false)
+  })
+
+  it('「二人で使った」をオンにすれば、注意は消える', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '6000')
+    await user.click(button('彼女が全額'))
+    await user.click(button('二人で使った'))
+    expect(screen.queryByText(/まるごと預かり残高に足されます/)).toBeNull()
+  })
+})
+
+// ============================================================
+// 税込ボタンの小さな直し
+// ============================================================
+describe('税込ボタン', () => {
+  beforeEach(() => setKeypadPreference('off'))
+  afterEach(() => setKeypadPreference('auto'))
+
+  it('押した直後はもう一度押せない(税込にさらに税が掛かるのを防ぐ)', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '1430')
+    await user.click(button('税込にする(10%)'))
+    expect(field('支払い金額(円)').value).toBe('1,573')
+    expect(button('税込にする(10%)').disabled).toBe(true)
+    // 金額を打ち直せば、また押せる
+    await typeAmount(user, '支払い金額(円)', '1000')
+    expect(button('税込にする(10%)').disabled).toBe(false)
+  })
+
+  it('預かり・返金・調整の金額には出さない(消費税が掛からない)', async () => {
+    setup({ fixedType: 'partner_deposit', submitLabel: '預かる' })
+    expect(screen.queryByRole('button', { name: /税込にする/ })).toBeNull()
   })
 })

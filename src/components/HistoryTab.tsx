@@ -56,7 +56,8 @@ import RowActionMenu from './RowActionMenu'
 import BulkCategorySheet from './BulkCategorySheet'
 import BulkTagSheet from './BulkTagSheet'
 import ChangeLogSheet from './ChangeLogSheet'
-import { IconHistory, IconRefresh, IconUndo } from './historyIcons'
+import { IconHistory, IconRefresh } from './historyIcons'
+import UndoDeleteBar from './UndoDeleteBar'
 import '../calendar.css'
 import '../history.css'
 
@@ -508,7 +509,9 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
           <>
             <div className="card month-summary">
               <div className="ms-item">
-                <span className="ms-label">支出</span>
+                {/* 合計は彼女の負担分を除いた「自分の分」。会計の総額の合計ではないことを
+                    見出しで言う(検索結果のときだけ注記が出ていて、ふだんは読めなかった) */}
+                <span className="ms-label">支出(自分の分)</span>
                 <span className="ms-value ms-expense">{yen(expenseTotal)}</span>
               </div>
               <div className="ms-divider" />
@@ -579,7 +582,7 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
           <div className="hist-result-head">
             <span>{searching ? `検索結果 ${results.length}件` : formatDate(selected)}</span>
             <span className="hist-result-total">
-              合計 {yen(searching ? resultTotal : dayTotal)}
+              自分の分 {yen(searching ? resultTotal : dayTotal)}
             </span>
             {visibleRows.length > 0 && !selectMode && (
               <button className="hist-head-btn" onClick={() => setSelectMode(true)}>
@@ -601,6 +604,7 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
                 splitPos={splitPos.get(t.id)}
                 selectMode={selectMode}
                 picked={pickedSet.has(t.id)}
+                unsynced={store.pendingIds?.has(t.id) ?? false}
                 onOpen={onEdit}
                 onLongPress={setMenuTx}
                 onSwipeDelete={(tx) => deleteTxs([tx])}
@@ -676,14 +680,7 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
 
       {/* ---------- 削除直後の「元に戻す」 (機能159) ---------- */}
       {!selectMode && undoTxs && (
-        <div ref={barRef} className="hist-bottom-bar hist-undo-bar" role="status">
-          <span className="hist-bar-text">
-            {undoTxs.length === 1 ? '1件を削除しました' : `${undoTxs.length}件を削除しました`}
-          </span>
-          <button className="hist-bar-undo" onClick={() => void store.undoDelete()}>
-            <IconUndo /> 元に戻す
-          </button>
-        </div>
+        <UndoDeleteBar barRef={barRef} count={undoTxs.length} onUndo={() => void store.undoDelete()} />
       )}
 
       {showPicker && (

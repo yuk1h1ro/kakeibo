@@ -130,8 +130,9 @@ describe('おごり・値引きの行', () => {
 })
 
 describe('履歴の行の添え書き', () => {
-  it('彼女の負担分があるときは「うち彼女分」を書く', () => {
-    expect(render(tx({ partner_amount: 400 }))).toContain('うち彼女分 ¥400')
+  it('彼女の負担分があるときは、会計の総額と「うち彼女分」を書く', () => {
+    // 右端は自分の分なので、総額がここに無いとレシートと突き合わせられない
+    expect(render(tx({ partner_amount: 400 }))).toContain('会計 ¥1,000(うち彼女分 ¥400)')
   })
 
   it('彼女の負担分が0のときは「うち彼女分」を書かない', () => {
@@ -205,5 +206,15 @@ describe('複数選択モードの行', () => {
 
   it('選択していないときは aria-pressed を付けない(ボタンの意味が変わらないように)', () => {
     expect(render(tx())).not.toContain('aria-pressed')
+  })
+})
+
+describe('未同期の印', () => {
+  it('まだ送れていない記録には「未同期」と出す', () => {
+    expect(render(tx({}), { unsynced: true })).toContain('未同期')
+  })
+
+  it('送れている記録には出さない', () => {
+    expect(render(tx({}))).not.toContain('未同期')
   })
 })

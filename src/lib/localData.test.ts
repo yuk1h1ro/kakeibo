@@ -143,7 +143,7 @@ describe('signOutIntentText — 1段目の確認', () => {
   })
 
   it('期限切れで押す必要が無いことを書く(ここが元の誤誘導の入口だった)', () => {
-    expect(signOutIntentText(0)).toContain('有効期限はありません')
+    expect(signOutIntentText(0)).toContain('押す必要はありません')
   })
 
   it('未同期があるときは件数を出す', () => {

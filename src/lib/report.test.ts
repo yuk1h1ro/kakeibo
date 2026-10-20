@@ -120,13 +120,13 @@ describe('partnerBalanceImpact — この期間の支出が預かり残高に与
 
   it('データ0件なら0で、残高は動いていないと言う', () => {
     expect(partnerBalanceImpact([], r)).toBe(0)
-    expect(note(0)).toBe('預かり残高は変わりません')
+    expect(note(0)).toBe('支出では残高は変わりません')
   })
 
   it('自分が全額払った回は、彼女の負担分だけ残高から引かれる', () => {
     const txs = [tx({ amount: 3000, partner_amount: 1000 })] // partner_paid 無し = 自分が全額
     expect(partnerBalanceImpact(txs, r)).toBe(-1000)
-    expect(note(-1000)).toBe('預かり残高が ¥1,000 減っています')
+    expect(note(-1000)).toBe('支出で残高が ¥1,000 減っています')
   })
 
   it('彼女が払った回は残高が増える(「減っています」と書いたら嘘になる回)', () => {
@@ -134,7 +134,7 @@ describe('partnerBalanceImpact — この期間の支出が預かり残高に与
     // 差し引かれるどころか 2,000円 こちらが借りている
     const txs = [tx({ amount: 3000, partner_amount: 1000, partner_paid: 3000 })]
     expect(partnerBalanceImpact(txs, r)).toBe(2000)
-    expect(note(2000)).toBe('預かり残高が ¥2,000 増えています')
+    expect(note(2000)).toBe('支出で残高が ¥2,000 増えています')
     // 3つの文言は末尾だけで向きが決まるので、逆向きの語が混ざっていないことまで見る
     expect(note(2000)).not.toContain('減っ')
     expect(note(-1000)).not.toContain('増え')
@@ -143,7 +143,7 @@ describe('partnerBalanceImpact — この期間の支出が預かり残高に与
   it('分けて払って過不足がなければ影響なし', () => {
     const txs = [tx({ amount: 3000, partner_amount: 1000, partner_paid: 1000 })]
     expect(partnerBalanceImpact(txs, r)).toBe(0)
-    expect(note(0)).toBe('預かり残高は変わりません')
+    expect(note(0)).toBe('支出では残高は変わりません')
   })
 
   it('期間内の支出を足し合わせ、打ち消し合えば0になる', () => {

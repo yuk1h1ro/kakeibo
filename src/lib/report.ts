@@ -109,9 +109,12 @@ export function partnerBalanceImpact(txs: readonly Transaction[], r: DateRange):
  * 文を伸ばすときは 390px 幅で2行に収まるか見ること。
  */
 export function partnerImpactNote(impact: number, formatYen: (n: number) => string): string {
-  if (impact < 0) return `預かり残高が ${formatYen(-impact)} 減っています`
-  if (impact > 0) return `預かり残高が ${formatYen(impact)} 増えています`
-  return '預かり残高は変わりません'
+  // 「支出で」と頭に付ける。この数字は預かり・返金・調整を含まない(上の
+  // partnerBalanceImpact)ので、ただ「預かり残高が減っています」と書くと、
+  // 同じ月に預かりを受け取って実際には残高が増えた月でも「減った」と読めてしまう
+  if (impact < 0) return `支出で残高が ${formatYen(-impact)} 減っています`
+  if (impact > 0) return `支出で残高が ${formatYen(impact)} 増えています`
+  return '支出では残高は変わりません'
 }
 
 // ---------- ランキング(カテゴリ別・お店別・1件ごと) ----------
