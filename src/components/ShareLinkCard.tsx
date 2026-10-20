@@ -13,7 +13,8 @@ import {
 import { buildShareUrl } from '../lib/shareRoute'
 import { hasBuildTimeConfig } from '../lib/supabaseClient'
 import '../share.css'
-import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
+import { describeUnknownError } from '../lib/errorGuidance'
+import { isOnlineNow } from '../lib/serverErrors'
 
 // ============================================================
 // 閲覧専用の共有リンクの発行・コピー・無効化・再発行 (機能179 / 利用者側)

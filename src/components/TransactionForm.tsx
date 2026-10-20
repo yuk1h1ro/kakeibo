@@ -60,7 +60,8 @@ import {
 } from '../lib/splits'
 import type { TransactionInput } from '../hooks/useTransactions'
 import '../ledger.css'
-import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
+import { describeUnknownError } from '../lib/errorGuidance'
+import { isOnlineNow } from '../lib/serverErrors'
 
 // 「最近の記録から入力」などの外部プリフィル。nonce が変わるたびに適用される(日付は現在の選択を維持)
 export interface FormPrefill {

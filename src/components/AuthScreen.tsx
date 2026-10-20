@@ -2,7 +2,8 @@ import { useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { clearConfig, getConfiguredUrl, hasStoredConfig } from '../lib/supabaseClient'
 import { unsyncedCount, unsyncedWarningText } from '../lib/localData'
-import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
+import { describeUnknownError } from '../lib/errorGuidance'
+import { isOnlineNow } from '../lib/serverErrors'
 
 export default function AuthScreen({ supabase }: { supabase: SupabaseClient }) {
   const configuredUrl = getConfiguredUrl()

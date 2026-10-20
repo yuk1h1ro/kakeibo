@@ -14,7 +14,7 @@
 //     (原因を特定できなかったときに、これが唯一の手がかりになる)
 // ============================================================
 
-import { isNetworkError, isSchemaError, toServerError, type ServerErrorLike } from './serverErrors'
+import { isNetworkError, isOnlineNow, isSchemaError, toServerError, type ServerErrorLike } from './serverErrors'
 
 export type GuidanceKind =
   /** マイグレーション未実行(列・テーブルが無い) */
@@ -537,11 +537,6 @@ export function describeUnknownError(e: unknown, online = true): string {
   const trimmed = message.trim()
   if (trimmed !== '' && looksAlreadyWrittenForHumans(trimmed)) return trimmed
   return formatGuidance(guidanceForMessage(trimmed === '' ? message : trimmed, online))
-}
-
-/** navigator.onLine を安全に読む(非ブラウザ環境では「オンライン」とみなす) */
-export function isOnlineNow(): boolean {
-  return typeof navigator === 'undefined' || navigator.onLine !== false
 }
 
 /**

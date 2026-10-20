@@ -12,7 +12,8 @@ import {
   type RecurringCandidate,
 } from '../../lib/recurringInsights'
 import { getSupabase } from '../../lib/supabaseClient'
-import { describeUnknownError, isOnlineNow } from '../../lib/errorGuidance'
+import { describeUnknownError } from '../../lib/errorGuidance'
+import { isOnlineNow } from '../../lib/serverErrors'
 
 interface Props {
   transactions: Transaction[]
@@ -63,7 +64,7 @@ export default function RecurringSuggestCard({ transactions, today }: Props) {
       await addRecurringRule(supabase, input)
       // 登録すると rules に載るので、この候補は次の描画で自動的に消える
     } catch (e) {
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      if (!isOnlineNow()) {
         setError('繰り返し入力の登録はオンライン時のみ可能です')
       } else {
         setError(describeUnknownError(e, isOnlineNow()))

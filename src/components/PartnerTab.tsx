@@ -46,7 +46,8 @@ import { useTxFeature } from '../lib/txExtensions'
 import { partnerPaid } from '../lib/types'
 import '../share.css'
 import '../ledger.css'
-import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
+import { describeUnknownError } from '../lib/errorGuidance'
+import { isOnlineNow } from '../lib/serverErrors'
 
 type Store = ReturnType<typeof useTransactions>
 

@@ -5,7 +5,8 @@ import { parseBalanceInput, type AssetRow } from '../lib/netWorth'
 import AmountTextInput from './AmountTextInput'
 import { todayISO, yen } from '../lib/format'
 import useBodyScrollLock from '../hooks/useBodyScrollLock'
-import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
+import { describeUnknownError } from '../lib/errorGuidance'
+import { isOnlineNow } from '../lib/serverErrors'
 
 interface Props {
   supabase: SupabaseClient

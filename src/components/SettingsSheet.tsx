@@ -12,7 +12,8 @@ import {
   type KeypadPreference,
 } from '../lib/keypadSettings'
 import { amountMaskStateLabel, setAmountMasked, useAmountMasked } from '../lib/amountMask'
-import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
+import { describeUnknownError } from '../lib/errorGuidance'
+import { isOnlineNow } from '../lib/serverErrors'
 import { clearConfig, getConfiguredUrl, hasStoredConfig } from '../lib/supabaseClient'
 import { privacyBlurStateLabel } from '../lib/privacyBlur'
 import { setPrivacyBlurEnabled, usePrivacyBlurEnabled } from '../lib/privacyShield'

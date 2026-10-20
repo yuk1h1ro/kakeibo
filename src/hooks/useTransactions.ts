@@ -54,13 +54,13 @@ import {
 import {
   isDuplicateRowError,
   isNetworkError,
+  isOnlineNow,
   isSchemaError,
   type ServerErrorLike,
 } from '../lib/serverErrors'
 import {
   favorRejectionGuidance,
   guidanceForServerError,
-  isOnlineNow,
   ledgerRejectionGuidance,
   syncRejectedGuidance,
   type Guidance,
@@ -189,9 +189,7 @@ export function useTransactions(supabase: SupabaseClient) {
   // 文字列にしてから画面側で分類し直すと、畳んだ文言をもう一度ほどくことになり、
   // 案内が二重に出てしまうため(MainScreen は errorGuide をそのまま描く)。
   const [errorGuide, setErrorGuide] = useState<Guidance | null>(null)
-  const [isOnline, setIsOnline] = useState(() =>
-    typeof navigator !== 'undefined' ? navigator.onLine : true
-  )
+  const [isOnline, setIsOnline] = useState(isOnlineNow)
   const [syncing, setSyncing] = useState(false)
   // この起動でサーバーから一度でも取り込めたか。
   // 「サーバーに無い」を根拠に判断してよいのは、取り込めたときだけ
@@ -209,7 +207,7 @@ export function useTransactions(supabase: SupabaseClient) {
 
   const refresh = useCallback(async () => {
     // 明らかにオフラインなら何もしない(キャッシュ表示を維持)
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (!isOnlineNow()) {
       setLoading(false)
       return
     }

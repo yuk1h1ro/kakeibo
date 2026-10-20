@@ -18,10 +18,16 @@ export interface ServerErrorLike {
 // supabase-js は fetch の失敗を「TypeError: Failed to fetch」(Chrome)や
 // 「TypeError: Load failed」(Safari)といった message の error として返す。
 // これらは「後で再試行すべき」失敗で、サーバーの拒否(制約違反等)とは区別する。
+/**
+ * いまオンラインか。navigator.onLine が false と明示されているときだけオフライン扱い
+ * (非ブラウザ環境では navigator が無い / undefined になるため「オンライン」とみなす)
+ */
+export function isOnlineNow(): boolean {
+  return typeof navigator === 'undefined' || navigator.onLine !== false
+}
+
 export function isNetworkError(message: string): boolean {
-  // navigator.onLine が false と明示されているときだけオフライン扱い
-  // (非ブラウザ環境では undefined になるため === false で判定する)
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true
+  if (!isOnlineNow()) return true
   return /fetch|network|load failed|接続|タイムアウト|timeout/i.test(message)
 }
 
