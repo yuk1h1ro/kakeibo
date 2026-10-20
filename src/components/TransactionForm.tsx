@@ -29,6 +29,7 @@ import {
   favorColumns,
   favorNoticeText,
   favorOf,
+  favorWhoText,
   treatFromOptions,
   type FavorKind,
 } from '../lib/favors'
@@ -775,36 +776,36 @@ export default function TransactionForm({
    */
   const zeroAllowed = isExpense && favor !== null
 
-  const valid =
-    Number.isInteger(amountNum) &&
-    (amountNum > 0 || (zeroAllowed && amountNum === 0)) &&
-    (!isExpense || !withPartner || (Number.isInteger(partnerNum) && partnerNum >= 0 && partnerNum <= amountNum)) &&
-    partnerPaidValid &&
-    // 分割中は内訳が完全に揃っていることが保存の条件。
-    // ここを緩めると支出の合計と預かり残高が静かにずれる
-    (!splitting ? !isExpense || category !== null : (splitValidation?.ok ?? false))
-
-  // 保存ボタンが押せない理由。灰色になるだけでは、初めての人は何が足りないのか
-  // 分からない。上の `valid` と同じ順に、最初に引っかかった1つだけを言う。
-  // 分割の内訳・彼女が払った額・マイナスの金額は、それぞれの欄の近くにもう理由が
-  // 出ているが、ボタンの近くにも同じことを短く出す(画面の外にあることが多い)
-  const saveBlockedReason: string | null = valid
-    ? null
-    : !splitting && isExpense && category === null
+  // 保存ボタンが押せない理由。**保存できるかの判定はこの1本だけ** —
+  // 理由が無ければ保存できる。以前は「押せるか」と「押せない理由」を別々の
+  // 式で書いていて食い違い、彼女の負担分を電卓でマイナスにすると、ボタンは
+  // 灰色なのに理由が出なかった。条件を足すときは、ここに理由ごと足すこと。
+  //
+  // 灰色になるだけでは、初めての人は何が足りないのか分からない。最初に
+  // 引っかかった1つだけを言う。分割の内訳・彼女が払った額・マイナスの金額は、
+  // それぞれの欄の近くにもう理由が出ているが、ボタンの近くにも同じことを
+  // 短く出す(画面の外にあることが多い)
+  const saveBlockedReason: string | null =
+    !splitting && isExpense && category === null
       ? 'カテゴリを選んでください'
       : amountNum < 0
         ? '金額がマイナスになっています(電卓の計算を見直してください)'
         : !Number.isInteger(amountNum) || (amountNum === 0 && !zeroAllowed)
           ? '金額を入れてください'
-          : isExpense && withPartner && partnerNum > amountNum
-            ? '彼女の負担分が支払い金額を超えています'
-            : !partnerPaidValid
-              ? payer === 'both' && partnerPaidNum <= 0
-                ? '彼女が払った額を入れてください'
-                : '彼女が払った額が支払い金額を超えています'
-              : splitting
-                ? '分割の内訳がそろっていません(内訳の欄の下を見てください)'
-                : null
+          : isExpense && withPartner && (!Number.isInteger(partnerNum) || partnerNum < 0)
+            ? '彼女の負担分がマイナスになっています(電卓の計算を見直してください)'
+            : isExpense && withPartner && partnerNum > amountNum
+              ? '彼女の負担分が支払い金額を超えています'
+              : !partnerPaidValid
+                ? payer === 'both' && partnerPaidNum <= 0
+                  ? '彼女が払った額を入れてください'
+                  : '彼女が払った額が支払い金額を超えています'
+                : // 分割中は内訳が完全に揃っていることが保存の条件。
+                  // ここを緩めると支出の合計と預かり残高が静かにずれる
+                  splitting && !(splitValidation?.ok ?? false)
+                  ? '分割の内訳がそろっていません(内訳の欄の下を見てください)'
+                  : null
+  const valid = saveBlockedReason === null
 
   const dateChips = [
     { label: '今日', value: daysAgoISO(0) },
@@ -825,13 +826,7 @@ export default function TransactionForm({
       : '',
     // おごりは畳んだままでも必ず見えるようにする。相手の名前が入っている記録を
     // 「気分もタグも付いていない普通の1件」に見せてしまうと、書いた意味が薄れる
-    favor === null
-      ? ''
-      : favor.kind === 'treat'
-        ? favor.from === ''
-          ? 'おごり'
-          : `${favor.from}さんのおごり`
-        : '割引',
+    favor === null ? '' : favorWhoText(favor),
     tags.length > 0 ? tags.map((t) => `#${t}`).join(' ') : '',
     splitting ? '分割中' : '',
   ]

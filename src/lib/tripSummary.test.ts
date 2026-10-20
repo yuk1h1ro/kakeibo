@@ -257,3 +257,15 @@ describe('tripCurrentBalance', () => {
     expect(tripCurrentBalance(txs)).toBe(22000)
   })
 })
+
+describe('buildTripSummary — 並び順', () => {
+  // 履歴のまとめ送信と同じ比べ方(compareCursor)で並べる。以前は localeCompare で
+  // 書いていて、記録日時の小数秒の有無で前後が逆になることがあった
+  it('同じ日なら記録日時の文字列の並びどおり(小数秒の有無で逆転しない)', () => {
+    const txs = [
+      tx({ store: 'あと', partner_amount: 100, created_at: '2026-08-06T10:00:00.5+00:00' }),
+      tx({ store: 'さき', partner_amount: 100, created_at: '2026-08-06T10:00:00+00:00' }),
+    ]
+    expect(buildTripSummary(txs, opts).entries.map((e) => e.title)).toEqual(['さき', 'あと'])
+  })
+})

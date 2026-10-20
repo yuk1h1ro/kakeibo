@@ -19,7 +19,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { TransactionInput } from '../hooks/useTransactions'
 import type { Transaction } from './types'
 import { partnerPaid, tagsOf } from './types'
-import { favorOf } from './favors'
+import { favorOf, favorWhoText } from './favors'
 import { formatDate, yenPlain } from './format'
 import { createTableAvailability } from './tableAvailability'
 
@@ -154,10 +154,8 @@ function favorText(t: {
 }): string {
   const favor = favorOf({ ...t, type: 'expense' })
   if (favor === null) return '(なし)'
-  if (favor.kind === 'discount') return `割引 ${yenPlain(favor.amount)}`
-  return favor.from === ''
-    ? `おごり ${yenPlain(favor.amount)}`
-    : `${favor.from}さんのおごり ${yenPlain(favor.amount)}`
+  // 言い方は favors.ts の1か所に揃える(敬称を重ねない「田中さんのおごり」)
+  return `${favorWhoText(favor)} ${yenPlain(favor.amount)}`
 }
 
 /** タグの一覧を表示用の1行にする。並び順の違いは差分にしない。(純粋関数) */
