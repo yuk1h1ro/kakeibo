@@ -152,6 +152,17 @@
 - `recurringRules.ts:268-272` — なぜ先に日付を書いてから取引を積むのか（重複生成を生成漏れより優先）
 - `reportYear.ts:4-5` — なぜ新しい集計を足さず既存の月次を束ね直すのか（同じ数字が別の式から出ると、どちらが正しいか分からなくなる）
 
+### 大きなファイルの分割（2026-10-20）
+
+重複の統合とは別に、ひとつに何でも入っていた2つのファイルを役割ごとに分けました。**動作は変えていません**（既存のテストがそのまま通り、ブラウザでもテンキー・電卓・分割・保存内容・削除の取り消し・Discord 通知を確かめた）。
+
+| 元 | 分けた先 |
+|---|---|
+| `TransactionForm.tsx`（1806行 → 約1000行） | 保存できるか・彼女が払った額・残高の見込み → `lib/transactionDraft.ts`（純粋関数・テストあり）／テンキーの開け閉め → `components/txform/useKeypadDock.ts`／電卓つきの金額欄 → `txform/useCalcField.ts`／各段の見た目 → `txform/` の部品 |
+| `useTransactions.ts`（849行 → 約690行） | キャッシュ・最終同期時刻・キューを重ねた一覧 → `lib/txSnapshot.ts`／断られた1件の見分けと案内 → `lib/syncRejection.ts`／同期中の Discord 通知 → `lib/syncNotifier.ts`／削除の取り消し → `hooks/useUndoableDeletes.ts` |
+
+`TransactionForm.tsx` に残したのは画面の状態と、それを保存する1件に組み立てる流れ、`useTransactions.ts` に残したのは送信の順番と隔離の手順（記録を失わないための順番そのもの）です。**保存できるかの条件を足すときは `transactionDraft.saveBlockedReason` に理由ごと足してください**（「押せるか」を別の式で書くと、また食い違います）。
+
 ---
 
 ## 課題3. 未修整の不具合・未検証の領域
