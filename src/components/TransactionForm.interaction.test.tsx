@@ -1209,3 +1209,35 @@ describe('分割の内訳の電卓', () => {
     expect(field('内訳 2 の金額').value).toBe('1,500')
   })
 })
+
+// ============================================================
+// テンキーが開いた瞬間に閉じない
+//
+// テンキーを開いたタップそのものが「外側のタップ」として数えられ、
+// 開いた瞬間に閉じていた(カテゴリの文字の部分を押したとき。絵の部分は
+// SVG なのでたまたま見逃されていた)。
+//
+// **注意: 1つ目のテストは、直す前のコードでも通る。** jsdom では React の
+// act() が副作用をタップの処理が終わるまで遅らせるので、「開いたタップが
+// そのまま document に届く」順番を再現できない。不具合は Chromium の実機相当
+// (Playwright)でだけ再現し、直ったこともそこで確かめた。ここに残すのは、
+// 直し方(聞き始めを遅らせる)で外側のタップまで効かなくなっていないことの見張り。
+// ============================================================
+describe('テンキーが開いた瞬間に閉じない', () => {
+  beforeEach(() => setKeypadPreference('on'))
+  afterEach(() => setKeypadPreference('auto'))
+
+  it('カテゴリの文字の部分を押しても、開いたテンキーはそのまま', async () => {
+    const { user } = setup()
+    // ボタンの中の文字(span)を押す
+    await user.click(screen.getByText('外食'))
+    expect(screen.queryByRole('group', { name: '金額入力のテンキー' })).not.toBeNull()
+  })
+
+  it('開いたあとで本当に外側を押せば閉じる', async () => {
+    const { user } = setup()
+    await user.click(screen.getByText('外食'))
+    await user.click(screen.getByText('メモ(任意)'))
+    expect(screen.queryByRole('group', { name: '金額入力のテンキー' })).toBeNull()
+  })
+})
