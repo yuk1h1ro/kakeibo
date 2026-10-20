@@ -900,6 +900,10 @@ export function useTransactions(supabase: SupabaseClient) {
     () => applyPendingOps(serverTx, pendingOps),
     [serverTx, pendingOps]
   )
+  const pendingIds = useMemo(
+    () => new Set(pendingOps.filter((op) => op.kind !== 'delete').map((op) => op.id)) as ReadonlySet<string>,
+    [pendingOps]
+  )
 
   // 変更履歴の「変更前」を引くための参照を最新に保つ
   useEffect(() => {
@@ -946,6 +950,8 @@ export function useTransactions(supabase: SupabaseClient) {
     retryQuarantined,
     discardQuarantined,
     pendingCount: pendingOps.length,
+    // まだサーバーに送れていない記録の行ID(履歴の行に「未同期」の印を付ける)
+    pendingIds,
     isOnline,
     syncing,
     lastSyncedAt,

@@ -1382,3 +1382,28 @@ describe('支払った人と「二人で使った」の組み合わせ', () => {
     expect(screen.queryByText(/まるごと預かり残高に足されます/)).toBeNull()
   })
 })
+
+// ============================================================
+// 税込ボタンの小さな直し
+// ============================================================
+describe('税込ボタン', () => {
+  beforeEach(() => setKeypadPreference('off'))
+  afterEach(() => setKeypadPreference('auto'))
+
+  it('押した直後はもう一度押せない(税込にさらに税が掛かるのを防ぐ)', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '1430')
+    await user.click(button('税込にする(10%)'))
+    expect(field('支払い金額(円)').value).toBe('1,573')
+    expect(button('税込にする(10%)').disabled).toBe(true)
+    // 金額を打ち直せば、また押せる
+    await typeAmount(user, '支払い金額(円)', '1000')
+    expect(button('税込にする(10%)').disabled).toBe(false)
+  })
+
+  it('預かり・返金・調整の金額には出さない(消費税が掛からない)', async () => {
+    setup({ fixedType: 'partner_deposit', submitLabel: '預かる' })
+    expect(screen.queryByRole('button', { name: /税込にする/ })).toBeNull()
+  })
+})

@@ -171,7 +171,7 @@ export function favorBadgeText(favor: Favor): string {
   if (favor.kind === 'discount') return `${yenPlain(favor.amount)} 割引`
   return favor.from === ''
     ? `${yenPlain(favor.amount)} おごり`
-    : `${favor.from}さんのおごり ${yenPlain(favor.amount)}`
+    : `${withHonorific(favor.from)}のおごり ${yenPlain(favor.amount)}`
 }
 
 /**
@@ -182,7 +182,7 @@ export function favorBadgeText(favor: Favor): string {
  */
 export function favorNoticeText(favor: Favor, paidAmount: number): string {
   const total = paidAmount + favor.amount
-  const who = favor.kind === 'treat' ? (favor.from === '' ? 'おごり' : `${favor.from}さんのおごり`) : '割引'
+  const who = favor.kind === 'treat' ? (favor.from === '' ? 'おごり' : `${withHonorific(favor.from)}のおごり`) : '割引'
   if (paidAmount <= 0) {
     return `本来 ${yenPlain(total)} のところ、全額 ${who} です。支出は ¥0 で記録されます`
   }
@@ -328,6 +328,21 @@ export function treatFromOptions(txs: readonly Transaction[], limit = 8): string
  * 「何回・いくらぶん・最後はいつ」。お礼やお返しを考えるのに要るのはこの3つ。
  */
 export function personLineText(person: TreatFromPerson): string {
-  const who = person.name === '' ? '名前を書いていない回' : `${person.name}さん`
+  const who = person.name === '' ? '名前を書いていない回' : withHonorific(person.name)
   return `${who} ${person.count}回・${yenPlain(person.total)}`
+}
+
+/** 名前の末尾がすでに敬称なら、さんを重ねない */
+const HONORIFICS = ['さん', '様', 'さま', 'ちゃん', 'くん', '君', '先輩', '先生', '氏', '殿']
+
+/**
+ * 表示用に「さん」を付ける。(純粋関数)
+ *
+ * 入力欄に「田中さん」と打つ人も「田中」と打つ人もいる。どちらでも
+ * 「田中さんのおごり」と読めるように、末尾が敬称のときだけは付けない
+ * (以前は無条件に付けていて「田中さんさんのおごり」になっていた)。
+ * 保存する値は打ったまま — 付け外しは表示のときだけ。
+ */
+export function withHonorific(name: string): string {
+  return HONORIFICS.some((h) => name.endsWith(h)) ? name : `${name}さん`
 }

@@ -75,6 +75,11 @@ export interface MonthlySummary {
   partnerPaidTotal: number
   /** 集計時点(= 送信時点)の残高。全期間の影響額の合計 */
   balance: number
+  /**
+   * その月の終わりの時点の残高(その月までの影響額の合計)。
+   * 送るのが遅れた月(8月分を10月に送る、など)でも、その月の話として読めるように
+   */
+  monthEndBalance: number
   /** その月の彼女負担分のカテゴリ別内訳(多い順) */
   categories: { category: string | null; amount: number }[]
   /** 動きが1件も無ければ false(送るものが無いので通知しない) */
@@ -99,12 +104,15 @@ export function buildMonthlySummary(
   let adjustTotal = 0
   let partnerPaidTotal = 0
   let balance = 0
+  let monthEndBalance = 0
   const byCategory = new Map<string | null, number>()
 
   for (const t of rows) {
     // 残高は全期間の積み上げ(月で区切らない)。
     // 返金・調整・彼女が払った回も含めるため、計算は partnerBalance.ts に一本化する
     balance += partnerImpact(t)
+    // 'YYYY-MM' どうしは文字列の大小で前後が決まる
+    if (monthKey(t.date) <= month) monthEndBalance += partnerImpact(t)
     if (monthKey(t.date) !== month) continue
     if (t.type === 'partner_deposit') {
       depositTotal += t.amount
@@ -135,6 +143,7 @@ export function buildMonthlySummary(
     adjustTotal,
     partnerPaidTotal,
     balance,
+    monthEndBalance,
     categories,
     // 残高が動いた月は必ず送る。返金・調整しか無い月に黙るのがいちばん困る
     hasActivity:
@@ -172,8 +181,15 @@ export function formatMonthlySummary(
     )
   }
   // 符号だけでは「預かり」か「貸し」か読めないので、機能011 の言い回しを添える
-  const w = balanceWording(s.balance)
-  lines.push(`いまの残高: ${yenPlain(w.magnitude)}(${w.title})`)
+  // 載せるのは「その月の終わりの残高」。送るのが遅れた月に「いまの残高」だけを
+  // 載せると、翌月以降の動きまで混ざった数字がその月の話として読めてしまう。
+  // いまと違うときだけ、いまの残高も添える
+  const end = balanceWording(s.monthEndBalance)
+  lines.push(`${Number(s.month.slice(5))}月末の残高: ${yenPlain(end.magnitude)}(${end.title})`)
+  if (s.balance !== s.monthEndBalance) {
+    const w = balanceWording(s.balance)
+    lines.push(`いまの残高: ${yenPlain(w.magnitude)}(${w.title})`)
+  }
   if (s.categories.length > 0) {
     lines.push('内訳')
     for (const c of s.categories) {

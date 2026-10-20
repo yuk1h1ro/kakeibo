@@ -205,9 +205,20 @@ export default function PartnerTab({ store, supabase, onEdit }: Props) {
         {settlementAvailable && (
           <p className="muted settle-note">
             どの操作も履歴に1件の記録として残ります(あとから編集・削除もできます)。
-            日付・金額と、ここに書いた{mode === 'adjust' ? '理由' : 'メモ'}は
-            <strong>共有リンクの画面にも表示されます</strong>
-            — 残高が動いた理由を彼女からも追えるようにするためです
+            {/* 共有ページが彼女に見せるのは、返金・調整の理由まで。預かりのメモは出さない
+                (supabase/schema.sql の共有ページ用の関数)。以前はここが「メモも表示されます」
+                と書いていて、事実と違っていた */}
+            {mode === 'deposit' ? (
+              <>
+                日付・金額は<strong>共有リンクの画面にも表示されます</strong>(メモは表示されません)
+              </>
+            ) : (
+              <>
+                日付・金額と、ここに書いた{mode === 'adjust' ? '理由' : 'メモ'}は
+                <strong>共有リンクの画面にも表示されます</strong>
+                — 残高が動いた理由を彼女からも追えるようにするためです
+              </>
+            )}
           </p>
         )}
       </div>

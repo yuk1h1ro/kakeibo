@@ -40,6 +40,8 @@ interface Props {
   fieldLabel?: string
   /** 保留中の式の横に出す注意書き(支払い金額のマイナス警告など) */
   warning?: ReactNode
+  /** 「税込」ボタンを出すか。消費税の掛からない金額(預かり・返金・調整)では出さない */
+  showTax?: boolean
 }
 
 /**
@@ -58,6 +60,7 @@ export default function AmountCalcBar({
   onApply,
   fieldLabel,
   warning,
+  showTax = true,
 }: Props) {
   const labels = calcKeyLabels(fieldLabel)
   return (
@@ -103,6 +106,7 @@ export default function AmountCalcBar({
         /* 保留中の演算子が無いと ％ は何も起きないので、押す前にそう見せる */
         percentDisabled={state.pendingOp === null}
         fieldLabel={fieldLabel}
+        showTax={showTax}
       />
     </div>
   )

@@ -1177,6 +1177,8 @@ export default function TransactionForm({
           onPercent={() => runPercent('amount')}
           onApply={(next) => applyTo('amount', next)}
           warning={amountNum < 0 && <span className="calc-warn">マイナスの金額は保存できません</span>}
+          // 預かり・返金・調整の金額には消費税が掛からない
+          showTax={isExpense}
         />
       </div>
 
@@ -1526,7 +1528,7 @@ export default function TransactionForm({
                           <input
                             type="text"
                             aria-label="おごってくれた人"
-                            placeholder="例: 田中さん / 部長 / 父"
+                            placeholder="例: 田中 / 部長 / 先輩"
                             value={favorFrom}
                             autoComplete="off"
                             maxLength={MAX_FAVOR_FROM_LENGTH}

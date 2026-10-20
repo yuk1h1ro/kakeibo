@@ -604,6 +604,7 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
                 splitPos={splitPos.get(t.id)}
                 selectMode={selectMode}
                 picked={pickedSet.has(t.id)}
+                unsynced={store.pendingIds?.has(t.id) ?? false}
                 onOpen={onEdit}
                 onLongPress={setMenuTx}
                 onSwipeDelete={(tx) => deleteTxs([tx])}

@@ -208,3 +208,13 @@ describe('複数選択モードの行', () => {
     expect(render(tx())).not.toContain('aria-pressed')
   })
 })
+
+describe('未同期の印', () => {
+  it('まだ送れていない記録には「未同期」と出す', () => {
+    expect(render(tx({}), { unsynced: true })).toContain('未同期')
+  })
+
+  it('送れている記録には出さない', () => {
+    expect(render(tx({}))).not.toContain('未同期')
+  })
+})
