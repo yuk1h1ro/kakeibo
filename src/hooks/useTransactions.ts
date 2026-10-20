@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Transaction, TransactionInput } from '../lib/types'
 import {
-  appendOp,
+  appendOps,
   loadQueue,
   removeOp,
   type PendingOp,
@@ -283,8 +283,11 @@ export function useTransactions(supabase: SupabaseClient) {
       let ops = loadQueue()
       for (const o of group) ops = removeOp(o.opId)
       const now = new Date().toISOString()
-      for (const row of siblings) {
-        ops = appendOp({ opId: crypto.randomUUID(), kind: 'delete', id: row.id, queuedAt: now })
+      // flush の最中に呼ばれるので、ここでは送りに行かない(積むだけ)
+      if (siblings.length > 0) {
+        ops = appendOps(
+          siblings.map((row) => ({ opId: crypto.randomUUID(), kind: 'delete' as const, id: row.id, queuedAt: now }))
+        )
       }
       setPendingOps(ops)
       clearSyncFailures(group.map((o) => o.opId))
@@ -508,6 +511,22 @@ export function useTransactions(supabase: SupabaseClient) {
     }
   }, [supabase, refresh, quarantineFromQueue])
 
+  /**
+   * キューに積んで、すぐ送りに行く。追加・更新・削除・取り消し・取りこぼしの
+   * 回復はみなここを通す(以前は同じ手順を10か所で書いていた)。
+   * opId と積んだ時刻はここで決める。積む順番がそのまま送る順番。
+   * flush の中(quarantineFromQueue)からは呼ばないこと — 送信中に送信を重ねない
+   */
+  const enqueue = useCallback(
+    (ops: readonly Omit<PendingOp, 'opId' | 'queuedAt'>[]) => {
+      if (ops.length === 0) return
+      const queuedAt = new Date().toISOString()
+      setPendingOps(appendOps(ops.map((op) => ({ ...op, opId: crypto.randomUUID(), queuedAt }))))
+      void flush()
+    },
+    [flush]
+  )
+
   // マウント時: まずキャッシュ表示 → サーバーから取得 → 保留分を再送
   useEffect(() => {
     void refresh().then(() => flush())
@@ -549,22 +568,9 @@ export function useTransactions(supabase: SupabaseClient) {
       quarantinedIds: new Set(quarantinedRowIds()),
       today: todayISO(),
     })
-    if (lost.length === 0) return
-    const queuedAt = new Date().toISOString()
-    let ops: PendingOp[] = loadQueue()
-    for (const m of lost) {
-      ops = appendOp({
-        opId: crypto.randomUUID(),
-        kind: 'insert',
-        // 控えに残した行IDをそのまま使う。二重になっても主キーが弾く
-        id: m.txId,
-        payload: m.input,
-        queuedAt,
-      })
-    }
-    setPendingOps(ops)
-    void flush()
-  }, [loading, serverSynced, pendingOps.length, serverTx, flush])
+    // 控えに残した行IDをそのまま使う。二重になっても主キーが弾く
+    enqueue(lost.map((m) => ({ kind: 'insert', id: m.txId, payload: m.input })))
+  }, [loading, serverSynced, pendingOps.length, serverTx, enqueue])
 
   // オンライン/オフラインの追跡。復帰時は自動で再同期
   useEffect(() => {
@@ -646,19 +652,11 @@ export function useTransactions(supabase: SupabaseClient) {
    */
   const add = useCallback(
     async (input: TransactionInput, id?: string) => {
-      const op: PendingOp = {
-        opId: crypto.randomUUID(),
-        kind: 'insert',
-        // 行IDをクライアント側で採番することで、未同期の行への
-        // update/delete も同じIDで一貫して扱える
-        id: id ?? crypto.randomUUID(),
-        payload: input,
-        queuedAt: new Date().toISOString(),
-      }
-      setPendingOps(appendOp(op))
-      void flush()
+      // 行IDをクライアント側で採番することで、未同期の行への
+      // update/delete も同じIDで一貫して扱える
+      enqueue([{ kind: 'insert', id: id ?? crypto.randomUUID(), payload: input }])
     },
-    [flush]
+    [enqueue]
   )
 
   /**
@@ -670,38 +668,17 @@ export function useTransactions(supabase: SupabaseClient) {
    */
   const addMany = useCallback(
     async (inputs: readonly TransactionInput[]) => {
-      if (inputs.length === 0) return
-      const queuedAt = new Date().toISOString()
-      let ops: PendingOp[] = loadQueue()
-      for (const input of inputs) {
-        ops = appendOp({
-          opId: crypto.randomUUID(),
-          kind: 'insert',
-          id: crypto.randomUUID(),
-          payload: input,
-          queuedAt,
-        })
-      }
-      setPendingOps(ops)
-      void flush()
+      enqueue(inputs.map((input) => ({ kind: 'insert', id: crypto.randomUUID(), payload: input })))
     },
-    [flush]
+    [enqueue]
   )
 
   const update = useCallback(
     async (id: string, input: TransactionInput) => {
       logUpdate(id, input)
-      const op: PendingOp = {
-        opId: crypto.randomUUID(),
-        kind: 'update',
-        id,
-        payload: input,
-        queuedAt: new Date().toISOString(),
-      }
-      setPendingOps(appendOp(op))
-      void flush()
+      enqueue([{ kind: 'update', id, payload: input }])
     },
-    [flush, logUpdate]
+    [enqueue, logUpdate]
   )
 
   /**
@@ -710,23 +687,10 @@ export function useTransactions(supabase: SupabaseClient) {
    */
   const updateMany = useCallback(
     async (updates: { id: string; input: TransactionInput }[]) => {
-      if (updates.length === 0) return
-      const queuedAt = new Date().toISOString()
-      let ops: PendingOp[] = loadQueue()
-      for (const u of updates) {
-        logUpdate(u.id, u.input)
-        ops = appendOp({
-          opId: crypto.randomUUID(),
-          kind: 'update',
-          id: u.id,
-          payload: u.input,
-          queuedAt,
-        })
-      }
-      setPendingOps(ops)
-      void flush()
+      for (const u of updates) logUpdate(u.id, u.input)
+      enqueue(updates.map((u) => ({ kind: 'update', id: u.id, payload: u.input })))
     },
-    [flush, logUpdate]
+    [enqueue, logUpdate]
   )
 
   const remove = useCallback(
@@ -740,16 +704,10 @@ export function useTransactions(supabase: SupabaseClient) {
         // 編集シートからの削除も取り消せるようにする(機能159)
         armUndo([before])
       }
-      const op: PendingOp = {
-        opId: crypto.randomUUID(),
-        kind: 'delete',
-        id,
-        queuedAt: new Date().toISOString(),
-      }
-      setPendingOps(appendOp(op))
-      void flush()
+      // 手元に見当たらない行でも delete は積む(サーバーにだけ残っている行のため)
+      enqueue([{ kind: 'delete', id }])
     },
-    [flush, logRemoved, armUndo]
+    [enqueue, logRemoved, armUndo]
   )
 
   /**
@@ -762,17 +720,11 @@ export function useTransactions(supabase: SupabaseClient) {
       if (txs.length === 0) return
       // まとめての削除も「利用者が自分で消した」ことに変わりはない(remove と同じ)
       forgetGeneratedMarks(txs.map((t) => t.id))
-      const queuedAt = new Date().toISOString()
-      let ops: PendingOp[] = loadQueue()
-      for (const t of txs) {
-        logRemoved(t)
-        ops = appendOp({ opId: crypto.randomUUID(), kind: 'delete', id: t.id, queuedAt })
-      }
-      setPendingOps(ops)
+      for (const t of txs) logRemoved(t)
       armUndo(txs)
-      void flush()
+      enqueue(txs.map((t) => ({ kind: 'delete', id: t.id })))
     },
-    [flush, logRemoved, armUndo]
+    [enqueue, logRemoved, armUndo]
   )
 
   /**
@@ -794,25 +746,21 @@ export function useTransactions(supabase: SupabaseClient) {
   const restoreMany = useCallback(
     async (txs: readonly Transaction[]) => {
       if (txs.length === 0) return
-      const queuedAt = new Date().toISOString()
-      let ops: PendingOp[] = loadQueue()
       for (const t of txs) {
-        ops = appendOp({
-          opId: crypto.randomUUID(),
+        recordChange(newEntry(t.id, 'restore', transactionSummary(t, categoryLabel), []))
+      }
+      dismissUndo()
+      enqueue(
+        txs.map((t) => ({
           kind: 'insert',
           id: t.id,
           payload: restoreInput(t),
-          queuedAt,
           // 彼女への通知を「元に戻しました」にする(新しい支出に見せない)
           restore: true,
-        })
-        recordChange(newEntry(t.id, 'restore', transactionSummary(t, categoryLabel), []))
-      }
-      setPendingOps(ops)
-      dismissUndo()
-      void flush()
+        }))
+      )
     },
-    [flush, dismissUndo]
+    [enqueue, dismissUndo]
   )
 
   // ---------- 隔離した記録の再送・破棄 ----------
@@ -829,11 +777,7 @@ export function useTransactions(supabase: SupabaseClient) {
       const entry = findQuarantineEntry(entryId)
       if (!entry) return
       const queuedAt = new Date().toISOString()
-      let ops: PendingOp[] = loadQueue()
-      for (const op of entry.ops) {
-        ops = appendOp({ ...op, opId: crypto.randomUUID(), queuedAt })
-      }
-      setPendingOps(ops)
+      setPendingOps(appendOps(entry.ops.map((op) => ({ ...op, opId: crypto.randomUUID(), queuedAt }))))
       const queued = loadQueue()
       if (entry.ops.every((op) => queued.some((q) => q.id === op.id && q.kind === op.kind))) {
         discardQuarantineEntry(entryId)

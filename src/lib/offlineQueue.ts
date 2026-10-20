@@ -38,10 +38,14 @@ export function saveQueue(ops: PendingOp[]): void {
   }
 }
 
-export function appendOp(op: PendingOp): PendingOp[] {
-  const ops = [...loadQueue(), op]
-  saveQueue(ops)
-  return ops
+/**
+ * まとめて積む。読み込みと保存は1回ずつ(1件ずつ積むと、件数ぶん
+ * キュー全体を読み書きすることになる)。積む順番がそのまま送る順番。
+ */
+export function appendOps(ops: readonly PendingOp[]): PendingOp[] {
+  const next = [...loadQueue(), ...ops]
+  saveQueue(next)
+  return next
 }
 
 export function removeOp(opId: string): PendingOp[] {
