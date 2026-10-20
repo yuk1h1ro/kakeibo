@@ -300,9 +300,9 @@ export function useTransactions(supabase: SupabaseClient) {
             // 導線を閉じて、これ以上同じ失敗を増やさない
             markTxFeatureUnavailable('settlement')
           }
-          // 送り直せば通る見込みがあるのは migration 系だけ。
-          // それ以外(制約違反など)は何度送っても同じなので、すぐ隔離する
           const attempts = recordSyncFailure(op.opId)
+          // 送り直せば通る見込みがあるのは migration 系だけ(retryable)。
+          // それ以外(制約違反など)は何度送っても同じなので、すぐ隔離する
           if (!retryable || reachedAttemptLimit(attempts)) {
             // 同じ op が何度も断られると、その後ろの記録がすべて送れなくなる。
             // 記録は隔離箱(localStorage)に移して必ず残したうえで、先へ進む
