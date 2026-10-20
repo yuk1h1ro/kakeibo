@@ -42,7 +42,7 @@ import {
   splitGroupOfOp,
   type SplitNotice,
 } from '../lib/discordNotify'
-import { partnerBalance } from '../lib/partnerBalance'
+import { hasDeposits, partnerBalance } from '../lib/partnerBalance'
 import {
   initTxExtensions,
   isFavorAmountRejection,
@@ -343,12 +343,15 @@ export function useTransactions(supabase: SupabaseClient) {
     // まとめている途中の会計と、取り消された内訳の行ID(その削除は知らせない)
     let pendingSplit: SplitNotice | null = null
     const silencedIds = new Set<string>()
+    // 低下アラートは預かりを使っている人にだけ送る。分割の通知は後でまとめて
+    // 送るので、そのとき見る手元の写しの状態をここで追いかける
+    let depositsSeen = hasDeposits(localRows)
     const sendPendingSplit = () => {
       if (pendingSplit === null) return
       const message = formatSplitNotification(pendingSplit)
       if (message) {
         void sendDiscordMessage(message) // 投げっぱなし。失敗しても記録は止めない
-        notifyLowBalanceIfNeeded(pendingSplit.balance)
+        if (depositsSeen) notifyLowBalanceIfNeeded(pendingSplit.balance)
       }
       pendingSplit = null
     }
@@ -504,9 +507,11 @@ export function useTransactions(supabase: SupabaseClient) {
             if (message) void sendDiscordMessage(message) // 投げっぱなし。失敗しても記録は止めない
             // 機能010: 残高がしきい値をまたいだときだけ低下アラートを送る。
             // 個々の op の通知とは別に、確定した残高そのものを見て判断する
-            if (message) notifyLowBalanceIfNeeded(partnerBalance(nextRows))
+            // 預かりをまだ使っていない人には送らない(hasDeposits。画面のアラートと同じ判断)
+            if (message && hasDeposits(nextRows)) notifyLowBalanceIfNeeded(partnerBalance(nextRows))
           }
           localRows = nextRows
+          depositsSeen = depositsSeen || hasDeposits([op.payload ?? { type: '' }])
           // 進めた手元のスナップショットは、この flush を抜けても引き継ぐ。
           // ここを flush の中の変数だけに留めていたころは、serverTxRef が
           // 「キューが空になったときの refresh()」でしか進まず、圏外で送信が
@@ -833,6 +838,8 @@ export function useTransactions(supabase: SupabaseClient) {
           id: t.id,
           payload: restoreInput(t),
           queuedAt,
+          // 彼女への通知を「元に戻しました」にする(新しい支出に見せない)
+          restore: true,
         })
         recordChange(newEntry(t.id, 'restore', transactionSummary(t, categoryLabel), []))
       }

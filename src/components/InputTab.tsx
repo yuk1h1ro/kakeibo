@@ -17,7 +17,7 @@ import {
   templateLabel,
   useTransactionTemplates,
 } from '../lib/transactionTemplates'
-import { balanceWording, isLowBalance, partnerBalance } from '../lib/partnerBalance'
+import { balanceWording, partnerBalance, shouldWarnLowBalance } from '../lib/partnerBalance'
 import { useLowBalanceThreshold } from '../lib/lowBalanceSettings'
 import type { Transaction } from '../lib/types'
 import { withCategory } from '../lib/txActions'
@@ -149,7 +149,7 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
             </span>
           )}
         </div>
-        {isLowBalance(balance, threshold) && (
+        {shouldWarnLowBalance(store.transactions, balance, threshold) && (
           <p className="low-balance-alert" role="status">
             <span>
               {balance < 0

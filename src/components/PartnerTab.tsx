@@ -35,7 +35,7 @@ import {
 import {
   DEFAULT_LOW_BALANCE_THRESHOLD,
   balanceWording,
-  isLowBalance,
+  shouldWarnLowBalance,
   ledgerRowTitle,
   partnerBalance,
   partnerImpact,
@@ -63,7 +63,8 @@ export default function PartnerTab({ store, supabase, onEdit }: Props) {
 
   // 機能010: しきい値を下回っているか。既定 1,000円で、下のカードから変えられる
   const threshold = useLowBalanceThreshold()
-  const low = isLowBalance(balance, threshold)
+  // 預かりをまだ使っていないうちは出さない(shouldWarnLowBalance)
+  const low = shouldWarnLowBalance(store.transactions, balance, threshold)
 
   // 機能012: 返金・調整も「預かり残高を動かす」同じ操作なので、預かりと1枚のカードにまとめ、
   // 種類の切り替えだけを出す。列が無い環境では切り替えを出さず、預かりだけが使える状態に倒す

@@ -94,9 +94,21 @@ describe('彼女タブの残高低下アラート (機能010)', () => {
   })
 
   it('使い切っているときは「下回りました」ではなく「使い切っています」と書く', () => {
-    const html = render([tx({ amount: 1000, partner_amount: 400 })])
+    const html = render([
+      tx({ id: 'd', type: 'partner_deposit', amount: 300, category: null, store: '' }),
+      tx({ amount: 1000, partner_amount: 400 }),
+    ])
     expect(html).toContain('預かりを使い切っています')
     expect(html).not.toContain('を下回りました')
+  })
+
+  // 低下アラートは「次の預かりをお願いする」ための知らせ。預かりの仕組みを
+  // まだ使っていない人には意味が無い(記録0件の ¥0 でも出ていた)
+  it('預かりを一度も受け取っていないうちは出さない', () => {
+    expect(render([])).not.toContain('次の預かりをお願いするタイミングです')
+    expect(render([tx({ amount: 1000, partner_amount: 400 })])).not.toContain(
+      '次の預かりをお願いするタイミングです'
+    )
   })
 
   it('しきい値以上あるときはアラートを出さない', () => {
