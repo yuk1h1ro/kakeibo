@@ -21,7 +21,7 @@
 // 「35件に付けたはずが34件だった」が黙って起きるのがいちばん困る。
 // ============================================================
 
-import type { TransactionInput } from '../hooks/useTransactions'
+import type { TransactionInput } from './types'
 import type { Transaction } from './types'
 import { tagsOf } from './types'
 import { MAX_TAGS_PER_TX, collectTags, normalizeTag, sanitizeTags } from './tags'

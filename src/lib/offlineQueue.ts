@@ -1,4 +1,4 @@
-import type { TransactionInput } from '../hooks/useTransactions'
+import type { TransactionInput } from './types'
 
 // オフライン中(または送信失敗時)に保留される Supabase への書き込み操作。
 // 同一行への連続操作は圧縮せず、素直に順番どおり積んで順番どおり送る。

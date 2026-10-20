@@ -42,7 +42,7 @@
 // その外側の薄い層に置く。
 // ============================================================
 
-import type { TransactionInput } from '../hooks/useTransactions'
+import type { TransactionInput } from './types'
 
 /** 生成した1件の控え */
 export interface GeneratedMark {

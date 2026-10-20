@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { Satisfaction, Transaction, TransactionType } from '../lib/types'
+import type { Transaction, TransactionInput } from '../lib/types'
 import {
   appendOp,
   loadQueue,
@@ -76,37 +76,10 @@ import {
 } from '../lib/changeLog'
 import { restoreInput } from '../lib/txActions'
 
-export interface TransactionInput {
-  date: string
-  // 機能012 で partner_refund / partner_adjust が加わった
-  type: TransactionType
-  amount: number
-  category: string | null
-  memo: string
-  store: string // お店(店名)。任意。支出でのみ使用(空文字 = 未入力)
-  partner_amount: number
-  // 繰り返し入力が自動生成した行の印。手入力では付けない。
-  // (省略時は列自体を送らないので、source 列が無いDBでも手入力は通る)
-  source?: 'recurring'
-  // 感情スタンプ (機能219 + 143)。migration-satisfaction.sql 未実行の環境では
-  // 送信直前にキーごと落とす(下の sendablePayload)
-  satisfaction?: Satisfaction | null
-  // 支出のうち彼女が実際に払った額 (機能018)
-  partner_paid?: number
-  // タグ (機能088)
-  tags?: string[]
-  // 分割した会計の束ねID (機能096)
-  split_group?: string | null
-  // おごり・値引き (favors.ts)。3つで1組(額・理由・相手)。
-  // amount には足さない — 払っていないお金を支出の集計に混ぜないため
-  favor_amount?: number
-  favor_kind?: string | null
-  favor_from?: string
-  // 作成日時。ふだんは送らず DB の now() に任せるが、**元に戻す**ときだけは
-  // 元の値を写す (機能159)。写さないと復元した瞬間が created_at になり、
-  // 同じ日の中での並び順が変わり、レポートの「時間帯別」も復元時刻に付け替わる。
-  created_at?: string
-}
+// 送る1件の形は lib/types.ts に置いてある(lib のモジュールも使うので、
+// hooks に置くと lib から hooks へ逆向きに依存することになる)。
+// 画面やテストが従来どおりここから読めるよう、型だけ再エクスポートする
+export type { TransactionInput }
 
 /**
  * 送信直前に、この環境に無い列を落とした内容を作る。

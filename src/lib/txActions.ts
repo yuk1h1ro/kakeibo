@@ -6,7 +6,7 @@
 // オフラインでも操作が失われない。
 // ============================================================
 
-import type { TransactionInput } from '../hooks/useTransactions'
+import type { TransactionInput } from './types'
 import type { Satisfaction, Transaction } from './types'
 
 /**

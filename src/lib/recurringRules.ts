@@ -8,7 +8,7 @@
 
 import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { TransactionInput } from '../hooks/useTransactions'
+import type { TransactionInput } from './types'
 import { createTableAvailability } from './tableAvailability'
 import { throwOnServerError } from './errorGuidance'
 import { pendingOccurrences, type Recurrence, type RecurrenceKind } from './recurrence'

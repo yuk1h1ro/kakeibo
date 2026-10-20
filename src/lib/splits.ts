@@ -26,7 +26,7 @@
 // ============================================================
 
 import { yenPlain } from './format'
-import type { TransactionInput } from '../hooks/useTransactions'
+import type { TransactionInput } from './types'
 import type { Transaction } from './types'
 
 /** 分割の内訳1つ分(画面から渡ってくる下書き) */

@@ -65,6 +65,43 @@ export interface Transaction {
   favor_from?: string | null // おごってくれた人。おごりのときだけ入る
 }
 
+/**
+ * 保存・送信する1件の中身(id と user_id はここに含めない)。
+ * オフラインキュー・繰り返し入力・分割・一括タグなど、lib のモジュールも
+ * この形で組み立てるので、hooks ではなくここに置く。
+ */
+export interface TransactionInput {
+  date: string
+  // 機能012 で partner_refund / partner_adjust が加わった
+  type: TransactionType
+  amount: number
+  category: string | null
+  memo: string
+  store: string // お店(店名)。任意。支出でのみ使用(空文字 = 未入力)
+  partner_amount: number
+  // 繰り返し入力が自動生成した行の印。手入力では付けない。
+  // (省略時は列自体を送らないので、source 列が無いDBでも手入力は通る)
+  source?: 'recurring'
+  // 感情スタンプ (機能219 + 143)。migration-satisfaction.sql 未実行の環境では
+  // 送信直前にキーごと落とす(下の sendablePayload)
+  satisfaction?: Satisfaction | null
+  // 支出のうち彼女が実際に払った額 (機能018)
+  partner_paid?: number
+  // タグ (機能088)
+  tags?: string[]
+  // 分割した会計の束ねID (機能096)
+  split_group?: string | null
+  // おごり・値引き (favors.ts)。3つで1組(額・理由・相手)。
+  // amount には足さない — 払っていないお金を支出の集計に混ぜないため
+  favor_amount?: number
+  favor_kind?: string | null
+  favor_from?: string
+  // 作成日時。ふだんは送らず DB の now() に任せるが、**元に戻す**ときだけは
+  // 元の値を写す (機能159)。写さないと復元した瞬間が created_at になり、
+  // 同じ日の中での並び順が変わり、レポートの「時間帯別」も復元時刻に付け替わる。
+  created_at?: string
+}
+
 /** 彼女が実際に払った額。列が無い/未設定は 0(= 自分が全額払った) */
 export function partnerPaid(t: { partner_paid?: number | null }): number {
   return typeof t.partner_paid === 'number' && Number.isFinite(t.partner_paid) ? t.partner_paid : 0

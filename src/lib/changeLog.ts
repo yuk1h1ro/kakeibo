@@ -16,7 +16,7 @@
 
 import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { TransactionInput } from '../hooks/useTransactions'
+import type { TransactionInput } from './types'
 import type { Transaction } from './types'
 import { partnerPaid, tagsOf } from './types'
 import { favorOf, favorWhoText } from './favors'
