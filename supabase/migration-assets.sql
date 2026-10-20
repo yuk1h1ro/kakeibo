@@ -91,6 +91,13 @@ create table if not exists public.asset_balances (
 -- ------------------------------------------------------------
 alter table public.assets enable row level security;
 
+-- API(supabase-js)から使うための権限。2026-10-30 以降に作る Supabase プロジェクトでは
+-- 新しいテーブルに自動で付かないので、ここで明示する(付け忘れると permission denied)。
+-- 何回実行しても同じ。anon(ログインしていない人)には付けない — このアプリは
+-- ログインしてから読み書きし、彼女の共有ページは security definer の関数だけを通る
+grant select, insert, update, delete on table public.assets to authenticated;
+grant select, insert, update, delete on table public.assets to service_role;
+
 drop policy if exists "select_own_assets" on public.assets;
 create policy "select_own_assets"
   on public.assets
@@ -117,6 +124,13 @@ create policy "delete_own_assets"
   using (auth.uid() = user_id);
 
 alter table public.asset_balances enable row level security;
+
+-- API(supabase-js)から使うための権限。2026-10-30 以降に作る Supabase プロジェクトでは
+-- 新しいテーブルに自動で付かないので、ここで明示する(付け忘れると permission denied)。
+-- 何回実行しても同じ。anon(ログインしていない人)には付けない — このアプリは
+-- ログインしてから読み書きし、彼女の共有ページは security definer の関数だけを通る
+grant select, insert, update, delete on table public.asset_balances to authenticated;
+grant select, insert, update, delete on table public.asset_balances to service_role;
 
 drop policy if exists "select_own_asset_balances" on public.asset_balances;
 create policy "select_own_asset_balances"

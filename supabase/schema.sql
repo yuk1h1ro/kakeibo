@@ -59,6 +59,13 @@ create table if not exists public.transactions (
 -- ------------------------------------------------------------
 alter table public.transactions enable row level security;
 
+-- API(supabase-js)から使うための権限。2026-10-30 以降に作る Supabase プロジェクトでは
+-- 新しいテーブルに自動で付かないので、ここで明示する(付け忘れると permission denied)。
+-- 何回実行しても同じ。anon(ログインしていない人)には付けない — このアプリは
+-- ログインしてから読み書きし、彼女の共有ページは security definer の関数だけを通る
+grant select, insert, update, delete on table public.transactions to authenticated;
+grant select, insert, update, delete on table public.transactions to service_role;
+
 -- 自分の行だけ参照 (SELECT) できる
 drop policy if exists "select_own_transactions" on public.transactions;
 create policy "select_own_transactions"
@@ -135,6 +142,13 @@ create table if not exists public.categories (
 -- Row Level Security (transactions と同じく本人の行のみ読み書き可)
 alter table public.categories enable row level security;
 
+-- API(supabase-js)から使うための権限。2026-10-30 以降に作る Supabase プロジェクトでは
+-- 新しいテーブルに自動で付かないので、ここで明示する(付け忘れると permission denied)。
+-- 何回実行しても同じ。anon(ログインしていない人)には付けない — このアプリは
+-- ログインしてから読み書きし、彼女の共有ページは security definer の関数だけを通る
+grant select, insert, update, delete on table public.categories to authenticated;
+grant select, insert, update, delete on table public.categories to service_role;
+
 -- 自分の行だけ参照 (SELECT) できる
 drop policy if exists "select_own_categories" on public.categories;
 create policy "select_own_categories"
@@ -201,6 +215,13 @@ create table if not exists public.store_categories (
 
 -- Row Level Security (transactions と同じく本人の行のみ読み書き可)
 alter table public.store_categories enable row level security;
+
+-- API(supabase-js)から使うための権限。2026-10-30 以降に作る Supabase プロジェクトでは
+-- 新しいテーブルに自動で付かないので、ここで明示する(付け忘れると permission denied)。
+-- 何回実行しても同じ。anon(ログインしていない人)には付けない — このアプリは
+-- ログインしてから読み書きし、彼女の共有ページは security definer の関数だけを通る
+grant select, insert, update, delete on table public.store_categories to authenticated;
+grant select, insert, update, delete on table public.store_categories to service_role;
 
 drop policy if exists "select_own_store_categories" on public.store_categories;
 create policy "select_own_store_categories"
@@ -282,6 +303,13 @@ create table if not exists public.recurring_rules (
 -- Row Level Security (transactions と同じく本人の行のみ読み書き可)
 alter table public.recurring_rules enable row level security;
 
+-- API(supabase-js)から使うための権限。2026-10-30 以降に作る Supabase プロジェクトでは
+-- 新しいテーブルに自動で付かないので、ここで明示する(付け忘れると permission denied)。
+-- 何回実行しても同じ。anon(ログインしていない人)には付けない — このアプリは
+-- ログインしてから読み書きし、彼女の共有ページは security definer の関数だけを通る
+grant select, insert, update, delete on table public.recurring_rules to authenticated;
+grant select, insert, update, delete on table public.recurring_rules to service_role;
+
 drop policy if exists "select_own_recurring_rules" on public.recurring_rules;
 create policy "select_own_recurring_rules"
   on public.recurring_rules
@@ -342,6 +370,13 @@ create table if not exists public.transaction_templates (
 
 -- Row Level Security (transactions と同じく本人の行のみ読み書き可)
 alter table public.transaction_templates enable row level security;
+
+-- API(supabase-js)から使うための権限。2026-10-30 以降に作る Supabase プロジェクトでは
+-- 新しいテーブルに自動で付かないので、ここで明示する(付け忘れると permission denied)。
+-- 何回実行しても同じ。anon(ログインしていない人)には付けない — このアプリは
+-- ログインしてから読み書きし、彼女の共有ページは security definer の関数だけを通る
+grant select, insert, update, delete on table public.transaction_templates to authenticated;
+grant select, insert, update, delete on table public.transaction_templates to service_role;
 
 drop policy if exists "select_own_transaction_templates" on public.transaction_templates;
 create policy "select_own_transaction_templates"
@@ -434,6 +469,13 @@ create table if not exists public.partner_share_links (
 
 alter table public.partner_share_links enable row level security;
 
+-- API(supabase-js)から使うための権限。2026-10-30 以降に作る Supabase プロジェクトでは
+-- 新しいテーブルに自動で付かないので、ここで明示する(付け忘れると permission denied)。
+-- 何回実行しても同じ。anon(ログインしていない人)には付けない — このアプリは
+-- ログインしてから読み書きし、彼女の共有ページは security definer の関数だけを通る
+grant select, insert, update, delete on table public.partner_share_links to authenticated;
+grant select, insert, update, delete on table public.partner_share_links to service_role;
+
 -- 本人(ログインした利用者)だけが自分のリンクを読み書きできる。
 -- anon 向けのポリシーは1つも作らない = トークンの直接照会は不可能。
 drop policy if exists "select_own_partner_share_links" on public.partner_share_links;
@@ -505,6 +547,13 @@ create table if not exists public.partner_share_comments (
 );
 
 alter table public.partner_share_comments enable row level security;
+
+-- API(supabase-js)から使うための権限。2026-10-30 以降に作る Supabase プロジェクトでは
+-- 新しいテーブルに自動で付かないので、ここで明示する(付け忘れると permission denied)。
+-- 何回実行しても同じ。anon(ログインしていない人)には付けない — このアプリは
+-- ログインしてから読み書きし、彼女の共有ページは security definer の関数だけを通る
+grant select, insert, update, delete on table public.partner_share_comments to authenticated;
+grant select, insert, update, delete on table public.partner_share_comments to service_role;
 
 -- 本人だけが読み書きできる。彼女(anon)向けのポリシーは作らない。
 drop policy if exists "select_own_partner_share_comments" on public.partner_share_comments;
@@ -606,6 +655,13 @@ create table if not exists public.partner_summary_sends (
 );
 
 alter table public.partner_summary_sends enable row level security;
+
+-- API(supabase-js)から使うための権限。2026-10-30 以降に作る Supabase プロジェクトでは
+-- 新しいテーブルに自動で付かないので、ここで明示する(付け忘れると permission denied)。
+-- 何回実行しても同じ。anon(ログインしていない人)には付けない — このアプリは
+-- ログインしてから読み書きし、彼女の共有ページは security definer の関数だけを通る
+grant select, insert, update, delete on table public.partner_summary_sends to authenticated;
+grant select, insert, update, delete on table public.partner_summary_sends to service_role;
 
 drop policy if exists "select_own_partner_summary_sends" on public.partner_summary_sends;
 create policy "select_own_partner_summary_sends"
@@ -1501,6 +1557,13 @@ comment on column public.discord_settings.webhook_url is
 -- Row Level Security (transactions と同じく本人の行のみ読み書き可)
 alter table public.discord_settings enable row level security;
 
+-- API(supabase-js)から使うための権限。2026-10-30 以降に作る Supabase プロジェクトでは
+-- 新しいテーブルに自動で付かないので、ここで明示する(付け忘れると permission denied)。
+-- 何回実行しても同じ。anon(ログインしていない人)には付けない — このアプリは
+-- ログインしてから読み書きし、彼女の共有ページは security definer の関数だけを通る
+grant select, insert, update, delete on table public.discord_settings to authenticated;
+grant select, insert, update, delete on table public.discord_settings to service_role;
+
 drop policy if exists "select_own_discord_settings" on public.discord_settings;
 create policy "select_own_discord_settings"
   on public.discord_settings
@@ -1604,6 +1667,13 @@ comment on column public.partner_backlog_sends.last_tx_id is
 --  drop してから作り直すことで再実行に耐えるようにしています)
 -- ------------------------------------------------------------
 alter table public.partner_backlog_sends enable row level security;
+
+-- API(supabase-js)から使うための権限。2026-10-30 以降に作る Supabase プロジェクトでは
+-- 新しいテーブルに自動で付かないので、ここで明示する(付け忘れると permission denied)。
+-- 何回実行しても同じ。anon(ログインしていない人)には付けない — このアプリは
+-- ログインしてから読み書きし、彼女の共有ページは security definer の関数だけを通る
+grant select, insert, update, delete on table public.partner_backlog_sends to authenticated;
+grant select, insert, update, delete on table public.partner_backlog_sends to service_role;
 
 drop policy if exists "select_own_partner_backlog_sends" on public.partner_backlog_sends;
 create policy "select_own_partner_backlog_sends"
