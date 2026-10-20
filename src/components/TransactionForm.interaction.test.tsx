@@ -1445,3 +1445,39 @@ describe('保存できるかの判定と理由が食い違わない', () => {
     expect(document.body.textContent).not.toContain('さんさん')
   })
 })
+
+// ============================================================
+// テンプレート・最近の記録から入れ直したとき
+//
+// 保存のあとと同じ片付け(resetPerEntry)を通る。以前は同じ十数行を2か所に
+// 書いていて、入れ直すときだけ前の1件の気分が残っていた。
+// ============================================================
+describe('テンプレートから入れ直したとき', () => {
+  it('前に押した気分を持ち越さない', async () => {
+    const user = userEvent.setup()
+    const submitted: TransactionInput[] = []
+    const props = {
+      fixedType: 'expense' as const,
+      submitLabel: '記録する',
+      onSubmit: async (input: TransactionInput) => {
+        submitted.push(input)
+      },
+    }
+    const { rerender } = render(<TransactionForm {...props} />)
+    await user.click(button(/食費/))
+    await openOptions(user)
+    const stamps = within(screen.getByRole('group', { name: 'この支出の気分' }))
+    await user.click(stamps.getByRole('button', { name: /後悔/ }))
+
+    // テンプレートを押した(親が prefill を渡し直す)
+    rerender(
+      <TransactionForm
+        {...props}
+        prefill={{ nonce: 1, amount: 980, category: 'food', memo: '', store: 'パン屋', partner_amount: 0 }}
+      />
+    )
+    expect(field('支払い金額(円)').value).toBe('980')
+    await user.click(saveButton())
+    expect(submitted[0].satisfaction ?? null).toBeNull()
+  })
+})

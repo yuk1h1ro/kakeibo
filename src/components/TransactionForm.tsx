@@ -533,30 +533,16 @@ export default function TransactionForm({
   // 外部プリフィル適用(日付は現在の選択を維持する。差し替えたいときは DatePrefill を使う)
   useEffect(() => {
     if (!prefill) return
-    setCalc(EMPTY_CALC) // 計算途中の状態が混ざらないようにリセット
-    setPartnerCalc(EMPTY_CALC)
+    // テンプレート・最近の記録から入れ直すときは、前の1件の中身(支払った人・
+    // タグ・分割・おごり・気分・計算途中の式)を持ち越さない。保存のあとと同じ片付け
+    resetPerEntry()
     setAmount(prefill.amount > 0 ? String(prefill.amount) : '')
     setMemo(prefill.memo)
     setStore(prefill.store)
     setWithPartner(prefill.partner_amount > 0)
     setPartnerAmount(prefill.partner_amount > 0 ? String(prefill.partner_amount) : '')
-    // テンプレート・最近の記録から入れ直すときは、
-    // 前の1件の「支払った人」「タグ」「分割」を持ち越さない
-    setPayer('me')
-    setPartnerPaidInput('')
-    setTags([])
-    setTagDraft('')
-    setFavorKind(null)
-    setFavorAmountInput('')
-    setFavorFrom('')
-    setSplitCalc(null)
-    setSplitParts(null)
-    setSplitNotice(null)
-    setTripTagSkipped(false)
     // カテゴリ無しで店名だけ入ってくる場合も、手入力と同じ経路でカテゴリを補う
     setCategory(prefill.category)
-    setAutoCategory(null)
-    setAutoRivals([])
     if (prefill.category === null && prefill.store !== '') {
       applyLearnedCategory(prefill.store, null)
     }
@@ -663,6 +649,45 @@ export default function TransactionForm({
       setKeypadOpen(false)
       setKeypadTarget('amount')
     }
+  }
+
+  /**
+   * 1件ごとの事実を空に戻す。保存のあとと、テンプレート・最近の記録から
+   * 入れ直すときの両方がここを通る(以前は同じ十数行を2か所に書いていて、
+   * 入れ直すときだけ気分が残る・分割に向いたパッドが残る、と食い違っていた)。
+   * 日付とカテゴリはここでは触らない — 残すかどうかは呼ぶ側が決める。
+   *
+   * どれも次の1件に持ち越してはいけないもの:
+   *   支払った人・タグ・分割 … 1件ごとの事実。残ると知らないうちに
+   *     「彼女が払った」扱いになり、預かり残高が動く
+   *   おごり・値引き … 残ると、覚えのない「◯◯さんのおごり」が静かに増えていく
+   *   「この1件だけ旅行タグを外す」 … 残ると、外したことを忘れたまま
+   *     旅行中の記録が抜け落ちる
+   */
+  function resetPerEntry() {
+    setAmount('')
+    setCalc(EMPTY_CALC)
+    setMemo('')
+    setStore('')
+    setWithPartner(false)
+    setPartnerAmount('')
+    setPartnerCalc(EMPTY_CALC)
+    // 彼女の負担分の欄は閉じるので、パッドは支払い金額へ戻す
+    setKeypadTarget('amount')
+    setAutoCategory(null)
+    setAutoRivals([])
+    setSatisfaction(null)
+    setPayer('me')
+    setPartnerPaidInput('')
+    setTags([])
+    setTagDraft('')
+    setFavorKind(null)
+    setFavorAmountInput('')
+    setFavorFrom('')
+    releaseSplitTargets()
+    setSplitParts(null)
+    setSplitNotice(null)
+    setTripTagSkipped(false)
   }
 
   // 機能096: 内訳の1つを書き換える
@@ -884,34 +909,7 @@ export default function TransactionForm({
       }
       // 新規入力時のみリセット(編集モーダルは親が閉じる)
       if (!initial) {
-        setAmount('')
-        setCalc(EMPTY_CALC)
-        setMemo('')
-        setStore('')
-        setWithPartner(false)
-        setPartnerAmount('')
-        setPartnerCalc(EMPTY_CALC)
-        // 彼女の負担分の欄は閉じるので、パッドは支払い金額へ戻す
-        setKeypadTarget('amount')
-        setAutoCategory(null)
-        setAutoRivals([])
-        setSatisfaction(null)
-        // 支払った人・タグ・分割も1件ごとの事実なので次には持ち越さない
-        setPayer('me')
-        setPartnerPaidInput('')
-        setTags([])
-        setTagDraft('')
-        // おごり・値引きも1件ごとの事実。次の記録に持ち越すと、
-        // 覚えのない「◯◯さんのおごり」が静かに増えていく
-        setFavorKind(null)
-        setFavorAmountInput('')
-        setFavorFrom('')
-        releaseSplitTargets()
-        setSplitParts(null)
-        setSplitNotice(null)
-        // 「この1件だけ旅行タグを外す」も1件ごとの判断。次の記録には持ち越さない
-        // (持ち越すと、外したことを忘れたまま旅行中の記録が抜け落ちる)
-        setTripTagSkipped(false)
+        resetPerEntry()
         if (continueAfter) {
           setStreak((n) => n + 1)
           setLastSavedAmount(amountNum)
