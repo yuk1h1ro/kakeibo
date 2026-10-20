@@ -197,6 +197,10 @@ export default function TransactionForm({
   )
   const [category, setCategory] = useState<string | null>(initial?.category ?? null)
   const [date, setDate] = useState(initial?.date ?? todayISO())
+  // 「自動で入れた今日」。利用者が選んだ日付と区別するために持つ。
+  // 開きっぱなしで日付をまたいだとき、まだ自動のままなら新しい今日へ進める
+  // (選んだ日付は動かさない)。編集シートは記録の日付そのものなので対象外
+  const autoDateRef = useRef<string | null>(initial ? null : date)
   const [memo, setMemo] = useState(initial?.memo ?? '')
   const [store, setStore] = useState(initial?.store ?? '')
   const [withPartner, setWithPartner] = useState((initial?.partner_amount ?? 0) > 0)
@@ -426,6 +430,25 @@ export default function TransactionForm({
     setCalc(EMPTY_CALC)
     setPartnerCalc(EMPTY_CALC)
   }, [initial])
+
+  // 開きっぱなしで日付をまたいだら、自動で入れた「今日」を新しい今日へ進める。
+  // ホーム画面のアプリは閉じずに何日も残るので、起動のたびには作り直されない
+  useEffect(() => {
+    const roll = () => {
+      if (document.visibilityState === 'hidden') return
+      const today = todayISO()
+      const auto = autoDateRef.current
+      if (auto === null || auto === today) return
+      autoDateRef.current = today
+      setDate((current) => (current === auto ? today : current))
+    }
+    document.addEventListener('visibilitychange', roll)
+    window.addEventListener('focus', roll)
+    return () => {
+      document.removeEventListener('visibilitychange', roll)
+      window.removeEventListener('focus', roll)
+    }
+  }, [])
 
   // パッドを閉じたら、内訳の打ちかけの式も畳む(理由は openKeypadFor と同じ)
   useEffect(() => {
@@ -761,6 +784,28 @@ export default function TransactionForm({
     // ここを緩めると支出の合計と預かり残高が静かにずれる
     (!splitting ? !isExpense || category !== null : (splitValidation?.ok ?? false))
 
+  // 保存ボタンが押せない理由。灰色になるだけでは、初めての人は何が足りないのか
+  // 分からない。上の `valid` と同じ順に、最初に引っかかった1つだけを言う。
+  // 分割の内訳・彼女が払った額・マイナスの金額は、それぞれの欄の近くにもう理由が
+  // 出ているが、ボタンの近くにも同じことを短く出す(画面の外にあることが多い)
+  const saveBlockedReason: string | null = valid
+    ? null
+    : !splitting && isExpense && category === null
+      ? 'カテゴリを選んでください'
+      : amountNum < 0
+        ? '金額がマイナスになっています(電卓の計算を見直してください)'
+        : !Number.isInteger(amountNum) || (amountNum === 0 && !zeroAllowed)
+          ? '金額を入れてください'
+          : isExpense && withPartner && partnerNum > amountNum
+            ? '彼女の負担分が支払い金額を超えています'
+            : !partnerPaidValid
+              ? payer === 'both' && partnerPaidNum <= 0
+                ? '彼女が払った額を入れてください'
+                : '彼女が払った額が支払い金額を超えています'
+              : splitting
+                ? '分割の内訳がそろっていません(内訳の欄の下を見てください)'
+                : null
+
   const dateChips = [
     { label: '今日', value: daysAgoISO(0) },
     { label: '昨日', value: daysAgoISO(1) },
@@ -881,6 +926,13 @@ export default function TransactionForm({
           setStreak(0)
           setOptionsOpen(false)
           setKeypadOpen(false)
+          // 「保存して続ける」だけが日付とカテゴリを残す(README の約束)。
+          // 「記録する」で残すと、昨日の分を入れたあとの次の1件が、
+          // 気付かないまま昨日の日付・同じカテゴリで保存される
+          const today = todayISO()
+          setDate(today)
+          autoDateRef.current = today
+          setCategory(null)
         }
       }
     } catch (e) {
@@ -1211,7 +1263,11 @@ export default function TransactionForm({
           {withPartner && (
             <>
               <div className="field">
-                <span>彼女の負担分(円) — 預かり残高から差し引かれます</span>
+                <span>
+                  彼女の負担分(円)
+                  {/* 彼女が払った回は「差し引かれる」とは限らない(下の支払った人の説明に任せる) */}
+                  {payer === 'me' && ' — 預かり残高から差し引かれます'}
+                </span>
                 {/* 支払い金額と同じ電卓が使える。
                     「彼女が頼んだ 1,280 と 450」のように、レシートの何行かを
                     足して負担分を出す場面が多いので、アプリの外の電卓に
@@ -1305,8 +1361,18 @@ export default function TransactionForm({
           )}
           {payer !== 'me' && (
             <p className="muted payer-note">
-              彼女が払った {yen(partnerPaidNum || 0)} と負担分 {yen(partnerNum)} の差が、
-              預かり残高に反映されます
+              {`彼女が払った ${yen(partnerPaidNum || 0)} と負担分 ${yen(partnerNum)} の差が、預かり残高に反映されます`}
+            </p>
+          )}
+          {/* 「支払った人」と「二人で使った」は別々のスイッチなので、片方だけ押すと
+              意図と逆に残高が動く。彼女がおごってくれた夕食で「彼女が全額」だけ押し、
+              「二人で使った」を忘れると、総額がまるごと「彼女に返すお金」として
+              残高に足される(彼女の分の差し引きが 0 になるため)。押せなくはしない —
+              「自分ひとりの買い物を彼女が立て替えてくれた」も正しい使い方なので */}
+          {payer !== 'me' && !withPartner && partnerPaidNum > 0 && (
+            <p className="payer-warn" role="note">
+              {`「二人で使った」がオフなので、彼女の負担は 0円 として扱われ、彼女が払った ${yen(partnerPaidNum)} がまるごと預かり残高に足されます。` +
+                '彼女の分も含まれる会計なら、上の「二人で使った」をオンにして負担分を入れてください。'}
             </p>
           )}
         </div>
@@ -1703,6 +1769,12 @@ export default function TransactionForm({
       )}
 
       {error && <p className="error-text">{error}</p>}
+
+      {saveBlockedReason && !busy && (
+        <p className="save-blocked" aria-live="polite">
+          {saveBlockedReason}
+        </p>
+      )}
 
       {/* 機能048: 主は「記録する」、副が「保存して続ける」 */}
       <div className="save-row">

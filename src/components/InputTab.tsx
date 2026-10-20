@@ -194,8 +194,10 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
           入力が主役の画面なので、段組みのバランス任せにせず必ず左の列に置く */}
       <div className="card form-card" ref={formCardRef}>
         <h2>支出を記録</h2>
+        {/* 保存ボタンはフォームのいちばん下にあるので、カードの上端に出しても
+            押した位置からは見えない。画面の下(タブバーの上)に浮かべて出す */}
         {saved && (
-          <p className="positive" style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
+          <p className="saved-toast" role="status">
             記録しました ✓
           </p>
         )}
