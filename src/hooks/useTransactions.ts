@@ -44,10 +44,10 @@ import {
 } from '../lib/discordNotify'
 import { hasDeposits, partnerBalance } from '../lib/partnerBalance'
 import {
+  featureToDrop,
   initTxExtensions,
   isFavorAmountRejection,
   isLedgerTypeRejection,
-  isTxFeatureAvailable,
   markTxFeatureUnavailable,
   stripUnavailableColumns,
 } from '../lib/txExtensions'
@@ -381,27 +381,16 @@ export function useTransactions(supabase: SupabaseClient) {
               markSatisfactionUnavailable()
               continue
             }
-            // 機能018(彼女が払った額)・088(タグ)・096(分割)の列も、
-            // 「無くても記録の本体は成り立つ」ので、その列だけ諦めてやり直す。
-            // partner_paid が落ちれば自分が全額払った扱い、split_group が落ちれば
-            // 束ねだけが消え、tags が落ちればタグだけが付かない — 金額は必ず残る。
-            if (isTxFeatureAvailable('settlement') && op.payload?.partner_paid !== undefined) {
-              markTxFeatureUnavailable('settlement')
-              continue
-            }
-            if (
-              isTxFeatureAvailable('tagging') &&
-              (op.payload?.tags !== undefined || op.payload?.split_group !== undefined)
-            ) {
-              markTxFeatureUnavailable('tagging')
-              continue
-            }
-            // おごり・値引き(favors.ts)の3列も同じ扱い。落ちても
-            // 「誰にご馳走になったか」が付かないだけで、金額と日付は必ず残る。
+            // 彼女が払った額・タグ・分割・おごりの列も「無くても記録の本体は
+            // 成り立つ」ので、その列だけ諦めてやり直す(どの列がどの機能かは
+            // txExtensions.ts の表 1つ)。partner_paid が落ちれば自分が全額払った扱い、
+            // split_group が落ちれば束ねだけが消え、tags が落ちればタグだけ、
+            // favor_* が落ちれば「誰にご馳走になったか」だけが付かない — 金額は必ず残る。
             // ただし全額おごりの 0円 は、列を落としても金額の制約に弾かれる —
             // それは下の isFavorAmountRejection が見分けて案内する
-            if (isTxFeatureAvailable('favor') && op.payload?.favor_amount !== undefined) {
-              markTxFeatureUnavailable('favor')
+            const feature = featureToDrop(op.payload ?? {})
+            if (feature !== null) {
+              markTxFeatureUnavailable(feature)
               continue
             }
           }
