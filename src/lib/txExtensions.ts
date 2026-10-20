@@ -63,6 +63,11 @@ export function markTxFeatureUnavailable(feature: TxFeature): void {
   setAvailable(feature, false)
 }
 
+/** テスト用に「全部使える」へ戻す(判定はモジュールの中に覚えているため) */
+export function resetTxExtensionsForTest(): void {
+  setting.clear()
+}
+
 export function isTxFeatureAvailable(feature: TxFeature): boolean {
   return setting.get()[feature]
 }
