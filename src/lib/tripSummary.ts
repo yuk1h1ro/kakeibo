@@ -202,7 +202,7 @@ export function tripFooterLines(s: TripSummary, currentBalance: number): string[
       : impact < 0
         ? `この旅行で、あずかっているお金から ${yenPlain(-impact)} を使いました`
         : 'この旅行で、あずかっているお金は動いていません'
-  return [RULE, move, `いまの${balanceLine(currentBalance)}`]
+  return [RULE, move, balanceLine(currentBalance, 'いまの残高')]
 }
 
 /**

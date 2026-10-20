@@ -127,10 +127,12 @@ function signedDelta(n: number): string {
 /**
  * 残高の1行。符号だけでは「預かり」なのか「貸し」なのか読めないので、
  * 機能011 の言い回し(partnerBalance.ts)をそのまま載せる。
+ * 月のまとめ・まとめ送り・旅行のまとめも、見出し(label)だけ変えてこれを使う
+ * (「いつの残高か」を見出しで言い分けないと、別の時点の数字が混ざって読めるため)。
  */
-export function balanceLine(balance: number): string {
+export function balanceLine(balance: number, label = '残高'): string {
   const w = balanceWording(balance)
-  return balance === 0 ? `残高: ${yen(0)}(${w.title})` : `残高: ${yen(w.magnitude)}(${w.title})`
+  return `${label}: ${yen(w.magnitude)}(${w.title})`
 }
 
 // 「どの記録の話か」(label) と「いつの記録か」(when) を必ず添える。

@@ -24,7 +24,6 @@
 import { formatDate, yenPlain } from './format'
 import { balanceLine } from './discordNotify'
 import {
-  balanceWording,
   txTitle,
   partnerBalance,
   partnerImpact,
@@ -321,10 +320,9 @@ export function backlogHeaderLines(entries: readonly BacklogEntry[]): string[] {
   const last = entries[entries.length - 1]
   // 最初の1件を反映する**前**の残高 = 始まりの残高
   const startBalance = first.balance - first.impact
-  const w = balanceWording(startBalance)
   return [
     `期間: ${formatBacklogDate(first.date)} 〜 ${formatBacklogDate(last.date)}・${entries.length}件`,
-    `はじめの残高: ${yenPlain(w.magnitude)}(${w.title})`,
+    balanceLine(startBalance, 'はじめの残高'),
     '「残り」はあずかっているお金、「立て替え」は使い切って私が払っている分です',
     RULE,
   ]
@@ -338,11 +336,10 @@ export function backlogHeaderLines(entries: readonly BacklogEntry[]): string[] {
 export function backlogFooterLines(rangeEndBalance: number, currentBalance: number): string[] {
   const lines = [RULE]
   if (rangeEndBalance !== currentBalance) {
-    const w = balanceWording(rangeEndBalance)
-    lines.push(`この期間のあとの残高: ${yenPlain(w.magnitude)}(${w.title})`)
+    lines.push(balanceLine(rangeEndBalance, 'この期間のあとの残高'))
   }
   // 言い回しは、そのつど飛んでいる通知と同じ (discordNotify.ts の balanceLine)
-  lines.push(`いまの${balanceLine(currentBalance)}`)
+  lines.push(balanceLine(currentBalance, 'いまの残高'))
   return lines
 }
 
