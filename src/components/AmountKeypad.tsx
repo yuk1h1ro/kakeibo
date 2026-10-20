@@ -37,7 +37,9 @@ const SIDE_KEYS: { op: CalcOp; label: string }[] = [
  * 数字も演算子も calc.ts の同じ状態機械を通すので、挙動は従来の電卓バーと同じ。
  *
  * onPointerDown で既定動作を止めているのは、キーを押しても金額欄の
- * フォーカスが外れないようにするため(外れるとパッドが閉じてしまう)。
+ * フォーカスが外れないようにするため(外れると OS のキーボードが出たり、
+ * 欄の選択位置が失われたりする)。パッドを閉じるかどうかは、フォーカスでは
+ * なく「金額欄・パッドの外を押したか」で決めている (TransactionForm)。
  */
 export default function AmountKeypad({
   pending,

@@ -139,7 +139,7 @@ export function occurrencesBetween(rec: Recurrence, from: string, to: string): s
   return out
 }
 
-/** 指定日以降(当日を含む)で最初に該当する日。1年以上先に無ければ null。(純粋関数) */
+/** 指定日以降(当日を含む)で最初に該当する日。2年先までに無ければ null。(純粋関数) */
 export function nextOccurrenceOnOrAfter(rec: Recurrence, from: string): string | null {
   if (!isValidISODate(from)) return null
   // 年次でも必ず1回は含まれるように2年分先まで見る

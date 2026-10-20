@@ -72,14 +72,13 @@ function allKeysOf(storage: Storage): string[] {
   return out
 }
 
-/** 未同期(まだサーバーに送れていない)の記録の件数 */
+/**
+ * 未同期(まだサーバーに送れていない)の記録の件数。
+ * キューが壊れていて読めないときは、loadQueue が空として返すので 0 になる
+ * (その場合、守るべき記録はもう読み出せない)。
+ */
 export function unsyncedCount(): number {
-  try {
-    return loadQueue().length
-  } catch {
-    // 読めないときは「あるかもしれない」側に倒す(消さない方向に効く)
-    return 1
-  }
+  return loadQueue().length
 }
 
 /**

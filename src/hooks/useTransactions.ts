@@ -546,7 +546,7 @@ export function useTransactions(supabase: SupabaseClient) {
     void initChangeLog(supabase)
   }, [supabase])
 
-  // 後から足した列 (partner_paid / tags / split_group) がこの環境にあるか。
+  // 後から足した列 (partner_paid / tags / split_group / favor_*) がこの環境にあるか。
   // 取引を読み書きするのはこのフックなので、確認もここで一度だけ行う。
   // 無ければ該当機能の導線が消えるだけで、記録・入力・同期は今までどおり動く
   useEffect(() => {

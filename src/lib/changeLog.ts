@@ -252,9 +252,11 @@ export function useChangeLogAvailable(): boolean {
   )
 }
 
-/** テーブルが無いと分かったときの後始末(判定は noteError 側で立てている) */
+/**
+ * テーブルが無いと分かったときの後始末。
+ * 「無い」の印は noteError がもう立てている(呼ぶのは noteError が true を返したときだけ)。
+ */
 function markUnavailable(): void {
-  availability.markMissing()
   // 送れない履歴を貯め続けても意味がないので捨てる(記録そのものではない)
   saveBuffer([])
 }

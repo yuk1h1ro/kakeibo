@@ -856,7 +856,7 @@ export default function TransactionForm({
     setError(null)
     try {
       // 打ちかけのタグ(確定していない文字列)も取りこぼさずに拾い、
-      // 旅行モードのタグを足す(オフのときは tripTag が null なので何も変わらない)
+      // 旅行モードのタグを足す(オフのときは tripTags が空なので何も変わらない)
       const finalTags = mergeTripTags([...tags, ...parseTagInput(tagDraft)], tripTags)
       const payload: TransactionInput = {
         date,
@@ -1125,7 +1125,8 @@ export default function TransactionForm({
         </div>
       )}
 
-      {/* 3. 金額。テンキー(052)・電卓・桁区切り(050)は AmountTextInput のまま */}
+      {/* 3. 金額。桁区切り(050)は AmountTextInput、電卓は AmountCalcBar、
+          自前テンキー(052)は下の AmountKeypad */}
       <div className="field form-step">
         <span className="step-label">
           {isExpense && (

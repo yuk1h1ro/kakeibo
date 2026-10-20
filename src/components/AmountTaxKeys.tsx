@@ -3,7 +3,7 @@ import { TAX_RATES, pressTax, taxNoticeText, type CalcState, type TaxApplied } f
 
 interface Props {
   /**
-   * 対象の金額欄の状態。電卓を持たない欄(分割の内訳など)は
+   * 対象の金額欄の状態。電卓を持たない欄(彼女が払った額・おごり額)は
    * input だけを詰めて渡す(pendingValue / pendingOp は null)。
    */
   state: CalcState
@@ -67,8 +67,7 @@ export default function AmountTaxKeys({
   return (
     <div
       className="percent-block"
-      /* 押しても金額欄のフォーカスが外れないようにする(外れると自前テンキーが閉じる)。
-         AmountKeypad と同じ理由・同じ手当て */
+      /* 押しても金額欄のフォーカスが外れないようにする。AmountKeypad と同じ理由・同じ手当て */
       onPointerDown={(e) => e.preventDefault()}
     >
       <div className={`percent-row${onPercent ? ' has-percent' : ''}`}>
