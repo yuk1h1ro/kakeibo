@@ -22,6 +22,7 @@ import { partnerPaid, tagsOf } from './types'
 import { favorOf, favorWhoText } from './favors'
 import { formatDate, yenPlain } from './format'
 import { createTableAvailability } from './tableAvailability'
+import { txTitle } from './partnerBalance'
 
 export type ChangeAction = 'update' | 'delete' | 'restore'
 
@@ -72,19 +73,9 @@ export function transactionSummary(
   t: Transaction,
   labelOf: (id: string | null) => string
 ): string {
-  // 支出以外は店名もカテゴリも持たないので、種別そのものを見出しにする。
-  // ここを落とすと返金・調整が「未分類」と表示され、履歴を遡る意味が薄れる
-  const what =
-    t.type === 'partner_deposit'
-      ? '彼女から預かり'
-      : t.type === 'partner_refund'
-        ? '彼女へ返金'
-        : t.type === 'partner_adjust'
-          ? '残高の調整'
-          : t.store.trim() !== ''
-            ? t.store.trim()
-            : labelOf(t.category)
-  return `${formatDate(t.date)} ${what} ${yenPlain(t.amount)}`
+  // 見出しの付け方は履歴・彼女タブと同じ1つ (partnerBalance.txTitle)。
+  // 支出以外は種別そのものが見出しになる(「未分類」と出さない)
+  return `${formatDate(t.date)} ${txTitle(t, labelOf)} ${yenPlain(t.amount)}`
 }
 
 /**

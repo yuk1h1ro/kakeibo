@@ -4,7 +4,7 @@ import { todayISO, yenPlain as yen } from './format'
 import { categoryLabel } from './categories'
 import {
   balanceWording,
-  ledgerRowTitle,
+  txTitle,
   lowBalanceAction,
   partnerBalance,
   partnerImpact,
@@ -199,7 +199,7 @@ function rowLabel(
   },
   today: string
 ): string {
-  const title = r.type === 'expense' ? r.store || r.memo || categoryLabel(r.category ?? null) : ledgerRowTitle(r)
+  const title = txTitle(r, categoryLabel)
   const when = notifyDate(r.date, today)
   return when ? `${when} ${title}` : title
 }

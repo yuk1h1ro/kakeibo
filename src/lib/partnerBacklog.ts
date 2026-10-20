@@ -25,7 +25,7 @@ import { formatDate, yenPlain } from './format'
 import { balanceLine } from './discordNotify'
 import {
   balanceWording,
-  ledgerRowTitle,
+  txTitle,
   partnerBalance,
   partnerImpact,
   type PartnerTxLike,
@@ -159,11 +159,8 @@ export function truncateTitle(text: string): string {
  * (共有ページでも返金・調整の理由だけは彼女に出している)。
  */
 export function backlogTitle(t: BacklogTxLike, labelOf: (category: string | null) => string): string {
-  if (t.type === 'expense') {
-    return truncateTitle(t.store || t.memo || labelOf(t.category))
-  }
-  const head = ledgerRowTitle(t)
-  return truncateTitle(t.memo ? `${head}(${t.memo})` : head)
+  const title = txTitle(t, labelOf)
+  return truncateTitle(t.type !== 'expense' && t.memo ? `${title}(${t.memo})` : title)
 }
 
 /**

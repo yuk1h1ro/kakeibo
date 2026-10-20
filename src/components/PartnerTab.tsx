@@ -36,7 +36,7 @@ import {
   DEFAULT_LOW_BALANCE_THRESHOLD,
   balanceWording,
   shouldWarnLowBalance,
-  ledgerRowTitle,
+  txTitle,
   partnerBalance,
   partnerImpact,
   partnerMovements,
@@ -467,7 +467,7 @@ function MovementRow({ tx, onEdit, comments, onOpenThread, onSubmitComment }: Mo
     ? resolveCategoryVisual(tx.category)
     : ({ kind: 'icon', icon: 'wallet' } as const)
   // タイトルの優先順位: お店 → メモ → カテゴリ名
-  const title = isExpense ? tx.store || tx.memo || categoryLabel(tx.category) : ledgerRowTitle(tx)
+  const title = txTitle(tx, categoryLabel)
 
   const subParts: string[] = [formatDate(tx.date)]
   if (!isExpense) {

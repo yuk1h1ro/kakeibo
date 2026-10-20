@@ -170,8 +170,13 @@ describe('transactionSummary', () => {
     expect(transactionSummary(tx(), labelOf)).toBe('7月20日(月) セブンイレブン ¥1,200')
   })
 
-  it('お店が無ければカテゴリ名で示す', () => {
-    expect(transactionSummary(tx({ store: '' }), labelOf)).toBe('7月20日(月) 食費 ¥1,200')
+  // 見出しは履歴の行と同じ付け方(お店 → メモ → カテゴリ名)
+  it('お店が無ければメモで示す', () => {
+    expect(transactionSummary(tx({ store: '' }), labelOf)).toBe('7月20日(月) おにぎり ¥1,200')
+  })
+
+  it('お店もメモも無ければカテゴリ名で示す', () => {
+    expect(transactionSummary(tx({ store: '', memo: '' }), labelOf)).toBe('7月20日(月) 食費 ¥1,200')
   })
 
   it('預かりはそう分かるようにする', () => {
