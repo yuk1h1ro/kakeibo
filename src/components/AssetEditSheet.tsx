@@ -9,7 +9,8 @@ import {
   type AssetKind,
 } from '../lib/assets'
 import useBodyScrollLock from '../hooks/useBodyScrollLock'
-import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
+import { describeUnknownError } from '../lib/errorGuidance'
+import { isOnlineNow } from '../lib/serverErrors'
 
 interface Props {
   supabase: SupabaseClient

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { Satisfaction, Transaction, TransactionType } from '../lib/types'
+import type { Transaction, TransactionInput } from '../lib/types'
 import {
-  appendOp,
+  appendOps,
   loadQueue,
   removeOp,
   type PendingOp,
@@ -44,25 +44,23 @@ import {
 } from '../lib/discordNotify'
 import { hasDeposits, partnerBalance } from '../lib/partnerBalance'
 import {
+  featureToDrop,
   initTxExtensions,
   isFavorAmountRejection,
   isLedgerTypeRejection,
-  isTxFeatureAvailable,
   markTxFeatureUnavailable,
   stripUnavailableColumns,
 } from '../lib/txExtensions'
 import {
   isDuplicateRowError,
   isNetworkError,
-  isRetryableServerError,
+  isOnlineNow,
   isSchemaError,
   type ServerErrorLike,
 } from '../lib/serverErrors'
 import {
   favorRejectionGuidance,
-  formatGuidance,
   guidanceForServerError,
-  isOnlineNow,
   ledgerRejectionGuidance,
   syncRejectedGuidance,
   type Guidance,
@@ -78,37 +76,10 @@ import {
 } from '../lib/changeLog'
 import { restoreInput } from '../lib/txActions'
 
-export interface TransactionInput {
-  date: string
-  // 機能012 で partner_refund / partner_adjust が加わった
-  type: TransactionType
-  amount: number
-  category: string | null
-  memo: string
-  store: string // お店(店名)。任意。支出でのみ使用(空文字 = 未入力)
-  partner_amount: number
-  // 繰り返し入力が自動生成した行の印。手入力では付けない。
-  // (省略時は列自体を送らないので、source 列が無いDBでも手入力は通る)
-  source?: 'recurring'
-  // 感情スタンプ (機能219 + 143)。migration-satisfaction.sql 未実行の環境では
-  // 送信直前にキーごと落とす(下の sendablePayload)
-  satisfaction?: Satisfaction | null
-  // 支出のうち彼女が実際に払った額 (機能018)
-  partner_paid?: number
-  // タグ (機能088)
-  tags?: string[]
-  // 分割した会計の束ねID (機能096)
-  split_group?: string | null
-  // おごり・値引き (favors.ts)。3つで1組(額・理由・相手)。
-  // amount には足さない — 払っていないお金を支出の集計に混ぜないため
-  favor_amount?: number
-  favor_kind?: string | null
-  favor_from?: string
-  // 作成日時。ふだんは送らず DB の now() に任せるが、**元に戻す**ときだけは
-  // 元の値を写す (機能159)。写さないと復元した瞬間が created_at になり、
-  // 同じ日の中での並び順が変わり、レポートの「時間帯別」も復元時刻に付け替わる。
-  created_at?: string
-}
+// 送る1件の形は lib/types.ts に置いてある(lib のモジュールも使うので、
+// hooks に置くと lib から hooks へ逆向きに依存することになる)。
+// 画面やテストが従来どおりここから読めるよう、型だけ再エクスポートする
+export type { TransactionInput }
 
 /**
  * 送信直前に、この環境に無い列を落とした内容を作る。
@@ -174,12 +145,6 @@ function saveLastSyncedAt(iso: string): void {
   }
 }
 
-// ---------- 再試行すべきエラーの判定 ----------
-// 判定そのものは lib/serverErrors.ts に置き、他のテーブルからも同じ基準で使う。
-// 従来この場所から import していた箇所のために再エクスポートする。
-export type { ServerErrorLike }
-export { isNetworkError, isSchemaError, isRetryableServerError }
-
 /** 削除を取り消せる時間 (機能159)。短いと間に合わず、長いと画面を塞ぐ */
 const UNDO_WINDOW_MS = 7000
 
@@ -224,9 +189,7 @@ export function useTransactions(supabase: SupabaseClient) {
   // 文字列にしてから画面側で分類し直すと、畳んだ文言をもう一度ほどくことになり、
   // 案内が二重に出てしまうため(MainScreen は errorGuide をそのまま描く)。
   const [errorGuide, setErrorGuide] = useState<Guidance | null>(null)
-  const [isOnline, setIsOnline] = useState(() =>
-    typeof navigator !== 'undefined' ? navigator.onLine : true
-  )
+  const [isOnline, setIsOnline] = useState(isOnlineNow)
   const [syncing, setSyncing] = useState(false)
   // この起動でサーバーから一度でも取り込めたか。
   // 「サーバーに無い」を根拠に判断してよいのは、取り込めたときだけ
@@ -244,7 +207,7 @@ export function useTransactions(supabase: SupabaseClient) {
 
   const refresh = useCallback(async () => {
     // 明らかにオフラインなら何もしない(キャッシュ表示を維持)
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (!isOnlineNow()) {
       setLoading(false)
       return
     }
@@ -318,8 +281,11 @@ export function useTransactions(supabase: SupabaseClient) {
       let ops = loadQueue()
       for (const o of group) ops = removeOp(o.opId)
       const now = new Date().toISOString()
-      for (const row of siblings) {
-        ops = appendOp({ opId: crypto.randomUUID(), kind: 'delete', id: row.id, queuedAt: now })
+      // flush の最中に呼ばれるので、ここでは送りに行かない(積むだけ)
+      if (siblings.length > 0) {
+        ops = appendOps(
+          siblings.map((row) => ({ opId: crypto.randomUUID(), kind: 'delete' as const, id: row.id, queuedAt: now }))
+        )
       }
       setPendingOps(ops)
       clearSyncFailures(group.map((o) => o.opId))
@@ -413,27 +379,16 @@ export function useTransactions(supabase: SupabaseClient) {
               markSatisfactionUnavailable()
               continue
             }
-            // 機能018(彼女が払った額)・088(タグ)・096(分割)の列も、
-            // 「無くても記録の本体は成り立つ」ので、その列だけ諦めてやり直す。
-            // partner_paid が落ちれば自分が全額払った扱い、split_group が落ちれば
-            // 束ねだけが消え、tags が落ちればタグだけが付かない — 金額は必ず残る。
-            if (isTxFeatureAvailable('settlement') && op.payload?.partner_paid !== undefined) {
-              markTxFeatureUnavailable('settlement')
-              continue
-            }
-            if (
-              isTxFeatureAvailable('tagging') &&
-              (op.payload?.tags !== undefined || op.payload?.split_group !== undefined)
-            ) {
-              markTxFeatureUnavailable('tagging')
-              continue
-            }
-            // おごり・値引き(favors.ts)の3列も同じ扱い。落ちても
-            // 「誰にご馳走になったか」が付かないだけで、金額と日付は必ず残る。
+            // 彼女が払った額・タグ・分割・おごりの列も「無くても記録の本体は
+            // 成り立つ」ので、その列だけ諦めてやり直す(どの列がどの機能かは
+            // txExtensions.ts の表 1つ)。partner_paid が落ちれば自分が全額払った扱い、
+            // split_group が落ちれば束ねだけが消え、tags が落ちればタグだけ、
+            // favor_* が落ちれば「誰にご馳走になったか」だけが付かない — 金額は必ず残る。
             // ただし全額おごりの 0円 は、列を落としても金額の制約に弾かれる —
             // それは下の isFavorAmountRejection が見分けて案内する
-            if (isTxFeatureAvailable('favor') && op.payload?.favor_amount !== undefined) {
-              markTxFeatureUnavailable('favor')
+            const feature = featureToDrop(op.payload ?? {})
+            if (feature !== null) {
+              markTxFeatureUnavailable(feature)
               continue
             }
           }
@@ -543,6 +498,22 @@ export function useTransactions(supabase: SupabaseClient) {
     }
   }, [supabase, refresh, quarantineFromQueue])
 
+  /**
+   * キューに積んで、すぐ送りに行く。追加・更新・削除・取り消し・取りこぼしの
+   * 回復はみなここを通す(以前は同じ手順を10か所で書いていた)。
+   * opId と積んだ時刻はここで決める。積む順番がそのまま送る順番。
+   * flush の中(quarantineFromQueue)からは呼ばないこと — 送信中に送信を重ねない
+   */
+  const enqueue = useCallback(
+    (ops: readonly Omit<PendingOp, 'opId' | 'queuedAt'>[]) => {
+      if (ops.length === 0) return
+      const queuedAt = new Date().toISOString()
+      setPendingOps(appendOps(ops.map((op) => ({ ...op, opId: crypto.randomUUID(), queuedAt }))))
+      void flush()
+    },
+    [flush]
+  )
+
   // マウント時: まずキャッシュ表示 → サーバーから取得 → 保留分を再送
   useEffect(() => {
     void refresh().then(() => flush())
@@ -554,7 +525,7 @@ export function useTransactions(supabase: SupabaseClient) {
     void initChangeLog(supabase)
   }, [supabase])
 
-  // 後から足した列 (partner_paid / tags / split_group) がこの環境にあるか。
+  // 後から足した列 (partner_paid / tags / split_group / favor_*) がこの環境にあるか。
   // 取引を読み書きするのはこのフックなので、確認もここで一度だけ行う。
   // 無ければ該当機能の導線が消えるだけで、記録・入力・同期は今までどおり動く
   useEffect(() => {
@@ -584,22 +555,9 @@ export function useTransactions(supabase: SupabaseClient) {
       quarantinedIds: new Set(quarantinedRowIds()),
       today: todayISO(),
     })
-    if (lost.length === 0) return
-    const queuedAt = new Date().toISOString()
-    let ops: PendingOp[] = loadQueue()
-    for (const m of lost) {
-      ops = appendOp({
-        opId: crypto.randomUUID(),
-        kind: 'insert',
-        // 控えに残した行IDをそのまま使う。二重になっても主キーが弾く
-        id: m.txId,
-        payload: m.input,
-        queuedAt,
-      })
-    }
-    setPendingOps(ops)
-    void flush()
-  }, [loading, serverSynced, pendingOps.length, serverTx, flush])
+    // 控えに残した行IDをそのまま使う。二重になっても主キーが弾く
+    enqueue(lost.map((m) => ({ kind: 'insert', id: m.txId, payload: m.input })))
+  }, [loading, serverSynced, pendingOps.length, serverTx, enqueue])
 
   // オンライン/オフラインの追跡。復帰時は自動で再同期
   useEffect(() => {
@@ -681,19 +639,11 @@ export function useTransactions(supabase: SupabaseClient) {
    */
   const add = useCallback(
     async (input: TransactionInput, id?: string) => {
-      const op: PendingOp = {
-        opId: crypto.randomUUID(),
-        kind: 'insert',
-        // 行IDをクライアント側で採番することで、未同期の行への
-        // update/delete も同じIDで一貫して扱える
-        id: id ?? crypto.randomUUID(),
-        payload: input,
-        queuedAt: new Date().toISOString(),
-      }
-      setPendingOps(appendOp(op))
-      void flush()
+      // 行IDをクライアント側で採番することで、未同期の行への
+      // update/delete も同じIDで一貫して扱える
+      enqueue([{ kind: 'insert', id: id ?? crypto.randomUUID(), payload: input }])
     },
-    [flush]
+    [enqueue]
   )
 
   /**
@@ -705,38 +655,17 @@ export function useTransactions(supabase: SupabaseClient) {
    */
   const addMany = useCallback(
     async (inputs: readonly TransactionInput[]) => {
-      if (inputs.length === 0) return
-      const queuedAt = new Date().toISOString()
-      let ops: PendingOp[] = loadQueue()
-      for (const input of inputs) {
-        ops = appendOp({
-          opId: crypto.randomUUID(),
-          kind: 'insert',
-          id: crypto.randomUUID(),
-          payload: input,
-          queuedAt,
-        })
-      }
-      setPendingOps(ops)
-      void flush()
+      enqueue(inputs.map((input) => ({ kind: 'insert', id: crypto.randomUUID(), payload: input })))
     },
-    [flush]
+    [enqueue]
   )
 
   const update = useCallback(
     async (id: string, input: TransactionInput) => {
       logUpdate(id, input)
-      const op: PendingOp = {
-        opId: crypto.randomUUID(),
-        kind: 'update',
-        id,
-        payload: input,
-        queuedAt: new Date().toISOString(),
-      }
-      setPendingOps(appendOp(op))
-      void flush()
+      enqueue([{ kind: 'update', id, payload: input }])
     },
-    [flush, logUpdate]
+    [enqueue, logUpdate]
   )
 
   /**
@@ -745,23 +674,10 @@ export function useTransactions(supabase: SupabaseClient) {
    */
   const updateMany = useCallback(
     async (updates: { id: string; input: TransactionInput }[]) => {
-      if (updates.length === 0) return
-      const queuedAt = new Date().toISOString()
-      let ops: PendingOp[] = loadQueue()
-      for (const u of updates) {
-        logUpdate(u.id, u.input)
-        ops = appendOp({
-          opId: crypto.randomUUID(),
-          kind: 'update',
-          id: u.id,
-          payload: u.input,
-          queuedAt,
-        })
-      }
-      setPendingOps(ops)
-      void flush()
+      for (const u of updates) logUpdate(u.id, u.input)
+      enqueue(updates.map((u) => ({ kind: 'update', id: u.id, payload: u.input })))
     },
-    [flush, logUpdate]
+    [enqueue, logUpdate]
   )
 
   const remove = useCallback(
@@ -775,16 +691,10 @@ export function useTransactions(supabase: SupabaseClient) {
         // 編集シートからの削除も取り消せるようにする(機能159)
         armUndo([before])
       }
-      const op: PendingOp = {
-        opId: crypto.randomUUID(),
-        kind: 'delete',
-        id,
-        queuedAt: new Date().toISOString(),
-      }
-      setPendingOps(appendOp(op))
-      void flush()
+      // 手元に見当たらない行でも delete は積む(サーバーにだけ残っている行のため)
+      enqueue([{ kind: 'delete', id }])
     },
-    [flush, logRemoved, armUndo]
+    [enqueue, logRemoved, armUndo]
   )
 
   /**
@@ -797,17 +707,11 @@ export function useTransactions(supabase: SupabaseClient) {
       if (txs.length === 0) return
       // まとめての削除も「利用者が自分で消した」ことに変わりはない(remove と同じ)
       forgetGeneratedMarks(txs.map((t) => t.id))
-      const queuedAt = new Date().toISOString()
-      let ops: PendingOp[] = loadQueue()
-      for (const t of txs) {
-        logRemoved(t)
-        ops = appendOp({ opId: crypto.randomUUID(), kind: 'delete', id: t.id, queuedAt })
-      }
-      setPendingOps(ops)
+      for (const t of txs) logRemoved(t)
       armUndo(txs)
-      void flush()
+      enqueue(txs.map((t) => ({ kind: 'delete', id: t.id })))
     },
-    [flush, logRemoved, armUndo]
+    [enqueue, logRemoved, armUndo]
   )
 
   /**
@@ -829,25 +733,21 @@ export function useTransactions(supabase: SupabaseClient) {
   const restoreMany = useCallback(
     async (txs: readonly Transaction[]) => {
       if (txs.length === 0) return
-      const queuedAt = new Date().toISOString()
-      let ops: PendingOp[] = loadQueue()
       for (const t of txs) {
-        ops = appendOp({
-          opId: crypto.randomUUID(),
+        recordChange(newEntry(t.id, 'restore', transactionSummary(t, categoryLabel), []))
+      }
+      dismissUndo()
+      enqueue(
+        txs.map((t) => ({
           kind: 'insert',
           id: t.id,
           payload: restoreInput(t),
-          queuedAt,
           // 彼女への通知を「元に戻しました」にする(新しい支出に見せない)
           restore: true,
-        })
-        recordChange(newEntry(t.id, 'restore', transactionSummary(t, categoryLabel), []))
-      }
-      setPendingOps(ops)
-      dismissUndo()
-      void flush()
+        }))
+      )
     },
-    [flush, dismissUndo]
+    [enqueue, dismissUndo]
   )
 
   // ---------- 隔離した記録の再送・破棄 ----------
@@ -864,11 +764,7 @@ export function useTransactions(supabase: SupabaseClient) {
       const entry = findQuarantineEntry(entryId)
       if (!entry) return
       const queuedAt = new Date().toISOString()
-      let ops: PendingOp[] = loadQueue()
-      for (const op of entry.ops) {
-        ops = appendOp({ ...op, opId: crypto.randomUUID(), queuedAt })
-      }
-      setPendingOps(ops)
+      setPendingOps(appendOps(entry.ops.map((op) => ({ ...op, opId: crypto.randomUUID(), queuedAt }))))
       const queued = loadQueue()
       if (entry.ops.every((op) => queued.some((q) => q.id === op.id && q.kind === op.kind))) {
         discardQuarantineEntry(entryId)
@@ -923,16 +819,12 @@ export function useTransactions(supabase: SupabaseClient) {
   // (利用者が中身を確かめて再送/破棄するまで、勝手に消えない)
   const quarantined = useQuarantine()
 
-  // 1行しか置けない場所(テストや将来の呼び出し側)のために畳んだ形も返す。
-  // 画面に出すのは errorGuide のほう — 畳んだ文字列を分類し直させないこと
-  const error = errorGuide ? formatGuidance(errorGuide) : null
-
+  // 画面が使うものだけを返す。refresh・restoreMany・dismissUndo は中で使うだけ
+  // (取り込み直しは syncNow、取り消しは undoDelete を通す)
   return {
     transactions,
     loading,
-    error,
     errorGuide,
-    refresh,
     syncNow,
     add,
     addMany,
@@ -940,11 +832,9 @@ export function useTransactions(supabase: SupabaseClient) {
     updateMany,
     remove,
     removeMany,
-    restoreMany,
     // 機能159: 直前の削除(数秒だけ取り消せる)
     undoableDeletes,
     undoDelete,
-    dismissUndo,
     // 同期できずに隔離した記録(中身の確認・再送・破棄)
     quarantined,
     retryQuarantined,

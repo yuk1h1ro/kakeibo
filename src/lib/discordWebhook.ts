@@ -202,8 +202,7 @@ interface DiscordSettingsRow {
 
 /**
  * いまログインしている利用者のID。取れなければ null。
- * upsert の衝突判定に使う列 (user_id) を本文にも入れるために引く
- * (assets.ts の upsert と同じ形にそろえている)。
+ * upsert の衝突判定に使う列 (user_id) を本文にも入れるために引く。
  * 取れなくても列の既定値 auth.uid() が入るので、insert 自体は成立する。
  */
 async function currentUserId(supabase: SupabaseClient): Promise<string | null> {

@@ -43,6 +43,17 @@ export function dayOfWeek(iso: string): number {
 }
 
 /**
+ * 'YYYY-MM-DD' どうしの日数の差(from → to。to が前なら負)。
+ * ローカルの Date で引くと夏時間のある環境で1時間ずれて丸めを誤るので、UTC で引く。
+ * (不正な文字列を null で返す版は storePicker.daysBetween。入力を信じられない側用)
+ */
+export function daysBetween(from: string, to: string): number {
+  const [y1, m1, d1] = from.split('-').map(Number)
+  const [y2, m2, d2] = to.split('-').map(Number)
+  return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86_400_000)
+}
+
+/**
  * 月キーを offset ヶ月ずらす('YYYY-MM' → 'YYYY-MM')。
  * 日を1日に固定してから Date に渡すので、「1月31日の1ヶ月後」のような
  * 日にちのはみ出し(3月3日に飛ぶ)は起きない。年またぎは Date に任せる。

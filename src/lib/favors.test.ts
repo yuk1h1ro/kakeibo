@@ -10,10 +10,7 @@ import {
   favorOf,
   favorSummary,
   favorTransactions,
-  isTreat,
-  listAmount,
   normalizeFavorFrom,
-  personLineText,
   treatFromOptions,
   withHonorific,
 } from './favors'
@@ -88,18 +85,6 @@ describe('支出の集計に影響しない', () => {
   it('一部だけおごってもらっても、支出は自分が払った額のまま', () => {
     const t = tx({ amount: 1000, favor_amount: 2200, favor_kind: 'treat', favor_from: '田中' })
     expect(ownAmount(t)).toBe(1000)
-    // 本来の値段だけは別に出せる
-    expect(listAmount(t)).toBe(3200)
-  })
-
-  it('付いていない記録の本来の値段は支払い額そのもの', () => {
-    expect(listAmount(tx({ amount: 1000 }))).toBe(1000)
-  })
-
-  it('isTreat は値引きに反応しない', () => {
-    expect(isTreat(treated())).toBe(true)
-    expect(isTreat(tx({ favor_amount: 500, favor_kind: 'discount' }))).toBe(false)
-    expect(isTreat(tx())).toBe(false)
   })
 })
 
@@ -310,20 +295,6 @@ describe('treatFromOptions', () => {
     )
     expect(treatFromOptions(txs)).toHaveLength(8)
     expect(treatFromOptions(txs, 3)).toHaveLength(3)
-  })
-})
-
-describe('personLineText', () => {
-  it('何回・いくらぶんかを1行で出す', () => {
-    expect(
-      personLineText({ name: '田中', count: 3, total: 6200, lastDate: '2026-07-12' })
-    ).toBe('田中さん 3回・¥6,200')
-  })
-
-  it('名前を書いていない回も、それと分かる言葉にする', () => {
-    expect(personLineText({ name: '', count: 1, total: 500, lastDate: '2026-07-12' })).toBe(
-      '名前を書いていない回 1回・¥500'
-    )
   })
 })
 

@@ -29,7 +29,6 @@ import type { Transaction } from '../lib/types'
 import '../ledger.css'
 import {
   addSavedFilter,
-  canSaveFilter,
   findMatchingFilter,
   loadSavedFilters,
   removeSavedFilter,
@@ -376,7 +375,7 @@ export default function HistoryFilterBar({ filter, onChange, transactions }: Pro
               </button>
               <button
                 className="hist-primary"
-                disabled={!canSaveFilter(filter)}
+                disabled={!active}
                 /* 名前の初期値は説明文そのままではなく、20文字に収まりやすい形にする
                    (既定のままの期間「すべて」を落とす。理由は suggestFilterName) */
                 onClick={() => setNaming(suggestFilterName(filter, categoryLabel))}

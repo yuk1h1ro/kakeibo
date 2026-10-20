@@ -38,6 +38,7 @@ import { useSyncExternalStore } from 'react'
 import { createLocalSetting } from './localSetting'
 import { DEFAULT_SPECIAL_TAGS } from './reportTagSettings'
 import { todayISO } from './format'
+import { daysBetween } from './calendar'
 import { normalizeTag, sanitizeTags } from './tags'
 import { tagsOf, type Transaction } from './types'
 
@@ -139,18 +140,13 @@ export function beginTripMode(
 
 // ---------- 純粋関数(表示と判断) ----------
 
-function toUTCms(iso: string): number {
-  const [y, m, d] = iso.split('-').map(Number)
-  return Date.UTC(y, m - 1, d)
-}
-
 /**
  * 開始日を1日目とした経過日数。(純粋関数)
  * 端末の日付が戻されている等で開始日が未来になっていても 1 を下回らせない
  * (「-3日目」という表示のほうが、ずれそのものより不安にさせる)。
  */
 export function tripDayCount(mode: TripMode, today: string): number {
-  const diff = Math.round((toUTCms(today) - toUTCms(mode.startedOn)) / 86_400_000)
+  const diff = daysBetween(mode.startedOn, today)
   return diff < 0 ? 1 : diff + 1
 }
 
@@ -191,21 +187,10 @@ export function tripReminderText(mode: TripMode, today: string): string | null {
 }
 
 /**
- * この1件に実際に付ける自動タグ。(純粋関数)
- * オフのとき・タグ列が無い環境・この1件だけ外したときは null(= 何も付けない)。
+ * この1件に実際に付ける自動タグ(行き先を含む)。(純粋関数)
+ * オフのとき・タグ列が無い環境・この1件だけ外したときは空配列(= 何も付けない)。
  * 判断をここ1か所に集めているのは、画面の表示(何が付くか)と保存内容が
  * 必ず一致するようにするため。
- */
-export function tripAutoTag(
-  mode: TripMode | null,
-  opts: { taggingAvailable: boolean; skippedForThisEntry: boolean }
-): string | null {
-  return tripAutoTags(mode, opts)[0] ?? null
-}
-
-/**
- * この1件に実際に付ける自動タグ(行き先を含む)。(純粋関数)
- * オフのとき・タグ列が無い環境・この1件だけ外したときは空配列。
  * 「この1件だけ外す」は行き先ごと外す — 旅行中に自分用のものを買った1件に、
  * 行き先だけ残しても意味がない。
  */
@@ -220,18 +205,13 @@ export function tripAutoTags(
 }
 
 /**
- * 手で付けたタグと自動タグを合わせる。(純粋関数)
+ * 手で付けたタグと自動タグ(旅行 + 行き先)を合わせる。(純粋関数)
  *
  * 自動タグを **先頭** に置くのは、1件あたりの上限(MAX_TAGS_PER_TX)で
  * 打ち切られる側に回さないため。手で5つ付けた回だけ旅行タグが静かに
  * 落ちると、その1件だけ集計から抜けて理由が分からなくなる。
  * 重複は sanitizeTags が落とすので、手で「旅行」と打っていても二重にならない。
  */
-export function mergeTripTag(manual: readonly string[], autoTag: string | null): string[] {
-  return mergeTripTags(manual, autoTag === null ? [] : [autoTag])
-}
-
-/** 手で付けたタグと自動タグ(旅行 + 行き先)を合わせる。(純粋関数) */
 export function mergeTripTags(manual: readonly string[], autoTags: readonly string[]): string[] {
   return sanitizeTags([...autoTags, ...manual])
 }

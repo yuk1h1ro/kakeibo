@@ -8,7 +8,7 @@
 export type CalcOp = '+' | '-' | '×'
 
 export interface CalcState {
-  /** 金額入力欄の生の文字列(input[type=number] の value) */
+  /** 金額入力欄の生の文字列(数字だけ。桁区切りのカンマは表示専用で、ここには入らない) */
   input: string
   /** 確定済みの計算途中の値 */
   pendingValue: number | null
@@ -35,7 +35,7 @@ export function applyOp(a: number, op: CalcOp, b: number): number {
 
 /**
  * 入力欄の文字列を整数に変換する。空・不正な値は null。
- * 小数が入力された場合(type=number では '.' が打てる)は四捨五入して円に丸める。
+ * 小数が来た場合(貼り付けなど)は四捨五入して円に丸める。
  */
 export function parseAmountInput(input: string): number | null {
   const s = input.trim()

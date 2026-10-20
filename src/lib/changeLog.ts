@@ -16,12 +16,13 @@
 
 import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { TransactionInput } from '../hooks/useTransactions'
+import type { TransactionInput } from './types'
 import type { Transaction } from './types'
 import { partnerPaid, tagsOf } from './types'
-import { favorOf } from './favors'
+import { favorOf, favorWhoText } from './favors'
 import { formatDate, yenPlain } from './format'
 import { createTableAvailability } from './tableAvailability'
+import { txTitle } from './partnerBalance'
 
 export type ChangeAction = 'update' | 'delete' | 'restore'
 
@@ -72,19 +73,9 @@ export function transactionSummary(
   t: Transaction,
   labelOf: (id: string | null) => string
 ): string {
-  // 支出以外は店名もカテゴリも持たないので、種別そのものを見出しにする。
-  // ここを落とすと返金・調整が「未分類」と表示され、履歴を遡る意味が薄れる
-  const what =
-    t.type === 'partner_deposit'
-      ? '彼女から預かり'
-      : t.type === 'partner_refund'
-        ? '彼女へ返金'
-        : t.type === 'partner_adjust'
-          ? '残高の調整'
-          : t.store.trim() !== ''
-            ? t.store.trim()
-            : labelOf(t.category)
-  return `${formatDate(t.date)} ${what} ${yenPlain(t.amount)}`
+  // 見出しの付け方は履歴・彼女タブと同じ1つ (partnerBalance.txTitle)。
+  // 支出以外は種別そのものが見出しになる(「未分類」と出さない)
+  return `${formatDate(t.date)} ${txTitle(t, labelOf)} ${yenPlain(t.amount)}`
 }
 
 /**
@@ -154,10 +145,8 @@ function favorText(t: {
 }): string {
   const favor = favorOf({ ...t, type: 'expense' })
   if (favor === null) return '(なし)'
-  if (favor.kind === 'discount') return `割引 ${yenPlain(favor.amount)}`
-  return favor.from === ''
-    ? `おごり ${yenPlain(favor.amount)}`
-    : `${favor.from}さんのおごり ${yenPlain(favor.amount)}`
+  // 言い方は favors.ts の1か所に揃える(敬称を重ねない「田中さんのおごり」)
+  return `${favorWhoText(favor)} ${yenPlain(favor.amount)}`
 }
 
 /** タグの一覧を表示用の1行にする。並び順の違いは差分にしない。(純粋関数) */
@@ -254,9 +243,11 @@ export function useChangeLogAvailable(): boolean {
   )
 }
 
-/** テーブルが無いと分かったときの後始末(判定は noteError 側で立てている) */
+/**
+ * テーブルが無いと分かったときの後始末。
+ * 「無い」の印は noteError がもう立てている(呼ぶのは noteError が true を返したときだけ)。
+ */
 function markUnavailable(): void {
-  availability.markMissing()
   // 送れない履歴を貯め続けても意味がないので捨てる(記録そのものではない)
   saveBuffer([])
 }

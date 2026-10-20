@@ -6,7 +6,7 @@
 import type { Satisfaction, Transaction } from './types'
 import { ownAmount, satisfactionOf, storeKey } from './types'
 import { partnerImpact } from './partnerBalance'
-import { WEEKDAY_LABELS, dayOfWeek, monthEndISO } from './calendar'
+import { WEEKDAY_LABELS, dayOfWeek, daysBetween, monthEndISO } from './calendar'
 
 /** 両端を含む期間 */
 export interface DateRange {
@@ -44,11 +44,7 @@ export function inRange(iso: string, r: DateRange): boolean {
 
 /** 期間の日数(両端を含む)。1日あたり平均や年換算の分母に使う */
 export function rangeDays(r: DateRange): number {
-  const [y1, m1, d1] = r.start.split('-').map(Number)
-  const [y2, m2, d2] = r.end.split('-').map(Number)
-  // 夏時間の無い日本でも安全側に倒して UTC の一日=86400000ms で差を取る
-  const diff = Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)
-  return Math.max(Math.round(diff / 86_400_000) + 1, 1)
+  return Math.max(daysBetween(r.start, r.end) + 1, 1)
 }
 
 /** 期間内の取引(種別を問わない) */

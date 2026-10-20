@@ -7,9 +7,7 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { toServerError } from './serverErrors'
-import { createTableAvailability } from './tableAvailability'
-import { formatGuidance, guidanceForServerError, isOnlineNow } from './errorGuidance'
+import { throwOnServerError } from './errorGuidance'
 
 export interface ShareLink {
   id: string
@@ -86,28 +84,14 @@ function fromRow(r: ShareLinkRow): ShareLink {
   }
 }
 
-// テーブルが無いと分かったら「無い」。以後この機能の導線を出さない。
-// 答えは localStorage に残るので、オフライン起動でも前回の答えが効く
-// (見分け方は tableAvailability.ts)。
-const availability = createTableAvailability('partner_share_links')
-
-// **この判定を「画面を出すかどうか」のガードに使わないこと。**
-// 描画の手前で弾くと fetch まで届かず、答えを取り消す機会が永久に来ない
-// (マイグレーションを実行しても機能が戻らなくなる)。導線を隠すのは、
-// いまのように fetch の結果(null)を画面側の state で受けて判断すること。
-export function isShareUnavailable(): boolean {
-  return availability.isMissing()
-}
-
-/** テスト用に、モジュールに残る「テーブルが無い」判定を戻す */
-export function resetShareLinksForTest(): void {
-  availability.resetForTest()
-}
-
 /**
  * 自分の共有リンクを読み込む。
- * テーブルが無ければ null を返して静かに無効化する(呼び出し側は導線を隠すだけ)。
- * 通信エラー等も null(= 分からない)で返し、例外は投げない。
+ * テーブルが無い(migration-partner-share.sql 未実行)ときも、通信できないときも
+ * null を返して黙る。呼び出し側はカードごと出さないだけで、どちらでも同じ扱い。
+ * 例外は投げない。
+ *
+ * 以前は「テーブルが無い」と分かったことを localStorage にも書いていたが、
+ * それを読む所は本番に1つも無かった(画面は null を受けて隠すだけ)ので外した。
  */
 export async function fetchShareLinks(supabase: SupabaseClient): Promise<ShareLink[] | null> {
   try {
@@ -115,11 +99,7 @@ export async function fetchShareLinks(supabase: SupabaseClient): Promise<ShareLi
       .from('partner_share_links')
       .select(SELECT_COLUMNS)
       .order('created_at', { ascending: false })
-    if (error) {
-      availability.noteError(error)
-      return null
-    }
-    availability.markPresent()
+    if (error) return null
     return ((data ?? []) as unknown as ShareLinkRow[]).map(fromRow)
   } catch {
     return null
@@ -139,10 +119,7 @@ export async function createShareLink(
     .insert({ expires_at: expiresAt })
     .select(SELECT_COLUMNS)
     .single()
-  if (error) {
-    availability.noteError(error)
-    throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
-  }
+  throwOnServerError(error)
   if (!data) {
     throw new Error('共有リンクを作成できませんでした。通信が不安定な可能性があります。もう一度お試しください')
   }
@@ -155,7 +132,7 @@ export async function revokeShareLink(supabase: SupabaseClient, id: string): Pro
     .from('partner_share_links')
     .update({ revoked_at: new Date().toISOString() })
     .eq('id', id)
-  if (error) throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
+  throwOnServerError(error)
 }
 
 /**
@@ -167,13 +144,8 @@ export async function reissueShareLink(
   oldId: string | null,
   expiresAt: string | null
 ): Promise<ShareLink> {
-  if (oldId) {
-    try {
-      await revokeShareLink(supabase, oldId)
-    } catch (e) {
-      // 無効化できないまま新しいリンクを作ると、古いURLが生きたままになる
-      throw new Error(toServerError(e).message)
-    }
-  }
+  // 無効化できないまま新しいリンクを作ると、古いURLが生きたままになる。
+  // 無効化に失敗すればここで例外が上がり、新しいリンクは作られない
+  if (oldId) await revokeShareLink(supabase, oldId)
   return createShareLink(supabase, expiresAt)
 }

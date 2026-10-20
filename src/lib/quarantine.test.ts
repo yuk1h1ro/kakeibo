@@ -171,7 +171,8 @@ describe('quarantinedOpSummary', () => {
       quarantinedOpSummary(op({ opId: 'a', payload: payload({ type }) }), label).title
     expect(t('partner_deposit')).toBe('彼女から預かり')
     expect(t('partner_refund')).toBe('彼女に返金')
-    expect(t('partner_adjust')).toBe('残高の調整')
+    // 調整は向きまで書く(履歴・彼女タブと同じ見出し。partnerBalance.txTitle)
+    expect(t('partner_adjust')).toMatch(/^調整\(残高を(増やした|減らした)\)$/)
   })
 
   it('削除は中身を持たないので金額を出さない', () => {

@@ -312,14 +312,6 @@ export async function unarchiveCategory(supabase: SupabaseClient, catKey: string
   setCategories(allCategories.map((c) => (c.catKey === catKey ? { ...c, archived: false } : c)))
 }
 
-/** そのカテゴリを使っている記録の件数。隠す前の確認に使う。(純粋関数) */
-export function countTransactionsWithCategory(
-  txs: readonly { category: string | null }[],
-  catKey: string
-): number {
-  return txs.filter((t) => t.category === catKey).length
-}
-
 /** アクティブ一覧内で1つ上/下と sort_order を入れ替える */
 export async function moveCategory(
   supabase: SupabaseClient,

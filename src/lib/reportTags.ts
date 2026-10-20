@@ -25,7 +25,6 @@ import type { Transaction } from './types'
 import { tagsOf } from './types'
 import type { DateRange, RankItem } from './report'
 import {
-  filterByRange,
   ownExpenses,
   rangeDays,
   rankByCategory,
@@ -33,6 +32,7 @@ import {
   totalOwn,
 } from './report'
 import { collectTags, hasAnyTag } from './tags'
+import { daysBetween } from './calendar'
 
 /** タグが1つも付いていない支出をまとめる見出し */
 export const NO_TAG_LABEL = 'タグなし'
@@ -115,20 +115,6 @@ export function withTags(txs: readonly Transaction[], tags: readonly string[]): 
 /** タグが1つも付いていない取引だけを取り出す。(純粋関数) */
 export function withoutTags(txs: readonly Transaction[]): Transaction[] {
   return txs.filter((t) => tagsOf(t).length === 0)
-}
-
-/**
- * 選んだタグ(または「タグなし」)の中のカテゴリ内訳。(純粋関数)
- * 「今回の旅行の内訳は宿泊◯円・食費◯円」を出すためのもの。
- * 集計そのものは既存の rankByCategory に任せ、ここは絞り込むだけ。
- */
-export function tagCategoryBreakdown(
-  txs: readonly Transaction[],
-  r: DateRange,
-  tag: string | null,
-  labelOf: (id: string | null) => string
-): RankItem[] {
-  return rankByCategory(tag === null ? withoutTags(txs) : withTag(txs, tag), r, labelOf)
 }
 
 // ---------- 日常 / 非日常 ----------
@@ -220,11 +206,6 @@ export interface TagEvent {
   categories: RankItem[]
 }
 
-/** 'YYYY-MM-DD' の差(日) */
-function daysBetween(from: string, to: string): number {
-  return rangeDays({ start: from, end: to }) - 1
-}
-
 /**
  * そのタグが付いた記録を「回」ごとに束ねる。(純粋関数)
  *
@@ -283,18 +264,6 @@ function eventsOf(
       categories: rankByCategory(tagged, range, labelOf),
     }))
     .reverse() // 直近の回を先頭に
-}
-
-/**
- * そのタグが付いた記録の最初から最後まで、をまとめた1つ。(純粋関数)
- * 「デート全体でいくら使ったか」を出すのに使う。1件も無ければ null。
- */
-export function tagSpan(
-  txs: readonly Transaction[],
-  tag: string,
-  labelOf: (id: string | null) => string
-): TagEvent | null {
-  return tagEvents(txs, tag, labelOf, Number.POSITIVE_INFINITY)[0] ?? null
 }
 
 // ============================================================
@@ -529,17 +498,6 @@ export function selectionSpan(
 }
 
 /**
- * 期間内に実際に使われているタグ(多い順)。(純粋関数)
- * 特別タグを選ぶチップの並びに使う。collectTags(tags.ts)は件数だけを見て
- * 期間を問わないので、レポートでは「この期間に出てくる順」を別に用意する。
- */
-export function tagsInRange(txs: readonly Transaction[], r: DateRange): string[] {
-  return tagBreakdown(txs, r)
-    .items.filter((i) => i.tag !== null)
-    .map((i) => i.tag as string)
-}
-
-/**
  * 「特別なタグ」を選ぶチップの並び。(純粋関数)
  *
  * よく使うタグから順に出す(collectTags と同じ順)。そのうえで keep に渡した
@@ -560,9 +518,4 @@ export function specialTagOptions(
     if (!out.includes(tag)) out.push(tag)
   }
   return out
-}
-
-/** 期間内に記録が1件でもあるか(カードを出すかどうかの判断に使う)。(純粋関数) */
-export function hasAnyTaggedTx(txs: readonly Transaction[], r: DateRange): boolean {
-  return filterByRange(txs, r).some((t) => tagsOf(t).length > 0)
 }

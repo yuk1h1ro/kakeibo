@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   groupCommentsByTransaction,
-  hasUnread,
   MAX_COMMENT_LENGTH,
   normalizeCommentBody,
   unreadCommentCount,
@@ -80,7 +79,7 @@ describe('groupCommentsByTransaction', () => {
   })
 })
 
-describe('unreadCommentCount / hasUnread', () => {
+describe('unreadCommentCount', () => {
   it('未読の彼女のコメントだけ数える', () => {
     const list = [
       comment({ id: 'a', author: 'partner', readByOwner: false }),
@@ -88,11 +87,9 @@ describe('unreadCommentCount / hasUnread', () => {
       comment({ id: 'c', author: 'owner', readByOwner: false }), // 自分の投稿は未読にしない
     ]
     expect(unreadCommentCount(list)).toBe(1)
-    expect(hasUnread(list)).toBe(true)
   })
 
   it('全部読んでいれば 0', () => {
     expect(unreadCommentCount([comment({ id: 'a', readByOwner: true })])).toBe(0)
-    expect(hasUnread([])).toBe(false)
   })
 })

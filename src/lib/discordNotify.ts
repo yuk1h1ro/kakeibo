@@ -4,7 +4,7 @@ import { todayISO, yenPlain as yen } from './format'
 import { categoryLabel } from './categories'
 import {
   balanceWording,
-  ledgerRowTitle,
+  txTitle,
   lowBalanceAction,
   partnerBalance,
   partnerImpact,
@@ -12,11 +12,6 @@ import {
 } from './partnerBalance'
 import { loadLowBalanceThreshold } from './lowBalanceSettings'
 import { getWebhookUrl } from './discordWebhook'
-
-// 残高計算の本体は partnerBalance.ts(純粋関数)に置いてある。
-// 従来ここから import していた箇所のために再エクスポートする。
-export { partnerBalance, partnerImpact }
-export type { PartnerTxLike }
 
 // ============================================================
 // Discord Webhook 通知
@@ -30,16 +25,6 @@ export type { PartnerTxLike }
 // スマホからの記録だけが通知されていなかった。いまはどの端末で設定しても
 // 全部の端末から通知が飛ぶ。
 // ============================================================
-
-// 保存場所が変わっても呼び出し側(monthlySummary など)は変えずに済むよう、
-// 従来どおりこのモジュールからも読めるようにしておく
-export {
-  getWebhookUrl,
-  saveWebhookUrl,
-  clearWebhookUrl,
-  isValidWebhookUrl,
-  maskWebhookUrl,
-} from './discordWebhook'
 
 /**
  * テスト送信の結果。
@@ -142,10 +127,12 @@ function signedDelta(n: number): string {
 /**
  * 残高の1行。符号だけでは「預かり」なのか「貸し」なのか読めないので、
  * 機能011 の言い回し(partnerBalance.ts)をそのまま載せる。
+ * 月のまとめ・まとめ送り・旅行のまとめも、見出し(label)だけ変えてこれを使う
+ * (「いつの残高か」を見出しで言い分けないと、別の時点の数字が混ざって読めるため)。
  */
-export function balanceLine(balance: number): string {
+export function balanceLine(balance: number, label = '残高'): string {
   const w = balanceWording(balance)
-  return balance === 0 ? `残高: ${yen(0)}(${w.title})` : `残高: ${yen(w.magnitude)}(${w.title})`
+  return `${label}: ${yen(w.magnitude)}(${w.title})`
 }
 
 // 「どの記録の話か」(label) と「いつの記録か」(when) を必ず添える。
@@ -214,7 +201,7 @@ function rowLabel(
   },
   today: string
 ): string {
-  const title = r.type === 'expense' ? r.store || r.memo || categoryLabel(r.category ?? null) : ledgerRowTitle(r)
+  const title = txTitle(r, categoryLabel)
   const when = notifyDate(r.date, today)
   return when ? `${when} ${title}` : title
 }

@@ -6,6 +6,7 @@ import { useTransactions, type TransactionInput } from './useTransactions'
 import { saveQueue, type PendingOp } from '../lib/offlineQueue'
 import { discardQuarantineEntry, loadQuarantine } from '../lib/quarantine'
 import { resetDiscordWebhookForTest } from '../lib/discordWebhook'
+import { resetTxExtensionsForTest } from '../lib/txExtensions'
 import type { Transaction } from '../lib/types'
 
 // ============================================================
@@ -322,4 +323,77 @@ describe('分割の会計の Discord 通知', () => {
     // 無かったことになる会計なので、「−¥700」も「🗑 削除されました」も届かない
     expect(sent).toEqual([])
   })
+})
+
+// ============================================================
+// 後から足した列が、サーバーにまだ無いとき
+//
+// その列だけを諦めて同じ記録を送り直す — 金額と日付は必ず残す。
+// 列と機能の対応(partner_paid → settlement、tags / split_group → tagging、
+// favor_* → favor)を変えたときに、ここが落ちる。
+// ============================================================
+describe('サーバーに無い列だけを落として送り直す', () => {
+  // どの列が無いかの判定はモジュールの中に残るので、ケースごとに「全部ある」から始める。
+  // 残したままだと、前のケースで落とした列が送る前に間引かれ、送り直しの道を通らない
+  beforeEach(() => resetTxExtensionsForTest())
+  afterEach(() => resetTxExtensionsForTest())
+
+  /** 指定した列を含む行を「その列は無い」(PGRST204)で弾く偽サーバー */
+  function missingColumns(server: FakeServer, columns: readonly string[]): SupabaseClient {
+    const base = fakeSupabase(server)
+    return {
+      from: (table: string) => {
+        const t = base.from(table) as unknown as Record<string, unknown> & {
+          insert: (row: Transaction) => Promise<unknown>
+        }
+        return {
+          ...t,
+          insert: (row: Transaction) => {
+            const missing = columns.find((c) => c in row)
+            if (table === 'transactions' && missing) {
+              return Promise.resolve({
+                error: {
+                  code: 'PGRST204',
+                  message: `Could not find the '${missing}' column of 'transactions' in the schema cache`,
+                  details: null,
+                  hint: null,
+                },
+              })
+            }
+            return t.insert(row)
+          },
+        }
+      },
+    } as unknown as SupabaseClient
+  }
+
+  const cases: { name: string; columns: string[]; payload: Partial<TransactionInput> }[] = [
+    { name: '彼女が払った額 (partner_paid)', columns: ['partner_paid'], payload: { partner_paid: 500 } },
+    { name: 'タグ (tags)', columns: ['tags', 'split_group'], payload: { tags: ['旅行'] } },
+    { name: '分割の束ね (split_group)', columns: ['tags', 'split_group'], payload: { split_group: 'g1' } },
+    {
+      name: 'おごり (favor_*)',
+      columns: ['favor_amount', 'favor_kind', 'favor_from'],
+      payload: { favor_amount: 300, favor_kind: 'treat', favor_from: '田中' },
+    },
+  ]
+
+  for (const c of cases) {
+    it(`${c.name} の列が無ければ、その列だけ落として記録は残す`, async () => {
+      const server = newServer()
+      // satisfaction は別の仕組みなので、ここでは送らない形にしておく
+      const { satisfaction: _s, ...base } = expense({ amount: 1200, partner_amount: 0 }) as TransactionInput & {
+        satisfaction?: unknown
+      }
+      saveQueue([insertOp('x', { ...base, ...c.payload } as TransactionInput)])
+
+      const { result } = renderHook(() => useTransactions(missingColumns(server, c.columns)))
+      await waitFor(() => expect(result.current.pendingCount).toBe(0))
+
+      expect(server.rows).toHaveLength(1)
+      expect(server.rows[0].amount).toBe(1200)
+      for (const col of c.columns) expect(col in server.rows[0]).toBe(false)
+      expect(loadQuarantine()).toEqual([])
+    })
+  }
 })

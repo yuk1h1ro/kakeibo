@@ -8,9 +8,10 @@
 
 import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { TransactionInput } from '../hooks/useTransactions'
+import type { TransactionInput } from './types'
 import { createTableAvailability } from './tableAvailability'
 import { throwOnServerError } from './errorGuidance'
+import { isOnlineNow } from './serverErrors'
 import { pendingOccurrences, type Recurrence, type RecurrenceKind } from './recurrence'
 import { hasGeneratedMark, recordGeneratedMark } from './recurringLedger'
 
@@ -284,7 +285,7 @@ export async function generateDueTransactions(
   enqueue: (input: TransactionInput, id?: string) => Promise<void>
 ): Promise<number> {
   if (availability.isMissing()) return 0
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return 0
+  if (!isOnlineNow()) return 0
 
   let generated = 0
   for (const { rule, dates } of planGeneration(rules, today)) {

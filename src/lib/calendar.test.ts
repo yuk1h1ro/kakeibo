@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { WEEKDAY_LABELS, dayOfWeek, daysInMonth, monthEndISO, shiftMonth } from './calendar'
+import { WEEKDAY_LABELS, dayOfWeek, daysBetween, daysInMonth, monthEndISO, shiftMonth } from './calendar'
 
 // 統合前は report / netWorth / historyFilter / recurrence / reportYear / calendar が
 // それぞれ月末日を出していた。各実装が持っていた境界(うるう年・28/29/30/31日・年またぎ)を
@@ -87,5 +87,18 @@ describe('monthEndISO', () => {
   it('1月・12月でも年をまたがない', () => {
     expect(monthEndISO('2026-01')).toBe('2026-01-31')
     expect(monthEndISO('2026-12')).toBe('2026-12-31')
+  })
+})
+
+describe('daysBetween', () => {
+  it('日数の差を返す(月・年・うるう日をまたいでも)', () => {
+    expect(daysBetween('2026-07-01', '2026-08-04')).toBe(34)
+    expect(daysBetween('2026-08-04', '2026-08-04')).toBe(0)
+    expect(daysBetween('2025-12-31', '2026-01-01')).toBe(1)
+    expect(daysBetween('2028-02-28', '2028-03-01')).toBe(2)
+  })
+
+  it('to が前なら負になる', () => {
+    expect(daysBetween('2026-08-04', '2026-08-01')).toBe(-3)
   })
 })

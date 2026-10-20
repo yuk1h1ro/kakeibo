@@ -41,6 +41,7 @@
 // ============================================================
 
 import { isAuthRetryableFetchError, type Session, type SupabaseClient } from '@supabase/supabase-js'
+import { isOnlineNow } from './serverErrors'
 
 export const VAULT_KEY = 'kakeibo.authVault'
 
@@ -159,7 +160,7 @@ export function restoreFromVault(
 
 async function runRestore(
   auth: RefreshCapable,
-  { storage = localStorage, online = isOnline() }: { storage?: Storage; online?: boolean }
+  { storage = localStorage, online = isOnlineNow() }: { storage?: Storage; online?: boolean }
 ): Promise<RestoreResult> {
   const entry = readVault(storage)
   if (entry === null) return 'no-backup'
@@ -188,10 +189,6 @@ async function runRestore(
   // 画面がその知らせを受ける前に次の更新が走っても取りこぼさないように)
   writeVault(data.session, storage)
   return 'restored'
-}
-
-function isOnline(): boolean {
-  return typeof navigator === 'undefined' || navigator.onLine !== false
 }
 
 /**

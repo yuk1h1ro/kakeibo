@@ -94,10 +94,11 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
     void initCategories(supabase)
   }, [supabase])
 
-  // 後から足したマスタデータ。いずれもテーブルが無ければ静かに無効化されるので、
-  // マイグレーション未実行でも記録・入力には影響しない
   // Discord の Webhook URL をサーバーから読み終わったか(月末サマリーはこれを待つ)
   const webhookReadyRef = useRef<Promise<void>>(Promise.resolve())
+
+  // 後から足したマスタデータ。いずれもテーブルが無ければ静かに無効化されるので、
+  // マイグレーション未実行でも記録・入力には影響しない
 
   useEffect(() => {
     void initStoreCategories(supabase)
@@ -152,7 +153,7 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
     void initRecurringRules(supabase).then(() =>
       generateDueTransactions(supabase, todayISO(), store.add)
     )
-    // 起動時に1回だけ実行する(store.add は毎描画で作り直されるため依存に含めない)
+    // 起動時に1回だけ実行する(supabase が変わったときだけ。store.add は依存に入れない)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase])
 

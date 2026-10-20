@@ -18,10 +18,16 @@ export interface ServerErrorLike {
 // supabase-js は fetch の失敗を「TypeError: Failed to fetch」(Chrome)や
 // 「TypeError: Load failed」(Safari)といった message の error として返す。
 // これらは「後で再試行すべき」失敗で、サーバーの拒否(制約違反等)とは区別する。
+/**
+ * いまオンラインか。navigator.onLine が false と明示されているときだけオフライン扱い
+ * (非ブラウザ環境では navigator が無い / undefined になるため「オンライン」とみなす)
+ */
+export function isOnlineNow(): boolean {
+  return typeof navigator === 'undefined' || navigator.onLine !== false
+}
+
 export function isNetworkError(message: string): boolean {
-  // navigator.onLine が false と明示されているときだけオフライン扱い
-  // (非ブラウザ環境では undefined になるため === false で判定する)
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true
+  if (!isOnlineNow()) return true
   return /fetch|network|load failed|接続|タイムアウト|timeout/i.test(message)
 }
 
@@ -73,12 +79,6 @@ export function isDuplicateRowError(err: ServerErrorLike, rowId: string): boolea
   if (!m) return false
   // uuid の英大小は問わない(PostgreSQL は小文字で返すが、端末側の採番に合わせる)
   return m[1].trim() === 'id' && m[2].trim().toLowerCase() === rowId.trim().toLowerCase()
-}
-
-// 「あとで直せる(再試行すべき)」失敗か。
-// true のとき op はキューに残す = 入力した記録は絶対に失わない。
-export function isRetryableServerError(err: ServerErrorLike): boolean {
-  return isSchemaError(err) || isNetworkError(err.message)
 }
 
 /**

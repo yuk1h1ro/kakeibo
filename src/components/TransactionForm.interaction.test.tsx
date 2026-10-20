@@ -1407,3 +1407,77 @@ describe('税込ボタン', () => {
     expect(screen.queryByRole('button', { name: /税込にする/ })).toBeNull()
   })
 })
+
+// ============================================================
+// 保存できるかの判定は1本(押せない理由と食い違わない)
+//
+// 以前は「押せるか」と「押せない理由」を別々の式で書いていて、彼女の負担分を
+// 電卓でマイナスにすると、ボタンは灰色なのに理由が出なかった。
+// ============================================================
+describe('保存できるかの判定と理由が食い違わない', () => {
+  beforeEach(() => setKeypadPreference('off'))
+  afterEach(() => setKeypadPreference('auto'))
+
+  it('彼女の負担分がマイナスになったら、理由を出す', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '1000')
+    await user.click(button('二人で使った'))
+    await typeAmount(user, '彼女の負担分', '100')
+    await user.click(button('彼女の負担分から引く'))
+    await typeAmount(user, '彼女の負担分', '300')
+    await user.click(button('彼女の負担分を計算する'))
+
+    expect(saveButton().disabled).toBe(true)
+    expect(screen.getByText(/彼女の負担分がマイナスになっています/)).toBeTruthy()
+  })
+
+  it('畳んだ欄の要約でも「田中さんさん」にしない', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    await openOptions(user)
+    await user.click(button(/おごってもらった/))
+    await typeAmount(user, 'おごってもらった額(円)', '3200')
+    await user.type(field('おごってくれた人'), '田中さん')
+    // 畳むと、要約に「田中さんのおごり」と出る
+    await user.click(button(/気分/))
+    expect(document.body.textContent).toContain('田中さんのおごり')
+    expect(document.body.textContent).not.toContain('さんさん')
+  })
+})
+
+// ============================================================
+// テンプレート・最近の記録から入れ直したとき
+//
+// 保存のあとと同じ片付け(resetPerEntry)を通る。以前は同じ十数行を2か所に
+// 書いていて、入れ直すときだけ前の1件の気分が残っていた。
+// ============================================================
+describe('テンプレートから入れ直したとき', () => {
+  it('前に押した気分を持ち越さない', async () => {
+    const user = userEvent.setup()
+    const submitted: TransactionInput[] = []
+    const props = {
+      fixedType: 'expense' as const,
+      submitLabel: '記録する',
+      onSubmit: async (input: TransactionInput) => {
+        submitted.push(input)
+      },
+    }
+    const { rerender } = render(<TransactionForm {...props} />)
+    await user.click(button(/食費/))
+    await openOptions(user)
+    const stamps = within(screen.getByRole('group', { name: 'この支出の気分' }))
+    await user.click(stamps.getByRole('button', { name: /後悔/ }))
+
+    // テンプレートを押した(親が prefill を渡し直す)
+    rerender(
+      <TransactionForm
+        {...props}
+        prefill={{ nonce: 1, amount: 980, category: 'food', memo: '', store: 'パン屋', partner_amount: 0 }}
+      />
+    )
+    expect(field('支払い金額(円)').value).toBe('980')
+    await user.click(saveButton())
+    expect(submitted[0].satisfaction ?? null).toBeNull()
+  })
+})

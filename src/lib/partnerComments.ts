@@ -11,8 +11,7 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { createTableAvailability } from './tableAvailability'
-import { formatGuidance, guidanceForServerError, isOnlineNow } from './errorGuidance'
+import { throwOnServerError } from './errorGuidance'
 
 /** コメント1件あたりの上限。データベース側の CHECK 制約と必ず同じ値にすること */
 export const MAX_COMMENT_LENGTH = 300
@@ -85,11 +84,6 @@ export function unreadCommentCount(comments: readonly PartnerComment[]): number 
   return comments.filter((c) => c.author === 'partner' && !c.readByOwner).length
 }
 
-/** その明細に未読があるか。(純粋関数) */
-export function hasUnread(comments: readonly PartnerComment[]): boolean {
-  return unreadCommentCount(comments) > 0
-}
-
 // ---------- Supabase 連携(利用者側) ----------
 
 interface CommentRow {
@@ -114,27 +108,10 @@ export function fromCommentRow(r: CommentRow): PartnerComment {
   }
 }
 
-// テーブルが無いと分かったら「無い」。以後コメントの導線を出さない。
-// 答えは localStorage に残るので、オフライン起動でも前回の答えが効く
-// (見分け方は tableAvailability.ts)。
-const availability = createTableAvailability('partner_share_comments')
-
-// **この判定を「画面を出すかどうか」のガードに使わないこと。**
-// 描画の手前で弾くと fetch まで届かず、答えを取り消す機会が永久に来ない
-// (マイグレーションを実行しても機能が戻らなくなる)。導線を隠すのは、
-// いまのように fetch の結果(null)を画面側の state で受けて判断すること。
-export function isCommentsUnavailable(): boolean {
-  return availability.isMissing()
-}
-
-/** テスト用に、モジュールに残る「テーブルが無い」判定を戻す */
-export function resetPartnerCommentsForTest(): void {
-  availability.resetForTest()
-}
-
 /**
  * 自分のコメントをすべて読み込む。
- * テーブルが無ければ null を返して静かに無効化する。例外は投げない。
+ * テーブルが無いときも通信できないときも null を返して黙る(共有リンクと同じ)。
+ * 呼び出し側はコメントの導線ごと出さないだけ。例外は投げない。
  */
 export async function fetchComments(supabase: SupabaseClient): Promise<PartnerComment[] | null> {
   try {
@@ -142,11 +119,7 @@ export async function fetchComments(supabase: SupabaseClient): Promise<PartnerCo
       .from('partner_share_comments')
       .select(SELECT_COLUMNS)
       .order('created_at', { ascending: true })
-    if (error) {
-      availability.noteError(error)
-      return null
-    }
-    availability.markPresent()
+    if (error) return null
     return ((data ?? []) as unknown as CommentRow[]).map(fromCommentRow)
   } catch {
     return null
@@ -171,10 +144,7 @@ export async function addOwnerComment(
     })
     .select(SELECT_COLUMNS)
     .single()
-  if (error) {
-    availability.noteError(error)
-    throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
-  }
+  throwOnServerError(error)
   if (!data) {
     throw new Error('コメントを保存できませんでした。通信が不安定な可能性があります。もう一度お試しください')
   }
@@ -195,10 +165,4 @@ export async function markTransactionRead(
   } catch {
     // 既読にできなくても表示は続ける(次に開いたときに再試行される)
   }
-}
-
-/** 利用者が自分のコメントを消す(誤爆の取り消し用) */
-export async function deleteOwnComment(supabase: SupabaseClient, id: string): Promise<void> {
-  const { error } = await supabase.from('partner_share_comments').delete().eq('id', id)
-  if (error) throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
 }

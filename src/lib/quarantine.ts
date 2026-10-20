@@ -21,6 +21,7 @@
 import { useSyncExternalStore } from 'react'
 import type { PendingOp } from './offlineQueue'
 import type { Guidance } from './errorGuidance'
+import { txTitle } from './partnerBalance'
 
 /** なぜ隔離したか */
 export type QuarantineReason =
@@ -145,15 +146,7 @@ export function quarantinedOpSummary(
   const action = op.kind === 'insert' ? '追加' : op.kind === 'update' ? '修正' : '削除'
   const p = op.payload
   if (!p) return { action, date: '', title: 'この記録の削除', amount: null }
-  const title =
-    p.type === 'partner_deposit'
-      ? '彼女から預かり'
-      : p.type === 'partner_refund'
-        ? '彼女に返金'
-        : p.type === 'partner_adjust'
-          ? '残高の調整'
-          : p.store || p.memo || labelOf(p.category)
-  return { action, date: p.date, title, amount: p.amount }
+  return { action, date: p.date, title: txTitle(p, labelOf), amount: p.amount }
 }
 
 /** 隔離された束に入っている金額の合計。(純粋関数。削除の op は数えない) */

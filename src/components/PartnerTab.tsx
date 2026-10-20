@@ -36,7 +36,7 @@ import {
   DEFAULT_LOW_BALANCE_THRESHOLD,
   balanceWording,
   shouldWarnLowBalance,
-  ledgerRowTitle,
+  txTitle,
   partnerBalance,
   partnerImpact,
   partnerMovements,
@@ -46,7 +46,8 @@ import { useTxFeature } from '../lib/txExtensions'
 import { partnerPaid } from '../lib/types'
 import '../share.css'
 import '../ledger.css'
-import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
+import { describeUnknownError } from '../lib/errorGuidance'
+import { isOnlineNow } from '../lib/serverErrors'
 
 type Store = ReturnType<typeof useTransactions>
 
@@ -256,7 +257,8 @@ export default function PartnerTab({ store, supabase, onEdit }: Props) {
  * 低下アラートのしきい値 (機能010)。
  * 設定シートではなくこのタブに置いたのは、判断の材料(いまの残高)が
  * すぐ上にあるからで、「いくらを切ったら困るか」はここでしか決められないため。
- * 値はこの端末に保存される(Discord の Webhook 設定と同じ粒度)。
+ * 値はこの端末にだけ保存される(Webhook URL は端末間で同期されるが、
+ * しきい値は同期しない。鳴らした印と同じく端末ごとの判断 — discordNotify.ts)。
  */
 function LowBalanceCard({ threshold }: { threshold: number }) {
   const [draft, setDraft] = useState(String(threshold))
@@ -466,7 +468,7 @@ function MovementRow({ tx, onEdit, comments, onOpenThread, onSubmitComment }: Mo
     ? resolveCategoryVisual(tx.category)
     : ({ kind: 'icon', icon: 'wallet' } as const)
   // タイトルの優先順位: お店 → メモ → カテゴリ名
-  const title = isExpense ? tx.store || tx.memo || categoryLabel(tx.category) : ledgerRowTitle(tx)
+  const title = txTitle(tx, categoryLabel)
 
   const subParts: string[] = [formatDate(tx.date)]
   if (!isExpense) {

@@ -29,6 +29,7 @@ import {
   favorColumns,
   favorNoticeText,
   favorOf,
+  favorWhoText,
   treatFromOptions,
   type FavorKind,
 } from '../lib/favors'
@@ -59,7 +60,8 @@ import {
 } from '../lib/splits'
 import type { TransactionInput } from '../hooks/useTransactions'
 import '../ledger.css'
-import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
+import { describeUnknownError } from '../lib/errorGuidance'
+import { isOnlineNow } from '../lib/serverErrors'
 
 // 「最近の記録から入力」などの外部プリフィル。nonce が変わるたびに適用される(日付は現在の選択を維持)
 export interface FormPrefill {
@@ -532,30 +534,16 @@ export default function TransactionForm({
   // 外部プリフィル適用(日付は現在の選択を維持する。差し替えたいときは DatePrefill を使う)
   useEffect(() => {
     if (!prefill) return
-    setCalc(EMPTY_CALC) // 計算途中の状態が混ざらないようにリセット
-    setPartnerCalc(EMPTY_CALC)
+    // テンプレート・最近の記録から入れ直すときは、前の1件の中身(支払った人・
+    // タグ・分割・おごり・気分・計算途中の式)を持ち越さない。保存のあとと同じ片付け
+    resetPerEntry()
     setAmount(prefill.amount > 0 ? String(prefill.amount) : '')
     setMemo(prefill.memo)
     setStore(prefill.store)
     setWithPartner(prefill.partner_amount > 0)
     setPartnerAmount(prefill.partner_amount > 0 ? String(prefill.partner_amount) : '')
-    // テンプレート・最近の記録から入れ直すときは、
-    // 前の1件の「支払った人」「タグ」「分割」を持ち越さない
-    setPayer('me')
-    setPartnerPaidInput('')
-    setTags([])
-    setTagDraft('')
-    setFavorKind(null)
-    setFavorAmountInput('')
-    setFavorFrom('')
-    setSplitCalc(null)
-    setSplitParts(null)
-    setSplitNotice(null)
-    setTripTagSkipped(false)
     // カテゴリ無しで店名だけ入ってくる場合も、手入力と同じ経路でカテゴリを補う
     setCategory(prefill.category)
-    setAutoCategory(null)
-    setAutoRivals([])
     if (prefill.category === null && prefill.store !== '') {
       applyLearnedCategory(prefill.store, null)
     }
@@ -662,6 +650,45 @@ export default function TransactionForm({
       setKeypadOpen(false)
       setKeypadTarget('amount')
     }
+  }
+
+  /**
+   * 1件ごとの事実を空に戻す。保存のあとと、テンプレート・最近の記録から
+   * 入れ直すときの両方がここを通る(以前は同じ十数行を2か所に書いていて、
+   * 入れ直すときだけ気分が残る・分割に向いたパッドが残る、と食い違っていた)。
+   * 日付とカテゴリはここでは触らない — 残すかどうかは呼ぶ側が決める。
+   *
+   * どれも次の1件に持ち越してはいけないもの:
+   *   支払った人・タグ・分割 … 1件ごとの事実。残ると知らないうちに
+   *     「彼女が払った」扱いになり、預かり残高が動く
+   *   おごり・値引き … 残ると、覚えのない「◯◯さんのおごり」が静かに増えていく
+   *   「この1件だけ旅行タグを外す」 … 残ると、外したことを忘れたまま
+   *     旅行中の記録が抜け落ちる
+   */
+  function resetPerEntry() {
+    setAmount('')
+    setCalc(EMPTY_CALC)
+    setMemo('')
+    setStore('')
+    setWithPartner(false)
+    setPartnerAmount('')
+    setPartnerCalc(EMPTY_CALC)
+    // 彼女の負担分の欄は閉じるので、パッドは支払い金額へ戻す
+    setKeypadTarget('amount')
+    setAutoCategory(null)
+    setAutoRivals([])
+    setSatisfaction(null)
+    setPayer('me')
+    setPartnerPaidInput('')
+    setTags([])
+    setTagDraft('')
+    setFavorKind(null)
+    setFavorAmountInput('')
+    setFavorFrom('')
+    releaseSplitTargets()
+    setSplitParts(null)
+    setSplitNotice(null)
+    setTripTagSkipped(false)
   }
 
   // 機能096: 内訳の1つを書き換える
@@ -775,36 +802,36 @@ export default function TransactionForm({
    */
   const zeroAllowed = isExpense && favor !== null
 
-  const valid =
-    Number.isInteger(amountNum) &&
-    (amountNum > 0 || (zeroAllowed && amountNum === 0)) &&
-    (!isExpense || !withPartner || (Number.isInteger(partnerNum) && partnerNum >= 0 && partnerNum <= amountNum)) &&
-    partnerPaidValid &&
-    // 分割中は内訳が完全に揃っていることが保存の条件。
-    // ここを緩めると支出の合計と預かり残高が静かにずれる
-    (!splitting ? !isExpense || category !== null : (splitValidation?.ok ?? false))
-
-  // 保存ボタンが押せない理由。灰色になるだけでは、初めての人は何が足りないのか
-  // 分からない。上の `valid` と同じ順に、最初に引っかかった1つだけを言う。
-  // 分割の内訳・彼女が払った額・マイナスの金額は、それぞれの欄の近くにもう理由が
-  // 出ているが、ボタンの近くにも同じことを短く出す(画面の外にあることが多い)
-  const saveBlockedReason: string | null = valid
-    ? null
-    : !splitting && isExpense && category === null
+  // 保存ボタンが押せない理由。**保存できるかの判定はこの1本だけ** —
+  // 理由が無ければ保存できる。以前は「押せるか」と「押せない理由」を別々の
+  // 式で書いていて食い違い、彼女の負担分を電卓でマイナスにすると、ボタンは
+  // 灰色なのに理由が出なかった。条件を足すときは、ここに理由ごと足すこと。
+  //
+  // 灰色になるだけでは、初めての人は何が足りないのか分からない。最初に
+  // 引っかかった1つだけを言う。分割の内訳・彼女が払った額・マイナスの金額は、
+  // それぞれの欄の近くにもう理由が出ているが、ボタンの近くにも同じことを
+  // 短く出す(画面の外にあることが多い)
+  const saveBlockedReason: string | null =
+    !splitting && isExpense && category === null
       ? 'カテゴリを選んでください'
       : amountNum < 0
         ? '金額がマイナスになっています(電卓の計算を見直してください)'
         : !Number.isInteger(amountNum) || (amountNum === 0 && !zeroAllowed)
           ? '金額を入れてください'
-          : isExpense && withPartner && partnerNum > amountNum
-            ? '彼女の負担分が支払い金額を超えています'
-            : !partnerPaidValid
-              ? payer === 'both' && partnerPaidNum <= 0
-                ? '彼女が払った額を入れてください'
-                : '彼女が払った額が支払い金額を超えています'
-              : splitting
-                ? '分割の内訳がそろっていません(内訳の欄の下を見てください)'
-                : null
+          : isExpense && withPartner && (!Number.isInteger(partnerNum) || partnerNum < 0)
+            ? '彼女の負担分がマイナスになっています(電卓の計算を見直してください)'
+            : isExpense && withPartner && partnerNum > amountNum
+              ? '彼女の負担分が支払い金額を超えています'
+              : !partnerPaidValid
+                ? payer === 'both' && partnerPaidNum <= 0
+                  ? '彼女が払った額を入れてください'
+                  : '彼女が払った額が支払い金額を超えています'
+                : // 分割中は内訳が完全に揃っていることが保存の条件。
+                  // ここを緩めると支出の合計と預かり残高が静かにずれる
+                  splitting && !(splitValidation?.ok ?? false)
+                  ? '分割の内訳がそろっていません(内訳の欄の下を見てください)'
+                  : null
+  const valid = saveBlockedReason === null
 
   const dateChips = [
     { label: '今日', value: daysAgoISO(0) },
@@ -825,13 +852,7 @@ export default function TransactionForm({
       : '',
     // おごりは畳んだままでも必ず見えるようにする。相手の名前が入っている記録を
     // 「気分もタグも付いていない普通の1件」に見せてしまうと、書いた意味が薄れる
-    favor === null
-      ? ''
-      : favor.kind === 'treat'
-        ? favor.from === ''
-          ? 'おごり'
-          : `${favor.from}さんのおごり`
-        : '割引',
+    favor === null ? '' : favorWhoText(favor),
     tags.length > 0 ? tags.map((t) => `#${t}`).join(' ') : '',
     splitting ? '分割中' : '',
   ]
@@ -861,7 +882,7 @@ export default function TransactionForm({
     setError(null)
     try {
       // 打ちかけのタグ(確定していない文字列)も取りこぼさずに拾い、
-      // 旅行モードのタグを足す(オフのときは tripTag が null なので何も変わらない)
+      // 旅行モードのタグを足す(オフのときは tripTags が空なので何も変わらない)
       const finalTags = mergeTripTags([...tags, ...parseTagInput(tagDraft)], tripTags)
       const payload: TransactionInput = {
         date,
@@ -889,34 +910,7 @@ export default function TransactionForm({
       }
       // 新規入力時のみリセット(編集モーダルは親が閉じる)
       if (!initial) {
-        setAmount('')
-        setCalc(EMPTY_CALC)
-        setMemo('')
-        setStore('')
-        setWithPartner(false)
-        setPartnerAmount('')
-        setPartnerCalc(EMPTY_CALC)
-        // 彼女の負担分の欄は閉じるので、パッドは支払い金額へ戻す
-        setKeypadTarget('amount')
-        setAutoCategory(null)
-        setAutoRivals([])
-        setSatisfaction(null)
-        // 支払った人・タグ・分割も1件ごとの事実なので次には持ち越さない
-        setPayer('me')
-        setPartnerPaidInput('')
-        setTags([])
-        setTagDraft('')
-        // おごり・値引きも1件ごとの事実。次の記録に持ち越すと、
-        // 覚えのない「◯◯さんのおごり」が静かに増えていく
-        setFavorKind(null)
-        setFavorAmountInput('')
-        setFavorFrom('')
-        releaseSplitTargets()
-        setSplitParts(null)
-        setSplitNotice(null)
-        // 「この1件だけ旅行タグを外す」も1件ごとの判断。次の記録には持ち越さない
-        // (持ち越すと、外したことを忘れたまま旅行中の記録が抜け落ちる)
-        setTripTagSkipped(false)
+        resetPerEntry()
         if (continueAfter) {
           setStreak((n) => n + 1)
           setLastSavedAmount(amountNum)
@@ -1130,7 +1124,8 @@ export default function TransactionForm({
         </div>
       )}
 
-      {/* 3. 金額。テンキー(052)・電卓・桁区切り(050)は AmountTextInput のまま */}
+      {/* 3. 金額。桁区切り(050)は AmountTextInput、電卓は AmountCalcBar、
+          自前テンキー(052)は下の AmountKeypad */}
       <div className="field form-step">
         <span className="step-label">
           {isExpense && (

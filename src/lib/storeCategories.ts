@@ -58,16 +58,6 @@ export function matchStoreSuggestions(
   return scored.slice(0, limit).map((s) => s.entry)
 }
 
-/** 店名に対して記憶しているカテゴリ。無ければ null。(純粋関数) */
-export function lookupStoreCategory(
-  entries: readonly StoreCategory[],
-  storeName: string
-): string | null {
-  const key = normalizeStoreName(storeName)
-  if (key === '') return null
-  return entries.find((e) => e.storeKey === key)?.category ?? null
-}
-
 /**
  * 「この店の過去の記録も新しいカテゴリに変えるか」の対象を洗い出す。(純粋関数)
  * 同じ店名(正規化後)の支出のうち、カテゴリが違うものだけを返す。

@@ -42,7 +42,7 @@
 // その外側の薄い層に置く。
 // ============================================================
 
-import type { TransactionInput } from '../hooks/useTransactions'
+import type { TransactionInput } from './types'
 
 /** 生成した1件の控え */
 export interface GeneratedMark {
@@ -304,14 +304,4 @@ export function reconcileGeneratedMarks(ctx: ReconcileContext): GeneratedMark[] 
   const { marks, lost } = reconcileMarks(list, ctx)
   if (!saveMarks(marks)) return []
   return lost
-}
-
-/** テスト用: 端末の控えを空にする */
-export function resetGeneratedMarks(): void {
-  cache = null
-  try {
-    localStorage.removeItem(LEDGER_KEY)
-  } catch {
-    // 消せなくても実害は無い
-  }
 }

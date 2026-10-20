@@ -16,10 +16,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { formatMonth, monthKey, yenPlain } from './format'
 import { shiftMonth } from './calendar'
-import { getWebhookUrl, sendDiscordMessage } from './discordNotify'
-import { balanceWording, partnerImpact, type PartnerTxLike } from './partnerBalance'
+import { balanceLine, sendDiscordMessage } from './discordNotify'
+import { getWebhookUrl } from './discordWebhook'
+import { partnerImpact, type PartnerTxLike } from './partnerBalance'
 import { partnerPaid } from './types'
 import { createTableAvailability } from './tableAvailability'
+import { isOnlineNow } from './serverErrors'
 
 /** さかのぼって送る月数の上限。長期間アプリを開いていなくても通知が溢れないようにする */
 export const SUMMARY_LOOKBACK_MONTHS = 3
@@ -184,12 +186,8 @@ export function formatMonthlySummary(
   // 載せるのは「その月の終わりの残高」。送るのが遅れた月に「いまの残高」だけを
   // 載せると、翌月以降の動きまで混ざった数字がその月の話として読めてしまう。
   // いまと違うときだけ、いまの残高も添える
-  const end = balanceWording(s.monthEndBalance)
-  lines.push(`${Number(s.month.slice(5))}月末の残高: ${yenPlain(end.magnitude)}(${end.title})`)
-  if (s.balance !== s.monthEndBalance) {
-    const w = balanceWording(s.balance)
-    lines.push(`いまの残高: ${yenPlain(w.magnitude)}(${w.title})`)
-  }
+  lines.push(balanceLine(s.monthEndBalance, `${Number(s.month.slice(5))}月末の残高`))
+  if (s.balance !== s.monthEndBalance) lines.push(balanceLine(s.balance, 'いまの残高'))
   if (s.categories.length > 0) {
     lines.push('内訳')
     for (const c of s.categories) {
@@ -269,7 +267,7 @@ export async function sendDueMonthlySummaries(
   // この起動中に「無い」と分かっていれば、もう問い合わせない
   // (判定を次の起動へ持ち越さない理由は上の createTableAvailability のコメント)
   if (availability.isMissing()) return 0
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return 0
+  if (!isOnlineNow()) return 0
 
   const sent = await fetchSentMonths(supabase)
   if (sent === null) return 0

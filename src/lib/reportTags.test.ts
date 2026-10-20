@@ -6,7 +6,6 @@ import {
   NO_TAG_LABEL,
   coTagBreakdown,
   everydaySplit,
-  hasAnyTaggedTx,
   innerTagSet,
   selectionCategoryBreakdown,
   selectionEvents,
@@ -15,11 +14,8 @@ import {
   selectionTxs,
   specialTagOptions,
   tagBreakdown,
-  tagCategoryBreakdown,
   tagEvents,
   tagOutline,
-  tagSpan,
-  tagsInRange,
   withTag,
   withoutTags,
 } from './reportTags'
@@ -147,7 +143,7 @@ describe('tagBreakdown', () => {
   })
 })
 
-describe('withTag / withoutTags / tagCategoryBreakdown', () => {
+describe('withTag / withoutTags', () => {
   const txs = [
     tx({ amount: 20000, category: 'hotel', tags: ['旅行'] }),
     tx({ amount: 5000, category: 'food', tags: ['旅行'] }),
@@ -165,18 +161,6 @@ describe('withTag / withoutTags / tagCategoryBreakdown', () => {
     expect(withoutTags(txs)).toHaveLength(1)
   })
 
-  it('タグの中のカテゴリ内訳が出る', () => {
-    const rows = tagCategoryBreakdown(txs, AUG, '旅行', label)
-    expect(rows.map((r) => [r.label, r.total])).toEqual([
-      ['hotel', 20000],
-      ['food', 8000],
-    ])
-  })
-
-  it('「タグなし」のカテゴリ内訳も出せる', () => {
-    const rows = tagCategoryBreakdown(txs, AUG, null, label)
-    expect(rows.map((r) => [r.label, r.total])).toEqual([['food', 900]])
-  })
 })
 
 describe('everydaySplit', () => {
@@ -259,7 +243,7 @@ describe('everydaySplit', () => {
   })
 })
 
-describe('tagEvents / tagSpan', () => {
+describe('tagEvents', () => {
   it('月をまたいでも、続いた記録は1回の出来事になる', () => {
     const txs = [
       tx({ date: '2026-07-30', amount: 12000, category: 'hotel', tags: ['旅行'] }),
@@ -361,18 +345,6 @@ describe('tagEvents / tagSpan', () => {
   it('そのタグの記録が無ければ空', () => {
     expect(tagEvents([tx({ tags: ['旅行'] })], '出張', label)).toEqual([])
     expect(tagEvents([], '旅行', label)).toEqual([])
-    expect(tagSpan([], '旅行', label)).toBeNull()
-  })
-
-  it('tagSpan は最初から最後までをまとめた1つになる', () => {
-    const txs = [
-      tx({ date: '2026-05-03', amount: 40000, tags: ['デート'] }),
-      tx({ date: '2026-08-10', amount: 30000, tags: ['デート'] }),
-    ]
-    const span = tagSpan(txs, 'デート', label)
-    expect(span?.range).toEqual({ start: '2026-05-03', end: '2026-08-10' })
-    expect(span?.total).toBe(70000)
-    expect(span?.count).toBe(2)
   })
 })
 
@@ -398,25 +370,6 @@ describe('specialTagOptions', () => {
   it('使われているタグと候補が重なっても二重に出ない', () => {
     const txs = [tx({ tags: ['旅行'] })]
     expect(specialTagOptions(txs, ['旅行', '出張'])).toEqual(['旅行', '出張'])
-  })
-})
-
-describe('tagsInRange / hasAnyTaggedTx', () => {
-  const txs = [
-    tx({ date: '2026-08-02', amount: 1000, tags: ['デート'] }),
-    tx({ date: '2026-08-03', amount: 9000, tags: ['旅行'] }),
-    tx({ date: '2026-09-03', amount: 9999, tags: ['出張'] }),
-    tx({ date: '2026-08-04', amount: 500 }),
-  ]
-
-  it('期間内に出てくるタグだけを多い順に返す', () => {
-    expect(tagsInRange(txs, AUG)).toEqual(['旅行', 'デート'])
-  })
-
-  it('タグの付いた記録があるかを判定できる', () => {
-    expect(hasAnyTaggedTx(txs, AUG)).toBe(true)
-    expect(hasAnyTaggedTx([tx({ date: '2026-08-04', amount: 500 })], AUG)).toBe(false)
-    expect(hasAnyTaggedTx([], AUG)).toBe(false)
   })
 })
 

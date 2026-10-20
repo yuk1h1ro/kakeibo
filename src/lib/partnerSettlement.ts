@@ -22,7 +22,7 @@
 // 預かりと1バイトも違わなかったので、カードでは1つにまとめている。
 // ============================================================
 
-import type { TransactionType } from './types'
+import type { TransactionInput, TransactionType } from './types'
 import { partnerImpact } from './partnerBalance'
 
 /** カードで選べる操作の種類 */
@@ -144,17 +144,12 @@ export interface SettlementInputDraft extends SettlementDraft {
  *
  * category / store / partner_amount は、どの種類でも必ずこの値。
  * 支出ではないので分類も店名も持たず、彼女の負担分という概念も無い。
- * (hooks/useTransactions の TransactionInput に構造的に代入できる形。
- *  lib から hooks に依存させないため、型は import せず自前で持つ)
+ * (TransactionInput の一部。category は必ず null であることを型でも言う)
  */
-export function settlementInput(draft: SettlementInputDraft): {
-  date: string
-  type: TransactionType
-  amount: number
+export function settlementInput(
+  draft: SettlementInputDraft
+): Pick<TransactionInput, 'date' | 'type' | 'amount' | 'memo' | 'store' | 'partner_amount'> & {
   category: null
-  memo: string
-  store: string
-  partner_amount: number
 } {
   const record = settlementRecord(draft)
   return {

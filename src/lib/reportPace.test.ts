@@ -3,7 +3,6 @@ import type { Transaction } from './types'
 import { monthRange } from './report'
 import {
   cumulativeSeries,
-  daysInMonthOf,
   monthEndForecast,
   paceStatus,
   resolvePaceBaseline,
@@ -216,13 +215,5 @@ describe('monthEndForecast', () => {
     if (!r.available) return
     expect(r.remainingDays).toBe(19)
     expect(r.point).toBe(29000)
-  })
-})
-
-describe('daysInMonthOf', () => {
-  it('うるう年を含めて月の日数を返す', () => {
-    expect(daysInMonthOf('2024-02')).toBe(29)
-    expect(daysInMonthOf('2023-02')).toBe(28)
-    expect(daysInMonthOf('2026-08')).toBe(31)
   })
 })

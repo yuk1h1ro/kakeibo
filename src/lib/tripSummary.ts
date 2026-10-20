@@ -34,6 +34,8 @@ import { partnerPaid, tagsOf, type Transaction } from './types'
 import {
   DISCORD_MESSAGE_LIMIT,
   backlogTitle,
+  compareCursor,
+  cursorOf,
   formatBacklogDate,
   isPartnerVisible,
   packBlocks,
@@ -101,16 +103,12 @@ export function buildTripSummary(
       inRange(t.date, opts.range) &&
       tags.every((tag) => tagsOf(t).includes(tag))
   )
-  // 並びは日付 → 記録日時 → ID。履歴のまとめ送信(compareCursor)と同じ順で、
-  // 同じ日の複数件でも必ず同じ並びになる
+  // 並びは日付 → 記録日時 → ID。履歴のまとめ送信と同じ比べ方(compareCursor)を
+  // そのまま使う。以前は同じ順のつもりで localeCompare を書いていて、記録日時の
+  // 小数秒の有無('…:00+00:00' と '…:00.5+00:00')で前後が逆になっていた
   const visible = inTrip
     .filter((t) => isPartnerVisible(t))
-    .sort(
-      (a, b) =>
-        a.date.localeCompare(b.date) ||
-        a.created_at.localeCompare(b.created_at) ||
-        a.id.localeCompare(b.id)
-    )
+    .sort((a, b) => compareCursor(cursorOf(a), cursorOf(b)))
 
   const entries: TripEntry[] = visible.map((t) => ({
     id: t.id,
@@ -204,7 +202,7 @@ export function tripFooterLines(s: TripSummary, currentBalance: number): string[
       : impact < 0
         ? `この旅行で、あずかっているお金から ${yenPlain(-impact)} を使いました`
         : 'この旅行で、あずかっているお金は動いていません'
-  return [RULE, move, `いまの${balanceLine(currentBalance)}`]
+  return [RULE, move, balanceLine(currentBalance, 'いまの残高')]
 }
 
 /**

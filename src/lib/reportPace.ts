@@ -13,7 +13,7 @@
 
 import type { Transaction } from './types'
 import type { DateRange } from './report'
-import { monthRange, rangeDays, totalOwn } from './report'
+import { monthRange, totalOwn } from './report'
 import { dailyTotals } from './reportBuckets'
 import { shiftMonth } from './calendar'
 
@@ -233,9 +233,4 @@ export function monthEndForecast(
     remainingDays: remaining,
     activeDays,
   }
-}
-
-/** 月の日数(参照線の説明文に使う)。rangeDays の再実装を避けるための薄い包み */
-export function daysInMonthOf(month: string): number {
-  return rangeDays(monthRange(month))
 }

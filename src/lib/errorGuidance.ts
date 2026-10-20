@@ -14,7 +14,7 @@
 //     (原因を特定できなかったときに、これが唯一の手がかりになる)
 // ============================================================
 
-import { isNetworkError, isSchemaError, toServerError, type ServerErrorLike } from './serverErrors'
+import { isNetworkError, isOnlineNow, isSchemaError, toServerError, type ServerErrorLike } from './serverErrors'
 
 export type GuidanceKind =
   /** マイグレーション未実行(列・テーブルが無い) */
@@ -259,13 +259,6 @@ function migrationGuidance(target: MigrationTarget, detail: string | null): Guid
 }
 
 /**
- * 「返金・調整をこのサーバーがまだ知らない」ときの案内。(純粋関数)
- *
- * 列不足ではなくチェック制約違反 (23514) で返ってくるため、上の migrationGuidance とは
- * 別に持っている。呼び出し側 (useTransactions) は保存しようとした種別まで見て
- * この形だと判断しているので、ここでは原因を言い切ってよい。
- */
-/**
  * 「支払い 0円 の記録を、このサーバーがまだ受け付けない」ときの案内。(純粋関数)
  *
  * 全額おごってもらった回・割引券で無料になった回は amount が 0 になる。
@@ -292,6 +285,13 @@ export function favorRejectionGuidance(err: ServerErrorLike): Guidance {
   }
 }
 
+/**
+ * 「返金・調整をこのサーバーがまだ知らない」ときの案内。(純粋関数)
+ *
+ * 列不足ではなくチェック制約違反 (23514) で返ってくるため、上の migrationGuidance とは
+ * 別に持っている。呼び出し側 (useTransactions) は保存しようとした種別まで見て
+ * この形だと判断しているので、ここでは原因を言い切ってよい。
+ */
 export function ledgerRejectionGuidance(err: ServerErrorLike): Guidance {
   const detail = err.message.trim() === '' ? null : err.message.trim()
   return {
@@ -539,11 +539,6 @@ export function describeUnknownError(e: unknown, online = true): string {
   return formatGuidance(guidanceForMessage(trimmed === '' ? message : trimmed, online))
 }
 
-/** navigator.onLine を安全に読む(非ブラウザ環境では「オンライン」とみなす) */
-export function isOnlineNow(): boolean {
-  return typeof navigator === 'undefined' || navigator.onLine !== false
-}
-
 /**
  * サーバーのエラーを、原因と次の行動が分かる文言にして投げる (機能161)。
  *
@@ -551,9 +546,6 @@ export function isOnlineNow(): boolean {
  * (`column ... does not exist` など)がそのまま出てしまう。
  * 画面はこの message をそのまま出すので、ここで案内まで作ってしまう。
  *
- * shareLinks / partnerComments も同じ式で投げているが、あちらは同じ場所で
- * 「テーブルが無い」判定(tableAvailability)も立てるため、
- * この関数には寄せずインラインのままにしてある。
  *
  * onSchemaError は、マイグレーション未実行のときだけ通常の案内より先に割り込むための口。
  * 資産のように「テーブルが無い」を画面の状態にも反映したい呼び出し側があるため、

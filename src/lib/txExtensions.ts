@@ -18,7 +18,7 @@
 //
 // 判定結果は localStorage にも残す。オフライン起動でも前回の答えを使えるので、
 // 「圏外でうっかり新機能を使い、あとでサーバーに弾かれる」窓が狭くなる。
-// (感情スタンプ satisfaction.ts と同じ考え方を、2つの機能群に広げたもの)
+// (感情スタンプ satisfaction.ts と同じ考え方を、3つの機能群に広げたもの)
 // ============================================================
 
 import { useSyncExternalStore } from 'react'
@@ -63,6 +63,11 @@ export function markTxFeatureUnavailable(feature: TxFeature): void {
   setAvailable(feature, false)
 }
 
+/** テスト用に「全部使える」へ戻す(判定はモジュールの中に覚えているため) */
+export function resetTxExtensionsForTest(): void {
+  setting.clear()
+}
+
 export function isTxFeatureAvailable(feature: TxFeature): boolean {
   return setting.get()[feature]
 }
@@ -91,17 +96,6 @@ async function probe(
   }
 }
 
-/** 起動時に1回だけ、後から足した列の有無を確かめる */
-export async function initTxExtensions(supabase: SupabaseClient): Promise<void> {
-  await Promise.all([
-    probe(supabase, 'settlement', 'partner_paid'),
-    probe(supabase, 'tagging', 'tags, split_group'),
-    probe(supabase, 'favor', 'favor_amount, favor_kind, favor_from'),
-  ])
-}
-
-// ---------- 送信直前の間引き ----------
-
 interface ExtendedPayload {
   type?: TransactionType
   partner_paid?: number | null
@@ -111,6 +105,41 @@ interface ExtendedPayload {
   favor_kind?: string | null
   favor_from?: string | null
 }
+
+/**
+ * 機能ごとの列。**起動時の確認・送信直前の間引き・送り直しの判定は、
+ * みなこの表から作る。** 以前は同じ対応を3か所に別々に書いていて、
+ * 列を1つ足すたびに3か所を揃える必要があった(送り直しの側を書き忘れると
+ * 「列が無いと同期が止まり、入力が滞留する」に戻る)。
+ * 並びは送り直しで試す順番でもある(settlement → tagging → favor)。
+ */
+export const TX_FEATURE_COLUMNS: Record<TxFeature, readonly (keyof ExtendedPayload)[]> = {
+  settlement: ['partner_paid'],
+  tagging: ['tags', 'split_group'],
+  favor: ['favor_amount', 'favor_kind', 'favor_from'],
+}
+
+const FEATURES = Object.keys(TX_FEATURE_COLUMNS) as TxFeature[]
+
+/** 起動時に1回だけ、後から足した列の有無を確かめる */
+export async function initTxExtensions(supabase: SupabaseClient): Promise<void> {
+  await Promise.all(FEATURES.map((f) => probe(supabase, f, TX_FEATURE_COLUMNS[f].join(', '))))
+}
+
+/**
+ * サーバーに列が無いと言われたとき、どの機能を諦めて送り直すか。(純粋関数)
+ * まだ使えることになっていて、その列をこの1件が持っている最初の機能。
+ * 無ければ null(= 諦めても直らない。別の失敗として扱う)。
+ */
+export function featureToDrop(payload: ExtendedPayload): TxFeature | null {
+  const state = setting.get()
+  return (
+    FEATURES.find((f) => state[f] && TX_FEATURE_COLUMNS[f].some((col) => payload[col] !== undefined)) ??
+    null
+  )
+}
+
+// ---------- 送信直前の間引き ----------
 
 /**
  * この環境に無い列をキーごと落とす。(純粋関数)
@@ -128,15 +157,9 @@ interface ExtendedPayload {
 export function stripUnavailableColumns<T extends ExtendedPayload>(payload: T): Partial<T> {
   const state = setting.get()
   const out: Partial<T> = { ...payload }
-  if (!state.settlement) delete out.partner_paid
-  if (!state.tagging) {
-    delete out.tags
-    delete out.split_group
-  }
-  if (!state.favor) {
-    delete out.favor_amount
-    delete out.favor_kind
-    delete out.favor_from
+  for (const f of FEATURES) {
+    if (state[f]) continue
+    for (const col of TX_FEATURE_COLUMNS[f]) delete out[col]
   }
   return out
 }

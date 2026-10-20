@@ -12,7 +12,8 @@ import {
   type KeypadPreference,
 } from '../lib/keypadSettings'
 import { amountMaskStateLabel, setAmountMasked, useAmountMasked } from '../lib/amountMask'
-import { describeUnknownError, isOnlineNow } from '../lib/errorGuidance'
+import { describeUnknownError } from '../lib/errorGuidance'
+import { isOnlineNow } from '../lib/serverErrors'
 import { clearConfig, getConfiguredUrl, hasStoredConfig } from '../lib/supabaseClient'
 import { privacyBlurStateLabel } from '../lib/privacyBlur'
 import { setPrivacyBlurEnabled, usePrivacyBlurEnabled } from '../lib/privacyShield'
@@ -31,8 +32,7 @@ interface Props {
   onClose: () => void
   /**
    * CSV 書き出し (機能198) に渡す記録。未同期の分も含めた「いま画面に出ている全件」。
-   * 省略できるようにしてあるのは、この設定シートを単体で描くとき(テストなど)に
-   * 書き出し以外の設定だけを試せるようにするため。既定は0件 = 書き出せない状態。
+   * 省略したときは0件 = 書き出せない状態になる。
    */
   transactions?: readonly Transaction[]
   /**

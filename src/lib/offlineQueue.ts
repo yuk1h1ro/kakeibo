@@ -1,4 +1,4 @@
-import type { TransactionInput } from '../hooks/useTransactions'
+import type { TransactionInput } from './types'
 
 // オフライン中(または送信失敗時)に保留される Supabase への書き込み操作。
 // 同一行への連続操作は圧縮せず、素直に順番どおり積んで順番どおり送る。
@@ -38,10 +38,14 @@ export function saveQueue(ops: PendingOp[]): void {
   }
 }
 
-export function appendOp(op: PendingOp): PendingOp[] {
-  const ops = [...loadQueue(), op]
-  saveQueue(ops)
-  return ops
+/**
+ * まとめて積む。読み込みと保存は1回ずつ(1件ずつ積むと、件数ぶん
+ * キュー全体を読み書きすることになる)。積む順番がそのまま送る順番。
+ */
+export function appendOps(ops: readonly PendingOp[]): PendingOp[] {
+  const next = [...loadQueue(), ...ops]
+  saveQueue(next)
+  return next
 }
 
 export function removeOp(opId: string): PendingOp[] {

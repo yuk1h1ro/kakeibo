@@ -139,8 +139,7 @@ export function partnerViewWording(balance: number): BalanceWording {
 
 /**
  * 支出以外(預かり・返金・調整)の行の見出し。(純粋関数)
- * 履歴・彼女タブ・長押しメニューで同じ言い方をするために1か所に置く。
- * 支出のときは空文字(呼び出し側がお店・メモ・カテゴリ名から作る)。
+ * 支出のときは空文字。記録の見出しがほしいときは下の txTitle を使うこと。
  */
 export function ledgerRowTitle(t: { type: TransactionType; amount: number }): string {
   switch (t.type) {
@@ -153,6 +152,30 @@ export function ledgerRowTitle(t: { type: TransactionType; amount: number }): st
     case 'expense':
       return ''
   }
+}
+
+/**
+ * 記録の見出し。(純粋関数)
+ * 支出は お店 → メモ → カテゴリ名、預かり・返金・調整は ledgerRowTitle。
+ *
+ * 履歴の行・彼女タブ・長押しメニュー・Discord・変更履歴・同期できなかった記録・
+ * 履歴のまとめ送信が、みなこの1つを使う。画面ごとに書いていたころは、同じ返金が
+ * 「彼女に返金」「彼女へ返金」、調整が「残高の調整」「調整(残高を増やした)」と
+ * 場所によって言い方が割れていた。
+ * カテゴリ名の引き方は呼ぶ側が渡す(この層を設定や画面の状態に依存させないため)。
+ */
+export function txTitle(
+  t: {
+    type: TransactionType
+    amount: number
+    store?: string | null
+    memo?: string | null
+    category?: string | null
+  },
+  labelOf: (category: string | null) => string
+): string {
+  if (t.type !== 'expense') return ledgerRowTitle(t)
+  return t.store?.trim() || t.memo?.trim() || labelOf(t.category ?? null)
 }
 
 // ---------- 残高の低下アラート (機能010) ----------

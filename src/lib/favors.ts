@@ -102,19 +102,6 @@ export function favorOf(t: {
   return { kind: t.favor_kind, amount, from }
 }
 
-/** おごってもらった回か。(純粋関数) */
-export function isTreat(t: Transaction): boolean {
-  return favorOf(t)?.kind === 'treat'
-}
-
-/**
- * 本来の値段(定価)。(純粋関数)
- * 実際に払った額 + 浮いた額。「3,200円のごちそうを 0円で食べた」の 3,200 のほう。
- */
-export function listAmount(t: Transaction): number {
-  return t.amount + favorAmount(t)
-}
-
 // ---------- 入力の正規化 ----------
 
 /**
@@ -171,7 +158,18 @@ export function favorBadgeText(favor: Favor): string {
   if (favor.kind === 'discount') return `${yenPlain(favor.amount)} 割引`
   return favor.from === ''
     ? `${yenPlain(favor.amount)} おごり`
-    : `${withHonorific(favor.from)}のおごり ${yenPlain(favor.amount)}`
+    : `${favorWhoText(favor)} ${yenPlain(favor.amount)}`
+}
+
+/**
+ * 「おごり」「田中さんのおごり」「割引」の言い方。(純粋関数)
+ * 入力の確認・畳んだ欄の要約・変更履歴が同じ言葉を使うよう、ここ1か所で作る
+ * (それぞれが自分で組み立てていたころは、敬称の重複「田中さんさん」の直しが
+ * 一部にしか届かなかった)
+ */
+export function favorWhoText(favor: Pick<Favor, 'kind' | 'from'>): string {
+  if (favor.kind === 'discount') return '割引'
+  return favor.from === '' ? 'おごり' : `${withHonorific(favor.from)}のおごり`
 }
 
 /**
@@ -182,7 +180,7 @@ export function favorBadgeText(favor: Favor): string {
  */
 export function favorNoticeText(favor: Favor, paidAmount: number): string {
   const total = paidAmount + favor.amount
-  const who = favor.kind === 'treat' ? (favor.from === '' ? 'おごり' : `${withHonorific(favor.from)}のおごり`) : '割引'
+  const who = favorWhoText(favor)
   if (paidAmount <= 0) {
     return `本来 ${yenPlain(total)} のところ、全額 ${who} です。支出は ¥0 で記録されます`
   }
@@ -321,15 +319,6 @@ export function treatFromOptions(txs: readonly Transaction[], limit = 8): string
     .sort((a, b) => (a[1] !== b[1] ? (a[1] < b[1] ? 1 : -1) : a[0] < b[0] ? -1 : 1))
     .slice(0, limit)
     .map(([name]) => name)
-}
-
-/**
- * 人ごとの1行。(純粋関数)
- * 「何回・いくらぶん・最後はいつ」。お礼やお返しを考えるのに要るのはこの3つ。
- */
-export function personLineText(person: TreatFromPerson): string {
-  const who = person.name === '' ? '名前を書いていない回' : withHonorific(person.name)
-  return `${who} ${person.count}回・${yenPlain(person.total)}`
 }
 
 /** 名前の末尾がすでに敬称なら、さんを重ねない */

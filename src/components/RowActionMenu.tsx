@@ -11,8 +11,9 @@ import type { Transaction } from '../lib/types'
 import { categoryLabel } from '../lib/categories'
 import { formatDate, yen } from '../lib/format'
 import { ownAmount, storeKey } from '../lib/types'
-import { ledgerRowTitle, partnerImpact } from '../lib/partnerBalance'
+import { partnerImpact, txTitle } from '../lib/partnerBalance'
 import { IconCopy, IconEdit, IconStore, IconTrash } from './historyIcons'
+import useBodyScrollLock from '../hooks/useBodyScrollLock'
 
 interface Props {
   tx: Transaction
@@ -32,10 +33,13 @@ export default function RowActionMenu({
   onFilterStore,
   onClose,
 }: Props) {
+  // ほかのシートと同じく、開いている間は背景をスクロールさせない
+  // (このメニューだけ呼び忘れていて、開いたまま裏の一覧が動いていた)
+  useBodyScrollLock()
   // 預かり・返金・調整は専用の見出しと「残高への影響額」で出す
   // (支出と同じ書き方にすると、返金・調整が ¥0 の行に見えてしまう)
   const isExpense = tx.type === 'expense'
-  const what = isExpense ? tx.store || tx.memo || categoryLabel(tx.category) : ledgerRowTitle(tx)
+  const what = txTitle(tx, categoryLabel)
   const amount = isExpense ? ownAmount(tx) : Math.abs(partnerImpact(tx))
 
   return (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isDuplicateRowError, isRetryableServerError, isSchemaError } from './serverErrors'
+import { isDuplicateRowError, isSchemaError } from './serverErrors'
 
 // ============================================================
 // 「その行はもう入っている」(23505) の見分け。
@@ -81,9 +81,8 @@ describe('isDuplicateRowError', () => {
     expect(isDuplicateRowError(pkeyViolation(ROW.toUpperCase()), ROW)).toBe(true)
   })
 
-  it('重複は「マイグレーション未実行」でも「再試行すべき失敗」でもない', () => {
+  it('重複は「マイグレーション未実行」ではない', () => {
     // 既存の分類は一切変えていないことの控え(ここが変わると案内文が入れ替わる)
     expect(isSchemaError(pkeyViolation(ROW))).toBe(false)
-    expect(isRetryableServerError(pkeyViolation(ROW))).toBe(false)
   })
 })

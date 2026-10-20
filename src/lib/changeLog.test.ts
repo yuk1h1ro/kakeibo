@@ -73,6 +73,15 @@ describe('diffTransaction', () => {
     ])
   })
 
+  it('名前にもう「さん」が付いていれば重ねない(「田中さんさん」にしない)', () => {
+    const changes = diffTransaction(
+      tx({ amount: 0, favor_amount: 3200, favor_kind: 'treat', favor_from: '田中さん' }),
+      input({ amount: 0, favor_amount: 3000, favor_kind: 'treat', favor_from: '田中さん' }),
+      labelOf
+    )
+    expect(changes[0].from).toBe('田中さんのおごり ¥3,200')
+  })
+
   it('おごりを外したことも履歴に残る', () => {
     const changes = diffTransaction(
       tx({ favor_amount: 500, favor_kind: 'discount', favor_from: '' }),
@@ -161,8 +170,13 @@ describe('transactionSummary', () => {
     expect(transactionSummary(tx(), labelOf)).toBe('7月20日(月) セブンイレブン ¥1,200')
   })
 
-  it('お店が無ければカテゴリ名で示す', () => {
-    expect(transactionSummary(tx({ store: '' }), labelOf)).toBe('7月20日(月) 食費 ¥1,200')
+  // 見出しは履歴の行と同じ付け方(お店 → メモ → カテゴリ名)
+  it('お店が無ければメモで示す', () => {
+    expect(transactionSummary(tx({ store: '' }), labelOf)).toBe('7月20日(月) おにぎり ¥1,200')
+  })
+
+  it('お店もメモも無ければカテゴリ名で示す', () => {
+    expect(transactionSummary(tx({ store: '', memo: '' }), labelOf)).toBe('7月20日(月) 食費 ¥1,200')
   })
 
   it('預かりはそう分かるようにする', () => {
