@@ -350,10 +350,3 @@ export async function recordBalances(
     ],
   })
 }
-
-/** 記録した残高を取り消す(打ち間違いの修正用) */
-export async function deleteBalance(supabase: SupabaseClient, id: string): Promise<void> {
-  const { error } = await supabase.from('asset_balances').delete().eq('id', id)
-  throwOn(error)
-  publish({ balances: snapshot.balances.filter((b) => b.id !== id) })
-}

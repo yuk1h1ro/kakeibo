@@ -54,13 +54,11 @@ import {
 import {
   isDuplicateRowError,
   isNetworkError,
-  isRetryableServerError,
   isSchemaError,
   type ServerErrorLike,
 } from '../lib/serverErrors'
 import {
   favorRejectionGuidance,
-  formatGuidance,
   guidanceForServerError,
   isOnlineNow,
   ledgerRejectionGuidance,
@@ -173,12 +171,6 @@ function saveLastSyncedAt(iso: string): void {
     // 保存できなくても表示が出ないだけ
   }
 }
-
-// ---------- 再試行すべきエラーの判定 ----------
-// 判定そのものは lib/serverErrors.ts に置き、他のテーブルからも同じ基準で使う。
-// 従来この場所から import していた箇所のために再エクスポートする。
-export type { ServerErrorLike }
-export { isNetworkError, isSchemaError, isRetryableServerError }
 
 /** 削除を取り消せる時間 (機能159)。短いと間に合わず、長いと画面を塞ぐ */
 const UNDO_WINDOW_MS = 7000
@@ -923,16 +915,12 @@ export function useTransactions(supabase: SupabaseClient) {
   // (利用者が中身を確かめて再送/破棄するまで、勝手に消えない)
   const quarantined = useQuarantine()
 
-  // 1行しか置けない場所(テストや将来の呼び出し側)のために畳んだ形も返す。
-  // 画面に出すのは errorGuide のほう — 畳んだ文字列を分類し直させないこと
-  const error = errorGuide ? formatGuidance(errorGuide) : null
-
+  // 画面が使うものだけを返す。refresh・restoreMany・dismissUndo は中で使うだけ
+  // (取り込み直しは syncNow、取り消しは undoDelete を通す)
   return {
     transactions,
     loading,
-    error,
     errorGuide,
-    refresh,
     syncNow,
     add,
     addMany,
@@ -940,11 +928,9 @@ export function useTransactions(supabase: SupabaseClient) {
     updateMany,
     remove,
     removeMany,
-    restoreMany,
     // 機能159: 直前の削除(数秒だけ取り消せる)
     undoableDeletes,
     undoDelete,
-    dismissUndo,
     // 同期できずに隔離した記録(中身の確認・再送・破棄)
     quarantined,
     retryQuarantined,

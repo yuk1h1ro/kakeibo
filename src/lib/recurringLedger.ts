@@ -305,13 +305,3 @@ export function reconcileGeneratedMarks(ctx: ReconcileContext): GeneratedMark[] 
   if (!saveMarks(marks)) return []
   return lost
 }
-
-/** テスト用: 端末の控えを空にする */
-export function resetGeneratedMarks(): void {
-  cache = null
-  try {
-    localStorage.removeItem(LEDGER_KEY)
-  } catch {
-    // 消せなくても実害は無い
-  }
-}

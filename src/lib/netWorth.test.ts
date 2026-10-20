@@ -5,7 +5,6 @@ import {
   balanceHistory,
   compactYen,
   daysBetween,
-  formatBalanceInput,
   latestBalanceAsOf,
   monthlyNetWorthSeries,
   netWorthAt,
@@ -316,14 +315,7 @@ describe('parseBalanceInput', () => {
   })
 })
 
-describe('formatBalanceInput / compactYen', () => {
-  it('3桁区切りにする', () => {
-    expect(formatBalanceInput(1_234_567)).toBe('1,234,567')
-    expect(formatBalanceInput(-5_000)).toBe('-5,000')
-    expect(formatBalanceInput(0)).toBe('0')
-    expect(formatBalanceInput(null)).toBe('')
-  })
-
+describe('compactYen', () => {
   it('1万円以上は「万」でまとめる', () => {
     expect(compactYen(0)).toBe('0')
     expect(compactYen(9_999)).toBe('9,999')

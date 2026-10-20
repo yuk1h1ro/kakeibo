@@ -3,12 +3,10 @@ import {
   TRIP_REMINDER_DAYS,
   beginTripMode,
   isTripOverdue,
-  mergeTripTag,
   mergeTripTags,
   parseTripMode,
   placeTagOptions,
   serializeTripMode,
-  tripAutoTag,
   tripAutoTags,
   tripBadgeText,
   tripDayCount,
@@ -122,42 +120,42 @@ describe('tripBadgeText', () => {
   })
 })
 
-describe('tripAutoTag', () => {
+describe('tripAutoTags の基本', () => {
   const on = { taggingAvailable: true, skippedForThisEntry: false }
 
   it('オフのときは何も付けない', () => {
-    expect(tripAutoTag(null, on)).toBeNull()
+    expect(tripAutoTags(null, on)).toEqual([])
   })
 
   it('オンのときは、そのタグを付ける', () => {
-    expect(tripAutoTag(mode(), on)).toBe('旅行')
+    expect(tripAutoTags(mode(), on)).toEqual(['旅行'])
   })
 
   it('tags 列が無い環境では付けない(送っても保存されないため)', () => {
-    expect(tripAutoTag(mode(), { ...on, taggingAvailable: false })).toBeNull()
+    expect(tripAutoTags(mode(), { ...on, taggingAvailable: false })).toEqual([])
   })
 
   it('この1件だけ外したときは付けない(旅行中のコンビニの自分用)', () => {
-    expect(tripAutoTag(mode(), { ...on, skippedForThisEntry: true })).toBeNull()
+    expect(tripAutoTags(mode(), { ...on, skippedForThisEntry: true })).toEqual([])
   })
 })
 
-describe('mergeTripTag', () => {
+describe('mergeTripTags の基本', () => {
   it('オフのときは手で付けたタグだけ(並びも変えない)', () => {
-    expect(mergeTripTag(['ごほうび', 'デート'], null)).toEqual(['ごほうび', 'デート'])
+    expect(mergeTripTags(['ごほうび', 'デート'], [])).toEqual(['ごほうび', 'デート'])
   })
 
   it('自動と手動の両方が付く', () => {
-    expect(mergeTripTag(['ごほうび'], '旅行')).toEqual(['旅行', 'ごほうび'])
+    expect(mergeTripTags(['ごほうび'], ['旅行'])).toEqual(['旅行', 'ごほうび'])
   })
 
   it('手で同じタグを打っていても二重にならない', () => {
-    expect(mergeTripTag(['旅行', 'ごほうび'], '旅行')).toEqual(['旅行', 'ごほうび'])
+    expect(mergeTripTags(['旅行', 'ごほうび'], ['旅行'])).toEqual(['旅行', 'ごほうび'])
   })
 
   it('手で上限まで付けた回でも、自動タグが落ちない(その1件だけ集計から抜けないように)', () => {
     const manual = ['a', 'b', 'c', 'd', 'e']
-    const merged = mergeTripTag(manual, '旅行')
+    const merged = mergeTripTags(manual, ['旅行'])
     expect(merged).toHaveLength(5)
     expect(merged[0]).toBe('旅行')
   })

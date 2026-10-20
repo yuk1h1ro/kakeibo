@@ -75,12 +75,6 @@ export function isDuplicateRowError(err: ServerErrorLike, rowId: string): boolea
   return m[1].trim() === 'id' && m[2].trim().toLowerCase() === rowId.trim().toLowerCase()
 }
 
-// 「あとで直せる(再試行すべき)」失敗か。
-// true のとき op はキューに残す = 入力した記録は絶対に失わない。
-export function isRetryableServerError(err: ServerErrorLike): boolean {
-  return isSchemaError(err) || isNetworkError(err.message)
-}
-
 /**
  * 例外・エラーオブジェクトを ServerErrorLike に寄せる。
  * try/catch で受けた unknown をそのまま判定に流せるようにするためのもの。

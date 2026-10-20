@@ -102,19 +102,6 @@ export function favorOf(t: {
   return { kind: t.favor_kind, amount, from }
 }
 
-/** おごってもらった回か。(純粋関数) */
-export function isTreat(t: Transaction): boolean {
-  return favorOf(t)?.kind === 'treat'
-}
-
-/**
- * 本来の値段(定価)。(純粋関数)
- * 実際に払った額 + 浮いた額。「3,200円のごちそうを 0円で食べた」の 3,200 のほう。
- */
-export function listAmount(t: Transaction): number {
-  return t.amount + favorAmount(t)
-}
-
 // ---------- 入力の正規化 ----------
 
 /**
@@ -332,15 +319,6 @@ export function treatFromOptions(txs: readonly Transaction[], limit = 8): string
     .sort((a, b) => (a[1] !== b[1] ? (a[1] < b[1] ? 1 : -1) : a[0] < b[0] ? -1 : 1))
     .slice(0, limit)
     .map(([name]) => name)
-}
-
-/**
- * 人ごとの1行。(純粋関数)
- * 「何回・いくらぶん・最後はいつ」。お礼やお返しを考えるのに要るのはこの3つ。
- */
-export function personLineText(person: TreatFromPerson): string {
-  const who = person.name === '' ? '名前を書いていない回' : withHonorific(person.name)
-  return `${who} ${person.count}回・${yenPlain(person.total)}`
 }
 
 /** 名前の末尾がすでに敬称なら、さんを重ねない */

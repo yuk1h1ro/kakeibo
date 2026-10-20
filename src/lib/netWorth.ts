@@ -246,16 +246,6 @@ export function parseBalanceInput(text: string): number | null {
   return negative ? -n : n
 }
 
-/** 残高を入力欄用の3桁区切り文字列にする。(純粋関数) */
-export function formatBalanceInput(value: number | null): string {
-  if (value === null) return ''
-  const negative = value < 0
-  const grouped = Math.abs(value)
-    .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-  return negative ? `-${grouped}` : grouped
-}
-
 /**
  * グラフの目盛り用の短い表記。(純粋関数)
  * 桁が大きいと軸ラベルが場所を食って横に溢れるので、1万円以上は「万」でまとめる。

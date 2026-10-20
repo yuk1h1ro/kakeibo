@@ -85,11 +85,6 @@ export function unreadCommentCount(comments: readonly PartnerComment[]): number 
   return comments.filter((c) => c.author === 'partner' && !c.readByOwner).length
 }
 
-/** その明細に未読があるか。(純粋関数) */
-export function hasUnread(comments: readonly PartnerComment[]): boolean {
-  return unreadCommentCount(comments) > 0
-}
-
 // ---------- Supabase 連携(利用者側) ----------
 
 interface CommentRow {
@@ -195,10 +190,4 @@ export async function markTransactionRead(
   } catch {
     // 既読にできなくても表示は続ける(次に開いたときに再試行される)
   }
-}
-
-/** 利用者が自分のコメントを消す(誤爆の取り消し用) */
-export async function deleteOwnComment(supabase: SupabaseClient, id: string): Promise<void> {
-  const { error } = await supabase.from('partner_share_comments').delete().eq('id', id)
-  if (error) throw new Error(formatGuidance(guidanceForServerError(error, isOnlineNow())))
 }

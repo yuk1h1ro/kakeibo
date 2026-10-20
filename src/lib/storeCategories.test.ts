@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  lookupStoreCategory,
   matchStoreSuggestions,
   mergeStoreCategories,
   normalizeStoreName,
@@ -70,19 +69,6 @@ describe('matchStoreSuggestions', () => {
 
   it('件数の上限を守る', () => {
     expect(matchStoreSuggestions(entries, 'セ', 2)).toHaveLength(2)
-  })
-})
-
-describe('lookupStoreCategory', () => {
-  const entries = [entry('セブンイレブン', 'food', '2026-08-03T00:00:00Z')]
-
-  it('表記ゆれがあっても引ける', () => {
-    expect(lookupStoreCategory(entries, ' セブン イレブン ')).toBe('food')
-  })
-
-  it('知らない店は null', () => {
-    expect(lookupStoreCategory(entries, 'ファミマ')).toBeNull()
-    expect(lookupStoreCategory(entries, '')).toBeNull()
   })
 })
 

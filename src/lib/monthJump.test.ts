@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clampMonth, monthCells, monthsWithRecords, selectableYears } from './monthJump'
+import { monthCells, monthsWithRecords, selectableYears } from './monthJump'
 
 describe('selectableYears', () => {
   it('一番古い記録の年から今年まで(新しい順)', () => {
@@ -37,12 +37,5 @@ describe('monthCells', () => {
 
   it('過去の年はすべて選べる', () => {
     expect(monthCells(2025, '2026-08-04', withRecords).every((c) => !c.disabled)).toBe(true)
-  })
-})
-
-describe('clampMonth', () => {
-  it('未来には飛ばさない', () => {
-    expect(clampMonth('2027-01', '2026-08-04')).toBe('2026-08')
-    expect(clampMonth('2026-03', '2026-08-04')).toBe('2026-03')
   })
 })

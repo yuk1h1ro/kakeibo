@@ -13,11 +13,6 @@ import {
 import { loadLowBalanceThreshold } from './lowBalanceSettings'
 import { getWebhookUrl } from './discordWebhook'
 
-// 残高計算の本体は partnerBalance.ts(純粋関数)に置いてある。
-// 従来ここから import していた箇所のために再エクスポートする。
-export { partnerBalance, partnerImpact }
-export type { PartnerTxLike }
-
 // ============================================================
 // Discord Webhook 通知
 // 彼女の預かり残高が増減したとき、設定済みの Discord チャンネルへ
@@ -30,16 +25,6 @@ export type { PartnerTxLike }
 // スマホからの記録だけが通知されていなかった。いまはどの端末で設定しても
 // 全部の端末から通知が飛ぶ。
 // ============================================================
-
-// 保存場所が変わっても呼び出し側(monthlySummary など)は変えずに済むよう、
-// 従来どおりこのモジュールからも読めるようにしておく
-export {
-  getWebhookUrl,
-  saveWebhookUrl,
-  clearWebhookUrl,
-  isValidWebhookUrl,
-  maskWebhookUrl,
-} from './discordWebhook'
 
 /**
  * テスト送信の結果。

@@ -61,9 +61,3 @@ export function monthCells(
   }
   return cells
 }
-
-/** 未来へ飛ばないように丸める。(純粋関数) */
-export function clampMonth(month: string, todayIso: string): string {
-  const currentMonth = monthKey(todayIso)
-  return month > currentMonth ? currentMonth : month
-}
