@@ -33,21 +33,10 @@ import {
   markSatisfactionUnavailable,
   withoutSatisfaction,
 } from '../lib/satisfaction'
-import {
-  addSplitPart,
-  buildPartnerOpMessage,
-  formatSplitNotification,
-  notifyLowBalanceIfNeeded,
-  sendDiscordMessage,
-  splitGroupOfOp,
-  type SplitNotice,
-} from '../lib/discordNotify'
-import { hasDeposits, partnerBalance } from '../lib/partnerBalance'
+import { createSyncNotifier } from '../lib/syncNotifier'
 import {
   featureToDrop,
   initTxExtensions,
-  isFavorAmountRejection,
-  isLedgerTypeRejection,
   markTxFeatureUnavailable,
   stripUnavailableColumns,
 } from '../lib/txExtensions'
@@ -58,13 +47,17 @@ import {
   isSchemaError,
   type ServerErrorLike,
 } from '../lib/serverErrors'
+import { guidanceForServerError, type Guidance } from '../lib/errorGuidance'
+import { judgeRejection } from '../lib/syncRejection'
 import {
-  favorRejectionGuidance,
-  guidanceForServerError,
-  ledgerRejectionGuidance,
-  syncRejectedGuidance,
-  type Guidance,
-} from '../lib/errorGuidance'
+  applyPendingOps,
+  loadLastSyncedAt,
+  loadTxCache,
+  normalizeRows,
+  saveLastSyncedAt,
+  saveTxCache,
+} from '../lib/txSnapshot'
+import { useUndoableDeletes } from './useUndoableDeletes'
 import { categoryLabel } from '../lib/categories'
 import { todayISO } from '../lib/format'
 import {
@@ -92,93 +85,14 @@ function sendablePayload(payload: TransactionInput | undefined): Partial<Transac
   return stripUnavailableColumns(base)
 }
 
-// ---------- スナップショットキャッシュ(オフライン起動・高速起動用) ----------
-
-const TX_CACHE_KEY = 'kakeibo.txCache'
-
-// 後方互換: store カラム追加以前に保存された行(migration 未実行のサーバー・
-// 旧バージョンの localStorage キャッシュ)には store が無い(undefined)。
-// 表示側に `?? ''` を散らさず、読み込みの入口で一括して '' に正規化する。
-function normalizeRows(rows: Transaction[]): Transaction[] {
-  return rows.map((r) => (typeof r.store === 'string' ? r : { ...r, store: '' }))
-}
-
-function loadTxCache(): Transaction[] | null {
-  try {
-    const raw = localStorage.getItem(TX_CACHE_KEY)
-    if (!raw) return null
-    const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) ? normalizeRows(parsed as Transaction[]) : null
-  } catch {
-    return null
-  }
-}
-
-function saveTxCache(rows: Transaction[]): void {
-  try {
-    localStorage.setItem(TX_CACHE_KEY, JSON.stringify(rows))
-  } catch {
-    // 容量超過等は無視(キャッシュはあくまで補助)
-  }
-}
-
-// ---------- 最終同期時刻 (機能154) ----------
-// 「いつのデータを見ているのか」は再起動しても引き継ぎたいので端末内に残す。
-// 記録できるのは「サーバーから取り込みに成功した時刻」だけで、
-// 通信できなかったときは前の値を保つ(嘘の更新時刻を出さないため)。
-
-const LAST_SYNC_KEY = 'kakeibo.lastSyncedAt'
-
-function loadLastSyncedAt(): string | null {
-  try {
-    return localStorage.getItem(LAST_SYNC_KEY)
-  } catch {
-    return null
-  }
-}
-
-function saveLastSyncedAt(iso: string): void {
-  try {
-    localStorage.setItem(LAST_SYNC_KEY, iso)
-  } catch {
-    // 保存できなくても表示が出ないだけ
-  }
-}
-
-/** 削除を取り消せる時間 (機能159)。短いと間に合わず、長いと画面を塞ぐ */
-const UNDO_WINDOW_MS = 7000
-
 // エラー文言は lib/errorGuidance.ts が組み立てる (機能161)。
 // ここに固定文言を置いていた頃は migration-store.sql の決め打ちで、
 // タグ・分割・返金など別の列が足りないときにも「store の SQL を実行してください」と
 // 間違ったファイルを案内していた。サーバーの code / details / hint が生きているのは
 // この場所だけなので、ここで分類すれば正しい SQL を名指しできる。
-
-function sortRows(rows: Transaction[]): Transaction[] {
-  return [...rows].sort(
-    (a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at)
-  )
-}
-
-// サーバースナップショットに保留キューを順に適用した表示用リストを作る
-function applyPendingOps(server: Transaction[], ops: PendingOp[]): Transaction[] {
-  let rows = server
-  for (const op of ops) {
-    if (op.kind === 'insert') {
-      if (op.payload && !rows.some((r) => r.id === op.id)) {
-        rows = [...rows, { id: op.id, created_at: op.queuedAt, ...op.payload }]
-      }
-    } else if (op.kind === 'update') {
-      if (op.payload) {
-        const payload = op.payload
-        rows = rows.map((r) => (r.id === op.id ? { ...r, ...payload } : r))
-      }
-    } else {
-      rows = rows.filter((r) => r.id !== op.id)
-    }
-  }
-  return sortRows(rows)
-}
+//
+// 端末に持つ写し(キャッシュ・最終同期時刻・キューを重ねた一覧)は lib/txSnapshot.ts、
+// 断られた1件の見分けは lib/syncRejection.ts、同期中の Discord 通知は lib/syncNotifier.ts。
 
 export function useTransactions(supabase: SupabaseClient) {
   const [serverTx, setServerTx] = useState<Transaction[]>(() => loadTxCache() ?? [])
@@ -305,30 +219,14 @@ export function useTransactions(supabase: SupabaseClient) {
     // update/delete の旧行の検索と「op適用後の残高」の計算に使う
     // (厳密な整合性より、通知が記録を止めないことを優先する)
     let localRows = serverTxRef.current
-    // 分割の会計は内訳が揃ってから1通にまとめて送る (discordNotify.ts)。
-    // まとめている途中の会計と、取り消された内訳の行ID(その削除は知らせない)
-    let pendingSplit: SplitNotice | null = null
-    const silencedIds = new Set<string>()
-    // 低下アラートは預かりを使っている人にだけ送る。分割の通知は後でまとめて
-    // 送るので、そのとき見る手元の写しの状態をここで追いかける
-    let depositsSeen = hasDeposits(localRows)
-    const sendPendingSplit = () => {
-      if (pendingSplit === null) return
-      const message = formatSplitNotification(pendingSplit)
-      if (message) {
-        void sendDiscordMessage(message) // 投げっぱなし。失敗しても記録は止めない
-        if (depositsSeen) notifyLowBalanceIfNeeded(pendingSplit.balance)
-      }
-      pendingSplit = null
-    }
+    // 彼女への通知(分割は内訳が揃ってから1通にまとめる)。同期1回ごとに作り直す
+    const notifier = createSyncNotifier(localRows)
     try {
       for (;;) {
         const queue = loadQueue()
         if (queue.length === 0) break
         const op = queue[0]
-        // 別の op に移る前に、まとめていた会計を送り出す(届いた順を崩さない)。
-        // 同じ会計の内訳が続くうちは待つ
-        if (pendingSplit !== null && splitGroupOfOp(op) !== pendingSplit.group) sendPendingSplit()
+        notifier.beforeOp(op)
         // code/details/hint まで保持する(スキーマ関連エラーの判定に使う)
         let err: ServerErrorLike | null = null
         try {
@@ -395,42 +293,22 @@ export function useTransactions(supabase: SupabaseClient) {
           // ここから先は「サーバーに届いたうえで断られた」失敗。
           // 直せる失敗(migration 未実行)か、直しようのない拒否(制約違反)かで
           // 扱いを変えるが、**どちらでも op を捨てない** のは共通の約束。
-          // 支払い 0円 の記録が金額の制約に弾かれた = migration-favor.sql 未実行。
-          // 種別の拒否より先に見る(こちらは支出、あちらは返金・調整なので重ならないが、
-          // 判定の順番を固定しておくほうが後から読んで迷わない)
-          const favorRejected = isFavorAmountRejection(err, op.payload)
-          const ledgerRejected = !favorRejected && isLedgerTypeRejection(err, op.payload?.type)
+          // 見分け方と案内の文言は syncRejection.ts
+          const { guide, retryable, ledgerRejected } = judgeRejection(err, op.payload, isOnlineNow())
           if (ledgerRejected) {
             // 返金・調整の種別が DB のチェック制約に無い = migration 未実行。
             // 導線を閉じて、これ以上同じ失敗を増やさない
             markTxFeatureUnavailable('settlement')
           }
-          const guide = isSchemaError(err)
-            ? // どの SQL を実行すればよいかは、code / details / hint が残っている
-              // ここでしか分からない。決め打ちの文言ではなく、必ず err から引く
-              guidanceForServerError(err, isOnlineNow())
-            : favorRejected
-              ? // 制約名 (transactions_amount_check) だけでは「調整のマイナス」と
-                // 区別が付かないので、中身まで見たここでファイル名を決める
-                favorRejectionGuidance(err)
-              : ledgerRejected
-                ? ledgerRejectionGuidance(err)
-                : syncRejectedGuidance(err, isOnlineNow())
-          // 送り直せば通る見込みがあるのは migration 系だけ。
-          // それ以外(制約違反など)は何度送っても同じなので、すぐ隔離する
-          const retryable = isSchemaError(err) || ledgerRejected || favorRejected
           const attempts = recordSyncFailure(op.opId)
+          // 送り直せば通る見込みがあるのは migration 系だけ(retryable)。
+          // それ以外(制約違反など)は何度送っても同じなので、すぐ隔離する
           if (!retryable || reachedAttemptLimit(attempts)) {
             // 同じ op が何度も断られると、その後ろの記録がすべて送れなくなる。
             // 記録は隔離箱(localStorage)に移して必ず残したうえで、先へ進む
             // 断られた内訳の会計は、先に入った内訳ごと取り消される。
-            // まとめていた通知は **送らずに捨てる**(無かったことになる会計)。
-            // 取り消しの削除も知らせない — 彼女から見ると、聞いたことの無い
-            // 記録が消えたという知らせになる
-            if (pendingSplit !== null && splitGroupOfOp(op) === pendingSplit.group) {
-              for (const id of pendingSplit.ids) silencedIds.add(id)
-              pendingSplit = null
-            }
+            // まとめていた通知は送らずに捨て、取り消しの削除も知らせない
+            notifier.cancelled(op)
             const moved = quarantineFromQueue(
               op,
               retryable ? 'repeated' : 'rejected',
@@ -453,20 +331,8 @@ export function useTransactions(supabase: SupabaseClient) {
           // 同期成功 — 彼女残高に影響する op なら Discord に通知する。
           // 旧行の参照(localRows)は「キューから op を消す前」に確保する
           const nextRows = applyPendingOps(localRows, [op])
-          if (splitGroupOfOp(op) !== null) {
-            // 分割の内訳は、会計が揃うまで手元にまとめる(送るのは次の op に
-            // 移るときか、この flush を抜けるとき)
-            pendingSplit = addSplitPart(pendingSplit, op, partnerBalance(nextRows))
-          } else if (!(op.kind === 'delete' && silencedIds.has(op.id))) {
-            const message = buildPartnerOpMessage(op, localRows, nextRows)
-            if (message) void sendDiscordMessage(message) // 投げっぱなし。失敗しても記録は止めない
-            // 機能010: 残高がしきい値をまたいだときだけ低下アラートを送る。
-            // 個々の op の通知とは別に、確定した残高そのものを見て判断する
-            // 預かりをまだ使っていない人には送らない(hasDeposits。画面のアラートと同じ判断)
-            if (message && hasDeposits(nextRows)) notifyLowBalanceIfNeeded(partnerBalance(nextRows))
-          }
+          notifier.sent(op, localRows, nextRows)
           localRows = nextRows
-          depositsSeen = depositsSeen || hasDeposits([op.payload ?? { type: '' }])
           // 進めた手元のスナップショットは、この flush を抜けても引き継ぐ。
           // ここを flush の中の変数だけに留めていたころは、serverTxRef が
           // 「キューが空になったときの refresh()」でしか進まず、圏外で送信が
@@ -487,8 +353,7 @@ export function useTransactions(supabase: SupabaseClient) {
       }
     } finally {
       // 圏外で途中まで送れた会計も、送れた分だけで1通にして出す
-      // (残りは次の同期で、もう1通になる)。待ち続けると知らせが出ない
-      sendPendingSplit()
+      notifier.finish()
       flushingRef.current = false
       setSyncing(false)
     }
@@ -600,35 +465,7 @@ export function useTransactions(supabase: SupabaseClient) {
   }, [])
 
   // ---------- 削除の取り消し (機能159) ----------
-  // 「削除を取り消せる状態」はフック側に持たせる。
-  // どの画面から消しても(編集シート・スワイプ・長押し・一括)同じように
-  // 取り消せるようにするため、そして画面を離れても数秒で必ず期限切れになるため
-  // (取り消しバーの寿命を画面の寿命に紐付けると、あとから古いバーが出てしまう)。
-  const [undoableDeletes, setUndoableDeletes] = useState<Transaction[] | null>(null)
-  const undoTimerRef = useRef<number | null>(null)
-
-  const clearUndoTimer = () => {
-    if (undoTimerRef.current !== null) {
-      window.clearTimeout(undoTimerRef.current)
-      undoTimerRef.current = null
-    }
-  }
-
-  const armUndo = useCallback((txs: readonly Transaction[]) => {
-    clearUndoTimer()
-    setUndoableDeletes(txs.length > 0 ? [...txs] : null)
-    undoTimerRef.current = window.setTimeout(() => {
-      undoTimerRef.current = null
-      setUndoableDeletes(null)
-    }, UNDO_WINDOW_MS)
-  }, [])
-
-  const dismissUndo = useCallback(() => {
-    clearUndoTimer()
-    setUndoableDeletes(null)
-  }, [])
-
-  useEffect(() => clearUndoTimer, [])
+  const { undoableDeletes, armUndo, dismissUndo } = useUndoableDeletes()
 
   /**
    * 1件追加する。

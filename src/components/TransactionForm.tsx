@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { categoryLabel, useCategories, visualFromEmojiValue } from '../lib/categories'
-import { CategoryVisualBadge } from './categoryIcons'
-import { daysAgoISO, formatDate, maskAmountsIn, todayISO, yen } from '../lib/format'
+import { useCategories } from '../lib/categories'
+import { daysAgoISO, formatDate, todayISO, yen } from '../lib/format'
 import {
   EMPTY_CALC,
   clearAll,
@@ -14,54 +13,55 @@ import {
   type CalcOp,
   type CalcState,
 } from '../lib/calc'
-import { useKeypadEnabled } from '../lib/keypadSettings'
 import AmountKeypad from './AmountKeypad'
 import AmountCalcBar from './AmountCalcBar'
-import AmountTaxKeys from './AmountTaxKeys'
 import AmountTextInput from './AmountTextInput'
-import { normalizeAmountInput } from '../lib/amountFormat'
-import { revealAboveKeypad } from '../lib/keypadReveal'
 import { SATISFACTION_OPTIONS, useSatisfactionAvailable } from '../lib/satisfaction'
-import {
-  FAVOR_OPTIONS,
-  MAX_FAVOR_FROM_LENGTH,
-  buildFavor,
-  favorColumns,
-  favorNoticeText,
-  favorOf,
-  favorWhoText,
-  treatFromOptions,
-  type FavorKind,
-} from '../lib/favors'
+import { buildFavor, favorColumns, favorOf, favorWhoText, treatFromOptions, type FavorKind } from '../lib/favors'
 import { matchStoreSuggestions, useStoreCategories } from '../lib/storeCategories'
-import {
-  buildStoreIndex,
-  guessStoreCategory,
-  isSameStore,
-  storeOptionsFor,
-} from '../lib/storePicker'
+import { buildStoreIndex, guessStoreCategory, isSameStore, storeOptionsFor } from '../lib/storePicker'
 import type { Satisfaction, Transaction, TransactionType } from '../lib/types'
 import { partnerPaid, satisfactionOf, tagsOf } from '../lib/types'
 import { useTxFeature } from '../lib/txExtensions'
-import { settlementImpact } from '../lib/partnerSettlement'
-import { collectTags, parseTagInput, sanitizeTags, MAX_TAGS_PER_TX } from '../lib/tags'
-import { mergeTripTags, tripAutoTags, tripTagsText, useTripMode } from '../lib/tripMode'
+import { parseTagInput } from '../lib/tags'
+import { mergeTripTags, tripAutoTags, useTripMode } from '../lib/tripMode'
 import {
   buildSplitInputs,
   carryPartnerAmount,
   evenSplit,
   splitCarryNotice,
   isSplitPart,
-  splitTotal,
   validateSplit,
-  MAX_SPLIT_PARTS,
-  MIN_SPLIT_PARTS,
   type SplitPart,
 } from '../lib/splits'
+import {
+  draftPartnerImpact,
+  initialPayer,
+  isPartnerPaidValid,
+  partnerPaidAmount,
+  saveBlockedReason as blockedReasonOf,
+  type DraftState,
+  type Payer,
+} from '../lib/transactionDraft'
 import type { TransactionInput } from '../hooks/useTransactions'
 import '../ledger.css'
 import { describeUnknownError } from '../lib/errorGuidance'
 import { isOnlineNow } from '../lib/serverErrors'
+import { keypadTargetLabel, parseSplitTarget, type AmountTarget } from './txform/amountTarget'
+import { useCalcField } from './txform/useCalcField'
+import { useKeypadDock } from './txform/useKeypadDock'
+import StepLabel from './txform/StepLabel'
+import CategoryStep from './txform/CategoryStep'
+import StoreStep from './txform/StoreStep'
+import AdjustSignField from './txform/AdjustSignField'
+import PartnerShareField from './txform/PartnerShareField'
+import PayerField from './txform/PayerField'
+import DateStep from './txform/DateStep'
+import SatisfactionField from './txform/SatisfactionField'
+import FavorField from './txform/FavorField'
+import TagField from './txform/TagField'
+import SplitEditor from './txform/SplitEditor'
+import TripTagRow from './txform/TripTagRow'
 
 // 「最近の記録から入力」などの外部プリフィル。nonce が変わるたびに適用される(日付は現在の選択を維持)
 export interface FormPrefill {
@@ -106,19 +106,6 @@ interface Props {
   knownTransactions?: readonly Transaction[]
 }
 
-/**
- * 支払った人 (機能018)。
- * 既定は 'me'(自分が全額)で、これは機能018 より前の唯一の前提でもある。
- */
-type Payer = 'me' | 'partner' | 'both'
-
-function initialPayer(initial?: Transaction): Payer {
-  if (!initial) return 'me'
-  const paid = partnerPaid(initial)
-  if (paid <= 0) return 'me'
-  return paid >= initial.amount ? 'partner' : 'both'
-}
-
 /** 金額欄の見出し。種別ごとに何の金額を打つのかを明示する */
 const AMOUNT_LABEL: Record<TransactionType, string> = {
   expense: '支払い金額(円)',
@@ -138,39 +125,15 @@ const MEMO_PLACEHOLDER: Record<TransactionType, string> = {
   partner_adjust: '例: 7/3 の割り勘の計算違いを修正',
 }
 
-const PAYER_OPTIONS: readonly { id: Payer; label: string }[] = [
-  { id: 'me', label: '自分が全額' },
-  { id: 'partner', label: '彼女が全額' },
-  { id: 'both', label: '分けて払った' },
-]
-
-/** タグの候補に出す件数。多すぎると詳細欄が縦に伸びて入力の邪魔になる */
-const TAG_SUGGESTION_LIMIT = 8
-
-/** 分割の内訳で、電卓が打ち込める欄 (SplitPart の数値の列) */
-type SplitField = 'amount' | 'partnerAmount'
-
 /**
- * 自前テンキー・電卓が打ち込む先の金額欄。
- * 分割の内訳は何行もあるので、行の番号と欄で指す(`split:0:partnerAmount`)
+ * 1件の記録を入れる・直すフォーム。
+ *
+ * ここが持つのは画面の状態(打ちかけの文字列・電卓の式・開いている欄)と、
+ * それを保存する1件に組み立てる流れだけ。
+ *   - 保存できるか・残高への影響 … lib/transactionDraft.ts(純粋関数)
+ *   - 各段の見た目 … txform/ の部品
+ *   - テンキーの開け閉め … txform/useKeypadDock.ts
  */
-type AmountTarget = 'amount' | 'partner' | `split:${number}:${SplitField}`
-
-const splitTarget = (index: number, field: SplitField): AmountTarget => `split:${index}:${field}`
-
-function parseSplitTarget(target: AmountTarget): { index: number; field: SplitField } | null {
-  const m = /^split:(\d+):(amount|partnerAmount)$/.exec(target)
-  return m ? { index: Number(m[1]), field: m[2] as SplitField } : null
-}
-
-/** パッドの上に出す「どの欄に入力中か」。支払い金額のときは出さない */
-function keypadTargetLabel(target: AmountTarget): string | undefined {
-  if (target === 'partner') return '彼女の負担分'
-  const split = parseSplitTarget(target)
-  if (split) return `内訳 ${split.index + 1} の${split.field === 'amount' ? '金額' : '彼女の負担分'}`
-  return undefined
-}
-
 export default function TransactionForm({
   initial,
   submitLabel,
@@ -191,12 +154,9 @@ export default function TransactionForm({
   const isAdjust = type === 'partner_adjust'
   const categories = useCategories()
 
-  const [amount, setAmount] = useState(
-    initial ? String(isAdjust ? Math.abs(initial.amount) : initial.amount) : ''
-  )
-  const [adjustSign, setAdjustSign] = useState<1 | -1>(
-    initial && isAdjust && initial.amount < 0 ? -1 : 1
-  )
+  // 支払い金額と彼女の負担分は、それぞれ電卓の式を持つ (useCalcField)
+  const amountField = useCalcField(initial ? String(isAdjust ? Math.abs(initial.amount) : initial.amount) : '')
+  const [adjustSign, setAdjustSign] = useState<1 | -1>(initial && isAdjust && initial.amount < 0 ? -1 : 1)
   const [category, setCategory] = useState<string | null>(initial?.category ?? null)
   const [date, setDate] = useState(initial?.date ?? todayISO())
   // 「自動で入れた今日」。利用者が選んだ日付と区別するために持つ。
@@ -206,9 +166,7 @@ export default function TransactionForm({
   const [memo, setMemo] = useState(initial?.memo ?? '')
   const [store, setStore] = useState(initial?.store ?? '')
   const [withPartner, setWithPartner] = useState((initial?.partner_amount ?? 0) > 0)
-  const [partnerAmount, setPartnerAmount] = useState(
-    initial && initial.partner_amount > 0 ? String(initial.partner_amount) : ''
-  )
+  const partnerField = useCalcField(initial && initial.partner_amount > 0 ? String(initial.partner_amount) : '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -231,8 +189,8 @@ export default function TransactionForm({
   // 「実際に払った額より本来の値段が高かった」回。列が無い環境では導線ごと出さない。
   // 既定は「無し」= これまでどおりの記録なので、触らなければ手数は1タップも増えない。
   const favorAvailable = useTxFeature('favor')
-  const [favorKind, setFavorKind] = useState<FavorKind | null>(
-    () => (initial ? (favorOf(initial)?.kind ?? null) : null)
+  const [favorKind, setFavorKind] = useState<FavorKind | null>(() =>
+    initial ? (favorOf(initial)?.kind ?? null) : null
   )
   const [favorAmountInput, setFavorAmountInput] = useState(() => {
     const f = initial ? favorOf(initial) : null
@@ -269,23 +227,10 @@ export default function TransactionForm({
   // 分割を開いたときに「上段の入力をどう扱ったか」を伝える1行。
   // 支払った人・彼女の負担分は分割では使えないので、黙って捨てないための表示
   const [splitNotice, setSplitNotice] = useState<string | null>(null)
-  // 金額入力の簡易電卓(保留中の値と演算子)。数字は入力欄か自前テンキーから入る
-  const [calc, setCalc] = useState<{ pendingValue: number | null; pendingOp: CalcOp | null }>({
-    pendingValue: null,
-    pendingOp: null,
-  })
-  // 彼女の負担分の電卓。支払い金額とは別に持つ — 片方で打ちかけた式が
-  // もう片方の金額に混ざると、保存される金額が黙って変わってしまうため
-  const [partnerCalc, setPartnerCalc] = useState<{ pendingValue: number | null; pendingOp: CalcOp | null }>({
-    pendingValue: null,
-    pendingOp: null,
-  })
 
   // 感情スタンプ (機能219)。列が無い環境では導線ごと出さない
   const satisfactionAvailable = useSatisfactionAvailable()
-  const [satisfaction, setSatisfaction] = useState<Satisfaction | null>(
-    initial ? satisfactionOf(initial) : null
-  )
+  const [satisfaction, setSatisfaction] = useState<Satisfaction | null>(initial ? satisfactionOf(initial) : null)
 
   // 気分・タグ・分割だけを畳む。
   // 画面の並び(カテゴリ→お店→金額→メモ/彼女の分→日付→保存)は、そのまま
@@ -299,15 +244,8 @@ export default function TransactionForm({
   const [streak, setStreak] = useState(0)
   const [lastSavedAmount, setLastSavedAmount] = useState(0)
 
-  // 自前テンキー(機能052)。タッチ端末では既定で有効、PC では OS のキーボードのまま
-  const keypadEnabled = useKeypadEnabled()
-  const [keypadOpen, setKeypadOpen] = useState(false)
-  // テンキーがどの金額欄に打ち込むか。パッドは画面の下に1枚だけなので、
-  // 開くたびにタップされた欄へ向け直す
-  const [keypadTarget, setKeypadTarget] = useState<AmountTarget>('amount')
-  const amountRef = useRef<HTMLInputElement | null>(null)
-  const partnerRef = useRef<HTMLInputElement | null>(null)
-  const dateLeadRef = useRef<HTMLParagraphElement | null>(null)
+  // 自前テンキー(機能052)
+  const keypad = useKeypadDock()
   // プログラムからフォーカスするとき、onFocus 経由でテンキーが開くのを抑える印
   const silentFocusRef = useRef(false)
 
@@ -341,10 +279,14 @@ export default function TransactionForm({
     if (current !== null) return
     const guess = guessStoreCategory(storeIndex, name)
     if (guess === null) return
-    setCategory(guess.category)
-    setAutoCategory(guess.category)
-    // 割れているときは「決めつけない言い方」に切り替えるため、対抗馬を覚えておく
-    setAutoRivals(guess.rivals)
+    setAutoGuess(guess.category, guess.rivals)
+  }
+
+  /** 自動で選んだカテゴリ。割れているときは「決めつけない言い方」に切り替えるため、対抗馬も覚えておく */
+  const setAutoGuess = (guessed: string, rivals: string[]) => {
+    setCategory(guessed)
+    setAutoCategory(guessed)
+    setAutoRivals(rivals)
   }
 
   /**
@@ -352,9 +294,6 @@ export default function TransactionForm({
    * 出どころ(取引履歴 + 学習内容)と並び順の理由は storePicker.ts を参照。
    */
   const storeOptions = storeOptionsFor(storeIndex, category)
-  // 一覧に無い店(新しく打った店・カテゴリを選び直したあとの店)も、
-  // 選ばれていることが見えるように先頭のチップとして出す
-  const storeInOptions = storeOptions.some((o) => isSameStore(o.storeName, store))
 
   /**
    * 金額欄にフォーカスを移す (機能047)。
@@ -364,7 +303,7 @@ export default function TransactionForm({
    * 開かないので、必ずタップのハンドラの中から同期的に呼ぶこと。
    */
   const focusAmount = () => {
-    const el = amountRef.current
+    const el = keypad.amountRef.current
     if (!el) return
     openKeypadFor('amount')
     el.focus({ preventScroll: true })
@@ -379,27 +318,27 @@ export default function TransactionForm({
   useEffect(() => {
     if (!initial || initialFocusDone.current) return
     initialFocusDone.current = true
-    const el = amountRef.current
+    const el = keypad.amountRef.current
     if (!el) return
     silentFocusRef.current = true
     el.focus({ preventScroll: true })
     el.select() // 打ち直しがそのまま置き換えになる
     silentFocusRef.current = false
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial])
 
   /** 自前テンキーを、タップされた金額欄に向けて開く。無効な端末では何もしない */
   function openKeypadFor(target: AmountTarget) {
-    if (!keypadEnabled) return
+    if (!keypad.enabled) return
     // 内訳の打ちかけの式は、パッドがその欄を離れたら畳む。
     // 内訳の値には確定後の数値が入っているので、何も失われない
     // (残すと「100 ＋」の直後の空欄のまま、100 が入っているのに見えなくなる)
     if (splitCalc && splitCalc.target !== target) setSplitCalc(null)
-    setKeypadTarget(target)
-    setKeypadOpen(true)
+    keypad.openFor(target)
   }
 
   /** まだ何も打っていない = 次の段へ自動で送ってよい状態か (機能047) */
-  const amountUntouched = amount === '' && calc.pendingOp === null
+  const amountUntouched = amountField.input === '' && amountField.state.pendingOp === null
 
   const chooseCategory = (id: string) => {
     setCategory(id)
@@ -429,8 +368,9 @@ export default function TransactionForm({
 
   // 編集モーダルの対象が変わったら計算途中の状態を持ち越さない
   useEffect(() => {
-    setCalc(EMPTY_CALC)
-    setPartnerCalc(EMPTY_CALC)
+    amountField.clearPending()
+    partnerField.clearPending()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial])
 
   // 開きっぱなしで日付をまたいだら、自動で入れた「今日」を新しい今日へ進める。
@@ -454,82 +394,8 @@ export default function TransactionForm({
 
   // パッドを閉じたら、内訳の打ちかけの式も畳む(理由は openKeypadFor と同じ)
   useEffect(() => {
-    if (!keypadOpen) setSplitCalc(null)
-  }, [keypadOpen])
-
-  // テンキーの高さぶんの余白を本文に持たせる(保存ボタンがパッドの下に隠れないように)
-  useEffect(() => {
-    if (!keypadOpen) return
-    document.body.classList.add('keypad-open')
-    return () => document.body.classList.remove('keypad-open')
-  }, [keypadOpen])
-
-  // タップが **どこで始まったか**。
-  // 画面の下半分にある金額欄をタップすると、指を置いた瞬間にテンキーが開いて
-  // 欄を覆い、指を離す位置がテンキーのキーになる。ブラウザはこの click を
-  // 「押した所と離した所の共通の祖先」に届けるので、下の「外側を押したら
-  // 閉じる」に引っかかり、テンキーが一瞬開いてすぐ閉じていた。
-  // 始まりが金額欄なら、それは外側のタップではない。
-  // テンキーが開く前の押し下げも拾う必要があるので、こちらは常に聞いておく
-  const pointerOriginRef = useRef<EventTarget | null>(null)
-  useEffect(() => {
-    const onPointerDown = (e: PointerEvent) => {
-      pointerOriginRef.current = e.target
-    }
-    document.addEventListener('pointerdown', onPointerDown, true)
-    return () => document.removeEventListener('pointerdown', onPointerDown, true)
-  }, [])
-
-  // 金額欄・テンキー以外を触ったら閉じる。
-  // blur ではなく click で閉じるのは、押した相手の onClick が先に走るようにするため
-  // (先に閉じると余白が消えてボタンが指の下からずれることがある)
-  useEffect(() => {
-    if (!keypadOpen) return
-    // 「保存して続ける」は次の1件をそのまま打つためのボタンなので、閉じない。
-    // お店のチップも同じ — 押すとその場で金額へ進む(=パッドを開く)ので、
-    // 開けたのと同じタップで閉じてしまわないように除外する。
-    // ％・税込のボタンは金額欄そのものへの操作なので、押しても閉じない
-    // (閉じると押した直後に画面が跳ねて、出したばかりの結果が読めない)
-    // SVG のアイコン(カテゴリの絵など)も外側として数えるので、HTMLElement ではなく Element で見る
-    const keepsOpen = (el: EventTarget | null): boolean =>
-      el instanceof Element &&
-      (el === amountRef.current ||
-        el === partnerRef.current ||
-        el.closest('.keypad-field') !== null ||
-        el.closest('.keypad-dock') !== null ||
-        el.closest('.save-continue') !== null ||
-        el.closest('.store-chip') !== null ||
-        el.closest('.percent-block') !== null)
-    const onDocumentClick = (e: MouseEvent) => {
-      if (keepsOpen(e.target) || keepsOpen(pointerOriginRef.current)) return
-      setKeypadOpen(false)
-    }
-    // 聞き始めるのは、テンキーを開いたタップが終わってから。
-    // React はタップで起きた変更をそのタップの最中に反映するので、ここで
-    // すぐ聞き始めると、**開いたタップそのもの** が document まで上ってきて
-    // 「外側を押した」と数えられ、開いた瞬間に閉じる(カテゴリの文字の
-    // 部分を押したときがそうだった。絵の部分は SVG なので、たまたま
-    // 見逃されていただけ)
-    const timer = window.setTimeout(() => document.addEventListener('click', onDocumentClick), 0)
-    return () => {
-      window.clearTimeout(timer)
-      document.removeEventListener('click', onDocumentClick)
-    }
-  }, [keypadOpen])
-
-  // テンキーを開いた・別の欄へ向け直したら、その欄をテンキーより上に見せる
-  // (keypadReveal.ts)。支払い金額のときは、すぐ下の「この記録は 昨日 で
-  // 保存されます」まで見せる — 日付の取り違えに気付ける最後の場所なので
-  useEffect(() => {
-    if (!keypadOpen) return
-    const active = document.activeElement
-    const field = active instanceof HTMLInputElement ? active : amountRef.current
-    if (!field) return
-    const frame = requestAnimationFrame(() =>
-      revealAboveKeypad(field, keypadTarget === 'amount' ? dateLeadRef.current : null)
-    )
-    return () => cancelAnimationFrame(frame)
-  }, [keypadOpen, keypadTarget])
+    if (!keypad.open) setSplitCalc(null)
+  }, [keypad.open])
 
   // 外部プリフィル適用(日付は現在の選択を維持する。差し替えたいときは DatePrefill を使う)
   useEffect(() => {
@@ -537,11 +403,11 @@ export default function TransactionForm({
     // テンプレート・最近の記録から入れ直すときは、前の1件の中身(支払った人・
     // タグ・分割・おごり・気分・計算途中の式)を持ち越さない。保存のあとと同じ片付け
     resetPerEntry()
-    setAmount(prefill.amount > 0 ? String(prefill.amount) : '')
+    amountField.setInput(prefill.amount > 0 ? String(prefill.amount) : '')
     setMemo(prefill.memo)
     setStore(prefill.store)
     setWithPartner(prefill.partner_amount > 0)
-    setPartnerAmount(prefill.partner_amount > 0 ? String(prefill.partner_amount) : '')
+    partnerField.setInput(prefill.partner_amount > 0 ? String(prefill.partner_amount) : '')
     // カテゴリ無しで店名だけ入ってくる場合も、手入力と同じ経路でカテゴリを補う
     setCategory(prefill.category)
     if (prefill.category === null && prefill.store !== '') {
@@ -561,30 +427,15 @@ export default function TransactionForm({
     setDate(datePrefill.date)
   }, [datePrefill])
 
-  const calcState: CalcState = { input: amount, pendingValue: calc.pendingValue, pendingOp: calc.pendingOp }
   // ＝ の押し忘れに備え、保留中の計算を評価した値を「確定した金額」として扱う
-  const resolvedAmount = resolveForSubmit(calcState).input
-  const amountNum = Number(resolvedAmount)
-  const partnerCalcState: CalcState = {
-    input: partnerAmount,
-    pendingValue: partnerCalc.pendingValue,
-    pendingOp: partnerCalc.pendingOp,
-  }
+  const amountNum = Number(amountField.resolved)
   // 彼女の負担分も、＝ の押し忘れは保留中の計算を評価した値で扱う。
   // 保存される額・残高の見込み・「支払い金額を超えていないか」の判定が
   // すべてこの1つの値を見るので、どこか1か所だけ式のまま、ということが起きない
-  const resolvedPartner = resolveForSubmit(partnerCalcState).input
-  const partnerNum = withPartner ? Number(resolvedPartner || 0) : 0
+  const partnerNum = withPartner ? Number(partnerField.resolved || 0) : 0
 
-  // 機能018: 彼女が実際に払った額。
-  // 「彼女が全額」は金額を打ち直させない(支払い総額と必ず一致させる)
-  const partnerPaidNum = !isExpense
-    ? 0
-    : payer === 'partner'
-      ? amountNum
-      : payer === 'both'
-        ? Number(partnerPaidInput || 0)
-        : 0
+  // 機能018: 彼女が実際に払った額
+  const partnerPaidNum = partnerPaidAmount(type, payer, amountNum, partnerPaidInput)
 
   // 機能096: 分割中か。編集シート(onSubmitSplit 無し)では分割しない
   const splitting = splitParts !== null
@@ -597,30 +448,27 @@ export default function TransactionForm({
    * (splitNotice。黙って捨てない)。
    */
   const favor =
-    isExpense && favorAvailable && !splitting
-      ? buildFavor(favorKind, Number(favorAmountInput || 0), favorFrom)
-      : null
+    isExpense && favorAvailable && !splitting ? buildFavor(favorKind, Number(favorAmountInput || 0), favorFrom) : null
 
-  // おごってくれた人の候補。過去の記録から、最近ご馳走になった順に出す
-  // (毎回打ち直させると「田中 / 田中さん」と揺れて、人ごとの集計が割れてしまう)
-  const treatOptions = treatFromOptions(knownTransactions ?? [])
   const splitValidation = splitting ? validateSplit(splitParts, amountNum) : null
 
-  // 機能088: 打ちかけの文字列をタグとして確定する(Enter と、欄から離れたとき)
-  const commitTagDraft = () => {
-    const parsed = parseTagInput(tagDraft)
-    if (parsed.length === 0) {
-      setTagDraft('')
-      return
-    }
-    setTags(sanitizeTags([...tags, ...parsed]))
-    setTagDraft('')
+  // 保存できるか・残高への影響を決めるのに要る中身 (transactionDraft.ts)
+  const draft: DraftState = {
+    type,
+    category,
+    amount: amountNum,
+    withPartner,
+    partnerAmount: partnerNum,
+    payer,
+    partnerPaid: partnerPaidNum,
+    hasFavor: favor !== null,
+    splitting,
+    splitOk: splitValidation?.ok ?? false,
   }
-
-  // 過去に使ったタグの候補。すでに付いているものは出さない
-  const tagSuggestions = collectTags(knownTransactions ?? [], 30)
-    .filter((t) => !tags.includes(t.tag))
-    .slice(0, TAG_SUGGESTION_LIMIT)
+  const partnerPaidValid = isPartnerPaidValid(draft)
+  // 保存ボタンが押せない理由。**保存できるかの判定はこの1本だけ**
+  const saveBlockedReason = blockedReasonOf(draft)
+  const valid = saveBlockedReason === null
 
   /**
    * 機能096: 分割を開く。
@@ -646,10 +494,7 @@ export default function TransactionForm({
    */
   function releaseSplitTargets() {
     setSplitCalc(null)
-    if (parseSplitTarget(keypadTarget)) {
-      setKeypadOpen(false)
-      setKeypadTarget('amount')
-    }
+    if (parseSplitTarget(keypad.target)) keypad.release()
   }
 
   /**
@@ -666,15 +511,13 @@ export default function TransactionForm({
    *     旅行中の記録が抜け落ちる
    */
   function resetPerEntry() {
-    setAmount('')
-    setCalc(EMPTY_CALC)
+    amountField.setDirect('')
     setMemo('')
     setStore('')
     setWithPartner(false)
-    setPartnerAmount('')
-    setPartnerCalc(EMPTY_CALC)
+    partnerField.setDirect('')
     // 彼女の負担分の欄は閉じるので、パッドは支払い金額へ戻す
-    setKeypadTarget('amount')
+    keypad.setTarget('amount')
     setAutoCategory(null)
     setAutoRivals([])
     setSatisfaction(null)
@@ -693,9 +536,7 @@ export default function TransactionForm({
 
   // 機能096: 内訳の1つを書き換える
   const updatePart = (index: number, patch: Partial<SplitPart>) => {
-    setSplitParts((prev) =>
-      prev === null ? prev : prev.map((p, i) => (i === index ? { ...p, ...patch } : p))
-    )
+    setSplitParts((prev) => (prev === null ? prev : prev.map((p, i) => (i === index ? { ...p, ...patch } : p))))
   }
 
   // 電卓の操作は、どの金額欄でも calc.ts の同じ状態機械を通す(挙動を1本に保つため)。
@@ -711,7 +552,7 @@ export default function TransactionForm({
       const value = part[split.field]
       return { input: value !== 0 ? String(value) : '', pendingValue: null, pendingOp: null }
     }
-    return target === 'partner' ? partnerCalcState : calcState
+    return target === 'partner' ? partnerField.state : amountField.state
   }
 
   const applyTo = (target: AmountTarget, next: CalcState) => {
@@ -723,14 +564,7 @@ export default function TransactionForm({
       updatePart(split.index, { [split.field]: Number(resolveForSubmit(next).input || 0) })
       return
     }
-    const pending = { pendingValue: next.pendingValue, pendingOp: next.pendingOp }
-    if (target === 'partner') {
-      setPartnerAmount(next.input)
-      setPartnerCalc(pending)
-    } else {
-      setAmount(next.input)
-      setCalc(pending)
-    }
+    ;(target === 'partner' ? partnerField : amountField).apply(next)
   }
 
   const runOperator = (target: AmountTarget, op: CalcOp) => applyTo(target, pressOperator(calcOf(target), op))
@@ -739,99 +573,19 @@ export default function TransactionForm({
   const runPercent = (target: AmountTarget) => applyTo(target, pressPercent(calcOf(target)))
   const runClear = (target: AmountTarget) => applyTo(target, clearAll())
   // テンキーの数字も演算子と同じ状態機械を通す
-  const runDigits = (target: AmountTarget, digits: string) =>
-    applyTo(target, pressDigits(calcOf(target), digits))
+  const runDigits = (target: AmountTarget, digits: string) => applyTo(target, pressDigits(calcOf(target), digits))
   const runBackspace = (target: AmountTarget) => applyTo(target, pressBackspace(calcOf(target)))
 
-  /** 「半分」「全額」のように値を直接入れるとき。打ちかけの式は捨てる */
-  const setPartnerDirect = (raw: string) => {
-    setPartnerAmount(raw)
-    setPartnerCalc(EMPTY_CALC)
-  }
-
   // 入力中の1件が残高に与える影響額を親に通知(残高カードの見込み表示用)。
-  // 分割中は内訳の負担分の合計で見る(機能096 は各行が負担分を持つ)
-  useEffect(() => {
-    if (!onPartnerImpactChange) return
-    if (!isExpense) {
-      // 預かり・返金・調整も残高を動かす (機能012)。
-      // 「押す前に結果が見える」ことが安全装置なので、支出と同じ経路で親に伝える。
-      // 影響額の決め方は partnerSettlement.ts の純粋関数に任せる(保存後の残高とずれない)
-      const magnitude = Number.isFinite(amountNum) && amountNum > 0 ? amountNum : 0
-      onPartnerImpactChange(
-        settlementImpact({ type, amount: isAdjust ? adjustSign * magnitude : magnitude })
-      )
-      return
-    }
-    if (splitting && splitParts) {
-      const sum = splitParts.reduce((s, p) => s + (Number.isFinite(p.partnerAmount) ? p.partnerAmount : 0), 0)
-      onPartnerImpactChange(-sum)
-      return
-    }
-    const owed = partnerNum
-    const paid = Number.isFinite(partnerPaidNum) ? partnerPaidNum : 0
-    const impact = paid - (Number.isFinite(owed) && owed > 0 ? owed : 0)
-    onPartnerImpactChange(Number.isFinite(impact) ? impact : 0)
-  }, [
-    isExpense,
-    partnerNum,
-    partnerPaidNum,
-    splitting,
-    splitParts,
-    onPartnerImpactChange,
-    // 預かり・返金・調整の見込み表示に効く(支出では使われない)
-    type,
-    isAdjust,
+  // 「押す前に結果が見える」ことが安全装置。決め方は transactionDraft.ts
+  const partnerImpact = draftPartnerImpact({
+    ...draft,
     adjustSign,
-    amountNum,
-  ])
-
-  const partnerPaidValid =
-    !isExpense ||
-    payer === 'me' ||
-    (Number.isInteger(partnerPaidNum) && partnerPaidNum > 0 && partnerPaidNum <= amountNum)
-
-  /**
-   * 支払い 0円 を保存してよいか。
-   *
-   * 「全額おごってもらった」「割引券で無料になった」回は、自分が財布から出した額が
-   * 0円 になる。これまでは金額 > 0 が絶対条件で、**そういう回は記録そのものが
-   * 残せなかった**。おごり・値引きが入っているときだけ 0円 を通す。
-   * 理由の無い 0円 は打ち間違いと区別が付かないので、これまでどおり弾く
-   * (DB 側の transactions_amount_check もまったく同じ判断をする)。
-   */
-  const zeroAllowed = isExpense && favor !== null
-
-  // 保存ボタンが押せない理由。**保存できるかの判定はこの1本だけ** —
-  // 理由が無ければ保存できる。以前は「押せるか」と「押せない理由」を別々の
-  // 式で書いていて食い違い、彼女の負担分を電卓でマイナスにすると、ボタンは
-  // 灰色なのに理由が出なかった。条件を足すときは、ここに理由ごと足すこと。
-  //
-  // 灰色になるだけでは、初めての人は何が足りないのか分からない。最初に
-  // 引っかかった1つだけを言う。分割の内訳・彼女が払った額・マイナスの金額は、
-  // それぞれの欄の近くにもう理由が出ているが、ボタンの近くにも同じことを
-  // 短く出す(画面の外にあることが多い)
-  const saveBlockedReason: string | null =
-    !splitting && isExpense && category === null
-      ? 'カテゴリを選んでください'
-      : amountNum < 0
-        ? '金額がマイナスになっています(電卓の計算を見直してください)'
-        : !Number.isInteger(amountNum) || (amountNum === 0 && !zeroAllowed)
-          ? '金額を入れてください'
-          : isExpense && withPartner && (!Number.isInteger(partnerNum) || partnerNum < 0)
-            ? '彼女の負担分がマイナスになっています(電卓の計算を見直してください)'
-            : isExpense && withPartner && partnerNum > amountNum
-              ? '彼女の負担分が支払い金額を超えています'
-              : !partnerPaidValid
-                ? payer === 'both' && partnerPaidNum <= 0
-                  ? '彼女が払った額を入れてください'
-                  : '彼女が払った額が支払い金額を超えています'
-                : // 分割中は内訳が完全に揃っていることが保存の条件。
-                  // ここを緩めると支出の合計と預かり残高が静かにずれる
-                  splitting && !(splitValidation?.ok ?? false)
-                  ? '分割の内訳がそろっていません(内訳の欄の下を見てください)'
-                  : null
-  const valid = saveBlockedReason === null
+    splitPartnerAmounts: splitParts?.map((p) => p.partnerAmount) ?? [],
+  })
+  useEffect(() => {
+    onPartnerImpactChange?.(partnerImpact)
+  }, [partnerImpact, onPartnerImpactChange])
 
   const dateChips = [
     { label: '今日', value: daysAgoISO(0) },
@@ -841,15 +595,12 @@ export default function TransactionForm({
 
   // 日付は主線の最後にあるので、入力中は画面の外に出ていることがある。
   // 今日でないときだけ、金額のすぐ下に「いつの記録か」を出して不安をなくす(機能053)
-  const dateShortLabel =
-    dateChips.find((c) => c.value === date)?.label ?? formatDate(date)
+  const dateShortLabel = dateChips.find((c) => c.value === date)?.label ?? formatDate(date)
   const dateIsToday = date === daysAgoISO(0)
 
   // 畳んでいる「気分・タグ・分割」の中身を、開かなくても分かるようにする1行
   const optionSummary = [
-    satisfaction !== null
-      ? (SATISFACTION_OPTIONS.find((o) => o.value === satisfaction)?.label ?? '')
-      : '',
+    satisfaction !== null ? (SATISFACTION_OPTIONS.find((o) => o.value === satisfaction)?.label ?? '') : '',
     // おごりは畳んだままでも必ず見えるようにする。相手の名前が入っている記録を
     // 「気分もタグも付いていない普通の1件」に見せてしまうと、書いた意味が薄れる
     favor === null ? '' : favorWhoText(favor),
@@ -870,14 +621,8 @@ export default function TransactionForm({
     // await のあとに focus してもキーボードが出ない
     if (continueAfter && !initial) focusAmount()
     // 保留中の計算があれば評価してから保存する(＝の押し忘れ対策)。画面にも結果を反映
-    if (calc.pendingOp !== null) {
-      setAmount(resolvedAmount)
-      setCalc(EMPTY_CALC)
-    }
-    if (partnerCalc.pendingOp !== null) {
-      setPartnerAmount(resolvedPartner)
-      setPartnerCalc(EMPTY_CALC)
-    }
+    if (amountField.state.pendingOp !== null) amountField.setDirect(amountField.resolved)
+    if (partnerField.state.pendingOp !== null) partnerField.setDirect(partnerField.resolved)
     setBusy(true)
     setError(null)
     try {
@@ -915,11 +660,11 @@ export default function TransactionForm({
           setStreak((n) => n + 1)
           setLastSavedAmount(amountNum)
           // 保存の間に別の要素へフォーカスが移っていても金額欄に戻す
-          amountRef.current?.focus({ preventScroll: true })
+          keypad.amountRef.current?.focus({ preventScroll: true })
         } else {
           setStreak(0)
           setOptionsOpen(false)
-          setKeypadOpen(false)
+          keypad.setOpen(false)
           // 「保存して続ける」だけが日付とカテゴリを残す(README の約束)。
           // 「記録する」で残すと、昨日の分を入れたあとの次の1件が、
           // 気付かないまま昨日の日付・同じカテゴリで保存される
@@ -937,6 +682,8 @@ export default function TransactionForm({
     }
   }
 
+  const stepNo = (n: number) => (isExpense ? n : undefined)
+
   return (
     <div className="form-col">
       {/* 機能096: 分割された記録であることを編集画面で明示する。
@@ -953,199 +700,58 @@ export default function TransactionForm({
           (「開く」という操作が縦の流れに割り込むため)。機能051 の
           「カテゴリを先に選ぶ」はそのまま、その次にお店を挟んだ形 */}
       {isExpense && (
-        <div className="form-step">
-          <label className="field">
-            <span className="step-label">
-              <span className="step-no" aria-hidden="true">
-                1
-              </span>
-              カテゴリ
-            </span>
-          </label>
-          <div className="category-grid">
-            {categories.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                className={`category-chip ${category === c.id ? 'selected' : ''}`}
-                onClick={() => chooseCategory(c.id)}
-              >
-                <CategoryVisualBadge visual={visualFromEmojiValue(c.emoji)} size={34} />
-                {c.label}
-              </button>
-            ))}
-          </div>
-          {autoCategory !== null && category === autoCategory && (
-            <p className="muted auto-category-note">
-              {autoRivals.length > 0
-                ? `このお店は「${[autoCategory, ...autoRivals]
-                    .map(categoryLabel)
-                    .join('」「')}」で使っています。とりあえず「${categoryLabel(
-                    autoCategory
-                  )}」にしました(違うときは上から選び直してください)`
-                : `このお店でいちばん多い「${categoryLabel(
-                    autoCategory
-                  )}」にしました(違うときは選び直してください)`}
-            </p>
-          )}
-        </div>
+        <CategoryStep
+          categories={categories}
+          category={category}
+          onChoose={chooseCategory}
+          autoCategory={autoCategory}
+          autoRivals={autoRivals}
+        />
       )}
 
-      {/* 2. お店。ここが入力の主役 —
-          選んだカテゴリで過去に使ったお店を並べ、1タップで選ぶだけで済ませる。
-          候補の出どころ(取引履歴 + 学習内容)と並び順は storePicker.ts を参照。
-          候補に無い店は下の欄に打てばよく、保存時に学習されるので次から候補に出る
-          (学習は InputTab の learnFromInput → rememberStoreCategory が担う)。
-          打った店名から カテゴリ を当てる既存の動き(機能067/075)は、
-          この欄の onBlur と候補リストにそのまま残してある */}
       {isExpense && (
-        <div className="field store-field form-step">
-          <span className="step-label">
-            <span className="step-no" aria-hidden="true">
-              2
-            </span>
-            お店(任意)
-          </span>
-          {storeOptions.length > 0 && (
-            <div className="store-chips" role="group" aria-label="お店の候補">
-              {/* 一覧に無い店(打ったばかり・カテゴリを選び直した後)も選択中だと分かるように出す */}
-              {store.trim() !== '' && !storeInOptions && (
-                <button
-                  type="button"
-                  className="store-chip selected"
-                  aria-pressed={true}
-                  onClick={() => chooseStore(store)}
-                >
-                  {store.trim()}
-                </button>
-              )}
-              {storeOptions.map((o) => (
-                <button
-                  key={o.storeKey}
-                  type="button"
-                  className={`store-chip${isSameStore(o.storeName, store) ? ' selected' : ''}`}
-                  aria-pressed={isSameStore(o.storeName, store)}
-                  onClick={() => chooseStore(o.storeName)}
-                >
-                  {o.storeName}
-                </button>
-              ))}
-            </div>
-          )}
-          <input
-            type="text"
-            aria-label="お店"
-            placeholder={storeOptions.length > 0 ? '一覧に無いお店はここに入力' : '例: セブンイレブン'}
-            value={store}
-            autoComplete="off"
-            onChange={(e) => setStore(e.target.value)}
-            onFocus={() => setStoreFocused(true)}
-            onBlur={() => {
-              setStoreFocused(false)
-              // 候補を選ばずに打ち切った場合も、同じ店名を知っていればカテゴリを補う
-              applyLearnedCategory(store, category)
-            }}
-          />
-          {category === null && (
-            <p className="muted store-hint">
-              カテゴリを選ぶと、そのカテゴリで使ったお店が並びます
-            </p>
-          )}
-          {category !== null && storeOptions.length === 0 && (
-            <p className="muted store-hint">
-              このカテゴリのお店はまだありません。入れておくと次から1タップで選べます
-            </p>
-          )}
-          {/* 機能067/075: 店名を打っている途中の候補(カテゴリをまたいで探す)。
-              こちらは「店 → カテゴリ」の経路で、カテゴリがまだ空のときだけカテゴリも入る */}
-          {suggestions.length > 0 && (
-            <ul className="store-suggestions">
-              {suggestions.map((s) => {
-                // 表示するカテゴリと、選んだときに入るカテゴリを必ず一致させる。
-                // どちらも「その店でいちばん多く使ったカテゴリ」(履歴が無い店だけ学習内容)
-                const guess = guessStoreCategory(storeIndex, s.storeName)
-                const guessed = guess?.category ?? s.category
-                return (
-                  <li key={s.storeKey}>
-                    <button
-                      type="button"
-                      className="store-suggestion"
-                      // blur より先に確定させたいので mousedown/pointerdown で拾う
-                      onPointerDown={(e) => {
-                        e.preventDefault()
-                        setStore(s.storeName)
-                        setStoreFocused(false)
-                        // すでに選んでいるカテゴリは上書きしない。
-                        // カテゴリ → お店 の順に進む流れで、あとから店を選んだだけで
-                        // カテゴリが勝手に変わると、選んだつもりの分類で残らない
-                        if (category === null) {
-                          setCategory(guessed)
-                          setAutoCategory(guessed)
-                          setAutoRivals(guess?.rivals ?? [])
-                        }
-                      }}
-                    >
-                      <span className="store-suggestion-name">{s.storeName}</span>
-                      <span className="store-suggestion-cat">{categoryLabel(guessed)}</span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </div>
+        <StoreStep
+          store={store}
+          onStoreChange={setStore}
+          category={category}
+          storeOptions={storeOptions}
+          suggestions={suggestions}
+          storeIndex={storeIndex}
+          onChooseStore={chooseStore}
+          onFocus={() => setStoreFocused(true)}
+          onBlur={() => {
+            setStoreFocused(false)
+            // 候補を選ばずに打ち切った場合も、同じ店名を知っていればカテゴリを補う
+            applyLearnedCategory(store, category)
+          }}
+          onPickSuggestion={(name, guessed, rivals) => {
+            setStore(name)
+            setStoreFocused(false)
+            // すでに選んでいるカテゴリは上書きしない。
+            // カテゴリ → お店 の順に進む流れで、あとから店を選んだだけで
+            // カテゴリが勝手に変わると、選んだつもりの分類で残らない
+            if (category === null) setAutoGuess(guessed, rivals)
+          }}
+        />
       )}
 
-      {/* 機能012: 調整の向き。編集シートから開いたときもここで直せる */}
-      {isAdjust && (
-        <div className="field">
-          <span>どちらに直しますか</span>
-          {/* 残高の向きを決める2択。すぐ上の種類チップ(settle-mode)と同じ見た目・
-              同じ 16px にそろえる — 押し間違いがそのまま残高の符号になる操作なので、
-              他のチップより小さくしない */}
-          <div className="settle-modes" role="group" aria-label="調整の向き">
-            <button
-              type="button"
-              className={`settle-mode${adjustSign === 1 ? ' selected' : ''}`}
-              aria-pressed={adjustSign === 1}
-              onClick={() => setAdjustSign(1)}
-            >
-              残高を増やす
-            </button>
-            <button
-              type="button"
-              className={`settle-mode${adjustSign === -1 ? ' selected' : ''}`}
-              aria-pressed={adjustSign === -1}
-              onClick={() => setAdjustSign(-1)}
-            >
-              残高を減らす
-            </button>
-          </div>
-        </div>
-      )}
+      {isAdjust && <AdjustSignField sign={adjustSign} onChange={setAdjustSign} />}
 
       {/* 3. 金額。桁区切り(050)は AmountTextInput、電卓は AmountCalcBar、
           自前テンキー(052)は下の AmountKeypad */}
       <div className="field form-step">
-        <span className="step-label">
-          {isExpense && (
-            <span className="step-no" aria-hidden="true">
-              3
-            </span>
-          )}
-          {AMOUNT_LABEL[type]}
-        </span>
+        <StepLabel no={stepNo(3)}>{AMOUNT_LABEL[type]}</StepLabel>
         <div className="amount-row">
           <AmountTextInput
-            inputRef={amountRef}
+            inputRef={keypad.amountRef}
             className={`amount-input ${amountNum < 0 ? 'negative' : ''}`}
             ariaLabel={AMOUNT_LABEL[type]}
             /* テンキー使用中も readOnly にはしない — 貼り付け・選択を殺さず、
                OS のキーボードだけを呼ばないようにする */
-            inputMode={keypadEnabled ? 'none' : 'numeric'}
+            inputMode={keypad.enabled ? 'none' : 'numeric'}
             placeholder="0"
-            value={amount}
-            onChange={setAmount}
+            value={amountField.input}
+            onChange={amountField.setInput}
             onFocus={() => {
               if (silentFocusRef.current) return
               openKeypadFor('amount')
@@ -1154,19 +760,14 @@ export default function TransactionForm({
             // onFocus が来ないので、タップでも開けるようにしておく
             onClick={() => openKeypadFor('amount')}
           />
-          <button
-            type="button"
-            className="amount-clear"
-            aria-label="金額をクリア"
-            onClick={() => runClear('amount')}
-          >
+          <button type="button" className="amount-clear" aria-label="金額をクリア" onClick={() => runClear('amount')}>
             C
           </button>
         </div>
         {/* テンキーを開いている間は同じ演算子が下に出るので、＋ − × ＝ は畳む */}
         <AmountCalcBar
-          state={calcState}
-          showKeys={!keypadOpen}
+          state={amountField.state}
+          showKeys={!keypad.open}
           onOperator={(op) => runOperator('amount', op)}
           onEquals={() => runEquals('amount')}
           onPercent={() => runPercent('amount')}
@@ -1177,20 +778,20 @@ export default function TransactionForm({
         />
       </div>
 
-      {keypadEnabled && keypadOpen && (
+      {keypad.enabled && keypad.open && (
         <AmountKeypad
           pending={(() => {
-            const { pendingValue, pendingOp } = calcOf(keypadTarget)
+            const { pendingValue, pendingOp } = calcOf(keypad.target)
             return pendingOp !== null && pendingValue !== null ? { value: pendingValue, op: pendingOp } : null
           })()}
-          targetLabel={keypadTargetLabel(keypadTarget)}
-          onDigits={(digits) => runDigits(keypadTarget, digits)}
-          onBackspace={() => runBackspace(keypadTarget)}
-          onOperator={(op) => runOperator(keypadTarget, op)}
-          onEquals={() => runEquals(keypadTarget)}
-          onClear={() => runClear(keypadTarget)}
+          targetLabel={keypadTargetLabel(keypad.target)}
+          onDigits={(digits) => runDigits(keypad.target, digits)}
+          onBackspace={() => runBackspace(keypad.target)}
+          onOperator={(op) => runOperator(keypad.target, op)}
+          onEquals={() => runEquals(keypad.target)}
+          onClear={() => runClear(keypad.target)}
           onDone={() => {
-            setKeypadOpen(false)
+            keypad.setOpen(false)
             // フォーカスが金額欄に残ったままだと、もう一度タップしても開き直せない
             if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
           }}
@@ -1201,7 +802,7 @@ export default function TransactionForm({
           金額のすぐ下にも出しておく — カレンダーから始めた入力(機能053)で
           「いつの記録なのか」が画面の外に行ったままにならないように */}
       {!dateIsToday && (
-        <p className="date-lead" aria-live="polite" ref={dateLeadRef}>
+        <p className="date-lead" aria-live="polite" ref={keypad.dateLeadRef}>
           この記録は <strong>{dateShortLabel}</strong> で保存されます(日付は下で変えられます)
         </p>
       )}
@@ -1209,20 +810,10 @@ export default function TransactionForm({
       {/* 4. メモ / 彼女の分。ここまでで1件の中身が決まる */}
       <label className="field form-step">
         {/* 調整だけは「なぜ直したか」が記録の本体なので、任意のメモではなく理由として聞く */}
-        <span className="step-label">
-          {isExpense && (
-            <span className="step-no" aria-hidden="true">
-              4
-            </span>
-          )}
+        <StepLabel no={stepNo(4)}>
           {isAdjust ? '理由(あとで見返すために書いておくと安心です)' : 'メモ(任意)'}
-        </span>
-        <input
-          type="text"
-          placeholder={MEMO_PLACEHOLDER[type]}
-          value={memo}
-          onChange={(e) => setMemo(e.target.value)}
-        />
+        </StepLabel>
+        <input type="text" placeholder={MEMO_PLACEHOLDER[type]} value={memo} onChange={(e) => setMemo(e.target.value)} />
       </label>
 
       {/* 分割中は上段の「彼女の負担分」を出さない (機能096)。
@@ -1231,175 +822,46 @@ export default function TransactionForm({
           引き継いだことは split-notice に出している(黙って捨てない)。
           「分割をやめる」を押せば、入れた値のまま元の欄に戻る */}
       {isExpense && !splitting && (
-        <div className="form-col">
-          {/* 「まとめて払った」ではなく「二人で使った」。
-              下に「支払った人」(機能018)があり、彼女が全額払った回も記録できる。
-              名前が「払った」だと、そのときオンにするのが日本語として変になる。
-              このトグルが言いたいのは「誰が払ったか」ではなく
-              「この支出に彼女の分が入っているか」なので、出来事の側を書く。
-              おごった回もオンにして負担分を 0 にできる(0 は有効な値) */}
-          <button
-            type="button"
-            className={`partner-toggle ${withPartner ? 'on' : ''}`}
-            onClick={() => {
-              // 外すと欄ごと消えるので、打ちかけの式とパッドの行き先も片付ける
-              // (消えた欄に向いたままのパッドで打つと、見えない所に数字が入る)
-              if (withPartner) {
-                setPartnerCalc(EMPTY_CALC)
-                if (keypadTarget === 'partner') {
-                  setKeypadOpen(false)
-                  setKeypadTarget('amount')
-                }
-              }
-              setWithPartner(!withPartner)
-            }}
-          >
-            <span>二人で使った</span>
-            <span className="toggle-check">{withPartner ? '✓' : ''}</span>
-          </button>
-          {withPartner && (
-            <>
-              <div className="field">
-                <span>
-                  彼女の負担分(円)
-                  {/* 彼女が払った回は「差し引かれる」とは限らない(下の支払った人の説明に任せる) */}
-                  {payer === 'me' && ' — 預かり残高から差し引かれます'}
-                </span>
-                {/* 支払い金額と同じ電卓が使える。
-                    「彼女が頼んだ 1,280 と 450」のように、レシートの何行かを
-                    足して負担分を出す場面が多いので、アプリの外の電卓に
-                    行き来しなくて済むようにする。パッドは支払い金額と共有で、
-                    この欄をタップするとこちらに向き直る */}
-                <AmountTextInput
-                  inputRef={partnerRef}
-                  ariaLabel="彼女の負担分"
-                  inputMode={keypadEnabled ? 'none' : 'numeric'}
-                  placeholder="0"
-                  value={partnerAmount}
-                  onChange={setPartnerAmount}
-                  onFocus={() => openKeypadFor('partner')}
-                  onClick={() => openKeypadFor('partner')}
-                />
-                <AmountCalcBar
-                  state={partnerCalcState}
-                  showKeys={!keypadOpen}
-                  fieldLabel="彼女の負担分"
-                  onOperator={(op) => runOperator('partner', op)}
-                  onEquals={() => runEquals('partner')}
-                  onPercent={() => runPercent('partner')}
-                  onApply={(next) => applyTo('partner', next)}
-                />
-              </div>
-              <div className="quick-row">
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  disabled={!amountNum}
-                  onClick={() =>
-                    setPartnerDirect(normalizeAmountInput(String(Math.round(amountNum / 2))))
-                  }
-                >
-                  半分
-                </button>
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  disabled={!amountNum}
-                  onClick={() => setPartnerDirect(normalizeAmountInput(String(amountNum)))}
-                >
-                  全額
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+        <PartnerShareField
+          withPartner={withPartner}
+          onToggle={() => {
+            // 外すと欄ごと消えるので、打ちかけの式とパッドの行き先も片付ける
+            // (消えた欄に向いたままのパッドで打つと、見えない所に数字が入る)
+            if (withPartner) {
+              partnerField.clearPending()
+              if (keypad.target === 'partner') keypad.release()
+            }
+            setWithPartner(!withPartner)
+          }}
+          payer={payer}
+          field={partnerField}
+          inputRef={keypad.partnerRef}
+          keypadEnabled={keypad.enabled}
+          keypadOpen={keypad.open}
+          onOpenKeypad={() => openKeypadFor('partner')}
+          onOperator={(op) => runOperator('partner', op)}
+          onEquals={() => runEquals('partner')}
+          onPercent={() => runPercent('partner')}
+          onApply={(next) => applyTo('partner', next)}
+          amount={amountNum}
+        />
       )}
 
-      {/* 機能018: 誰が払ったか。既定の「自分が全額」は今までの前提そのものなので、
-          触らなければ手数は増えない。彼女の分の続きなので、すぐ下に置く。
-          分割中は使わない(splits.ts の理由を参照) */}
+      {/* 機能018: 誰が払ったか。分割中は使わない(splits.ts の理由を参照) */}
       {isExpense && settlementAvailable && !splitting && (
-        <div className="field">
-          <span>支払った人</span>
-          <div className="payer-row" role="group" aria-label="支払った人">
-            {PAYER_OPTIONS.map((o) => (
-              <button
-                key={o.id}
-                type="button"
-                className={`payer-chip${payer === o.id ? ' selected' : ''}`}
-                aria-pressed={payer === o.id}
-                onClick={() => setPayer(o.id)}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
-          {payer === 'both' && (
-            <>
-              <div className="field">
-                <span>そのうち彼女が払った額(円)</span>
-                <AmountTextInput
-                  ariaLabel="彼女が払った額"
-                  inputMode="numeric"
-                  placeholder="0"
-                  value={partnerPaidInput}
-                  onChange={setPartnerPaidInput}
-                />
-                <AmountTaxKeys
-                  state={{ input: partnerPaidInput, pendingValue: null, pendingOp: null }}
-                  onApply={(next) => setPartnerPaidInput(next.input)}
-                  fieldLabel="彼女が払った額"
-                />
-              </div>
-              {!partnerPaidValid && partnerPaidInput !== '' && (
-                <p className="error-text">彼女が払った額は、支払い金額までにしてください</p>
-              )}
-            </>
-          )}
-          {payer !== 'me' && (
-            <p className="muted payer-note">
-              {`彼女が払った ${yen(partnerPaidNum || 0)} と負担分 ${yen(partnerNum)} の差が、預かり残高に反映されます`}
-            </p>
-          )}
-          {/* 「支払った人」と「二人で使った」は別々のスイッチなので、片方だけ押すと
-              意図と逆に残高が動く。彼女がおごってくれた夕食で「彼女が全額」だけ押し、
-              「二人で使った」を忘れると、総額がまるごと「彼女に返すお金」として
-              残高に足される(彼女の分の差し引きが 0 になるため)。押せなくはしない —
-              「自分ひとりの買い物を彼女が立て替えてくれた」も正しい使い方なので */}
-          {payer !== 'me' && !withPartner && partnerPaidNum > 0 && (
-            <p className="payer-warn" role="note">
-              {`「二人で使った」がオフなので、彼女の負担は 0円 として扱われ、彼女が払った ${yen(partnerPaidNum)} がまるごと預かり残高に足されます。` +
-                '彼女の分も含まれる会計なら、上の「二人で使った」をオンにして負担分を入れてください。'}
-            </p>
-          )}
-        </div>
+        <PayerField
+          payer={payer}
+          onPayer={setPayer}
+          partnerPaidInput={partnerPaidInput}
+          onPartnerPaidInput={setPartnerPaidInput}
+          partnerPaid={partnerPaidNum}
+          partnerPaidValid={partnerPaidValid}
+          partnerAmount={partnerNum}
+          withPartner={withPartner}
+        />
       )}
 
-      {/* 5. 日付。ほとんどの場合は「今日」のままなので、いちばん下にあっても手数は増えない。
-          畳まずに出しているので、選ばれている日はスクロールすれば必ず見える */}
-      <div className="field form-step">
-        <span className="step-label">
-          {isExpense && (
-            <span className="step-no" aria-hidden="true">
-              5
-            </span>
-          )}
-          日付
-        </span>
-        <div className="date-quick">
-          {dateChips.map((c) => (
-            <button
-              key={c.label}
-              type="button"
-              className={`date-chip ${date === c.value ? 'selected' : ''}`}
-              onClick={() => setDate(c.value)}
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-      </div>
+      <DateStep date={date} onDate={setDate} chips={dateChips} stepNo={stepNo(5)} />
 
       {/* 気分(219)・おごり(favors.ts)・タグ(088)・分割(096)。
           毎回は触らないので主線には割り込ませず、日付の下・保存の直前に畳んで置く。
@@ -1433,188 +895,35 @@ export default function TransactionForm({
 
           {optionsOpen && (
             <div className="form-col detail-body">
-              {/* 機能219: 感情スタンプ。1タップで押せて、もう一度押すと未入力に戻せる */}
               {isExpense && satisfactionAvailable && (
-                <div className="field">
-                  <span>この支出の気分(任意)</span>
-                  <div className="stamp-row" role="group" aria-label="この支出の気分">
-                    {SATISFACTION_OPTIONS.map((o) => (
-                      <button
-                        key={o.value}
-                        type="button"
-                        className={`stamp-btn ${satisfaction === o.value ? 'selected' : ''}`}
-                        aria-pressed={satisfaction === o.value}
-                        onClick={() => setSatisfaction(satisfaction === o.value ? null : o.value)}
-                      >
-                        <span className="stamp-emoji" aria-hidden="true">
-                          {o.emoji}
-                        </span>
-                        {o.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                <SatisfactionField value={satisfaction} onChange={setSatisfaction} />
               )}
 
-              {/* おごり・値引き (favors.ts)。
-                  「割引券で無料になった」「ご馳走になった」回を、支出を膨らませずに残す。
-                  既定は選ばれていない状態なので、開いても何も押さなければ従来どおり。
-                  分割中は出さない(浮いた額を内訳に割り振れないため。splits.ts) */}
+              {/* 分割中は出さない(浮いた額を内訳に割り振れないため。splits.ts) */}
               {isExpense && favorAvailable && !splitting && (
-                <div className="field favor-field">
-                  <span>おごり・値引き(任意)</span>
-                  <div className="favor-kinds" role="group" aria-label="おごり・値引き">
-                    {FAVOR_OPTIONS.map((o) => (
-                      <button
-                        key={o.kind}
-                        type="button"
-                        className={`favor-chip${favorKind === o.kind ? ' selected' : ''}`}
-                        aria-pressed={favorKind === o.kind}
-                        onClick={() => {
-                          // もう一度押すと「無し」に戻る(気分スタンプと同じ操作感)。
-                          // 外したときに額と相手も消すのは、選び直したときに
-                          // 前の相手の名前が残っていると事実が入れ替わるため
-                          if (favorKind === o.kind) {
-                            setFavorKind(null)
-                            setFavorAmountInput('')
-                            setFavorFrom('')
-                            return
-                          }
-                          setFavorKind(o.kind)
-                          if (o.kind === 'discount') setFavorFrom('')
-                        }}
-                      >
-                        <span className="favor-chip-emoji" aria-hidden="true">
-                          {o.emoji}
-                        </span>
-                        {o.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {favorKind !== null && (
-                    <>
-                      <div className="field">
-                        <span>
-                          {FAVOR_OPTIONS.find((o) => o.kind === favorKind)?.amountLabel}
-                        </span>
-                        <AmountTextInput
-                          ariaLabel={FAVOR_OPTIONS.find((o) => o.kind === favorKind)?.amountLabel ?? ''}
-                          inputMode="numeric"
-                          placeholder="0"
-                          value={favorAmountInput}
-                          onChange={setFavorAmountInput}
-                        />
-                        {/* 値引き額をそのまま打つ場所なので、
-                            ここにも税込ボタンを置く(電卓はこの欄に無いので ％ は出ない) */}
-                        <AmountTaxKeys
-                          state={{ input: favorAmountInput, pendingValue: null, pendingOp: null }}
-                          onApply={(next) => setFavorAmountInput(next.input)}
-                          fieldLabel="おごり・値引き額"
-                        />
-                      </div>
-
-                      {/* おごってくれた人。**この欄がこの機能の本体**。
-                          誰にご馳走になったかが残っていないと、お礼もお返しもできない。
-                          値引き(相手のいない好意)のときは出さない */}
-                      {favorKind === 'treat' && (
-                        <div className="field">
-                          <span>おごってくれた人(任意・{MAX_FAVOR_FROM_LENGTH}文字まで)</span>
-                          <input
-                            type="text"
-                            aria-label="おごってくれた人"
-                            placeholder="例: 田中 / 部長 / 先輩"
-                            value={favorFrom}
-                            autoComplete="off"
-                            maxLength={MAX_FAVOR_FROM_LENGTH}
-                            onChange={(e) => setFavorFrom(e.target.value)}
-                          />
-                          {treatOptions.length > 0 && (
-                            <div className="tag-chips">
-                              {treatOptions.map((name) => (
-                                <button
-                                  key={name}
-                                  type="button"
-                                  className={`tag-chip${favorFrom === name ? ' is-on' : ''}`}
-                                  onClick={() => setFavorFrom(favorFrom === name ? '' : name)}
-                                >
-                                  {name}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* 「本来いくらで、自分はいくら払うのか」を保存する前に読めるようにする。
-                          目隠し (機能169) 中は金額を伏せる */}
-                      {favor !== null && (
-                        <p className="favor-notice" aria-live="polite">
-                          {maskAmountsIn(favorNoticeText(favor, amountNum > 0 ? amountNum : 0))}
-                        </p>
-                      )}
-                      {favor === null && (
-                        <p className="muted">
-                          金額を入れると、この記録に付きます(1円以上)
-                        </p>
-                      )}
-                    </>
-                  )}
-                </div>
+                <FavorField
+                  kind={favorKind}
+                  onKind={setFavorKind}
+                  amountInput={favorAmountInput}
+                  onAmountInput={setFavorAmountInput}
+                  from={favorFrom}
+                  onFrom={setFavorFrom}
+                  // おごってくれた人の候補。過去の記録から、最近ご馳走になった順に出す
+                  // (毎回打ち直させると「田中 / 田中さん」と揺れて、人ごとの集計が割れてしまう)
+                  treatOptions={treatFromOptions(knownTransactions ?? [])}
+                  favor={favor}
+                  paidAmount={amountNum}
+                />
               )}
 
-              {/* 機能088: タグ。付けたい人だけが開く「詳細」の中に置く */}
               {taggingAvailable && (
-                <div className="field tag-field">
-                  <span>タグ(任意・{MAX_TAGS_PER_TX}個まで)</span>
-                  {tags.length > 0 && (
-                    <div className="tag-chips">
-                      {tags.map((tag) => (
-                        <span key={tag} className="tag-chip is-on">
-                          #{tag}
-                          <button
-                            type="button"
-                            className="tag-chip-remove"
-                            aria-label={`タグ ${tag} を外す`}
-                            onClick={() => setTags(tags.filter((x) => x !== tag))}
-                          >
-                            ✕
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  <input
-                    type="text"
-                    aria-label="タグ"
-                    placeholder="例: 旅行2026 デート(空白で区切る)"
-                    value={tagDraft}
-                    autoComplete="off"
-                    onChange={(e) => setTagDraft(e.target.value)}
-                    onBlur={commitTagDraft}
-                    onKeyDown={(e) => {
-                      // Enter で確定。フォーム送信は起きない(button type=button のため)
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        commitTagDraft()
-                      }
-                    }}
-                  />
-                  {tagSuggestions.length > 0 && (
-                    <div className="tag-chips">
-                      {tagSuggestions.map((s) => (
-                        <button
-                          key={s.tag}
-                          type="button"
-                          className="tag-chip"
-                          onClick={() => setTags(sanitizeTags([...tags, s.tag]))}
-                        >
-                          #{s.tag}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <TagField
+                  tags={tags}
+                  onTags={setTags}
+                  draft={tagDraft}
+                  onDraft={setTagDraft}
+                  knownTransactions={knownTransactions ?? []}
+                />
               )}
 
               {/* 機能096: 分割。入力タブからのみ(編集シートでは各行を個別に直す) */}
@@ -1630,101 +939,28 @@ export default function TransactionForm({
                       カテゴリを分けて記録する
                     </button>
                   ) : (
-                    <div className="split-block">
-                      <p className="muted">
-                        内訳ごとに1件ずつ記録します。上のカテゴリではなく、下の内訳のカテゴリで残ります
-                      </p>
-                      {splitNotice && (
-                        // 目隠し (機能169) 中は、ここに出る金額も伏せる
-                        <p className="split-notice">{maskAmountsIn(splitNotice)}</p>
-                      )}
-                      {splitParts.map((p, i) => (
-                        <div className="split-part" key={i}>
-                          <div className="split-part-head">
-                            <span>内訳 {i + 1}</span>
-                            {splitParts.length > MIN_SPLIT_PARTS && (
-                              <button
-                                type="button"
-                                className="btn-ghost"
-                                onClick={() => {
-                                  releaseSplitTargets()
-                                  setSplitParts(splitParts.filter((_, j) => j !== i))
-                                }}
-                              >
-                                削除
-                              </button>
-                            )}
-                          </div>
-                          <select
-                            className="split-cat-select"
-                            aria-label={`内訳 ${i + 1} のカテゴリ`}
-                            value={p.category ?? ''}
-                            onChange={(e) =>
-                              updatePart(i, { category: e.target.value === '' ? null : e.target.value })
-                            }
-                          >
-                            <option value="">カテゴリを選ぶ</option>
-                            {categories.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {c.label}
-                              </option>
-                            ))}
-                          </select>
-                          {/* 内訳の金額・負担分も、パッドの電卓で足し引きできる。
-                              行が多くなるので ＋ − × ＝ の段は置かず、パッドだけで扱う
-                              (PC では設定でテンキーをオンにすると使える) */}
-                          {(['amount', 'partnerAmount'] as const).map((field) => {
-                            const target = splitTarget(i, field)
-                            return (
-                              <AmountTextInput
-                                key={field}
-                                className="keypad-field"
-                                ariaLabel={`内訳 ${i + 1} の${field === 'amount' ? '金額' : '彼女の負担分'}`}
-                                inputMode={keypadEnabled ? 'none' : 'numeric'}
-                                placeholder={field === 'amount' ? '金額' : '彼女の負担分(任意)'}
-                                value={calcOf(target).input}
-                                onChange={(v) => {
-                                  // 手で打ち直したら、その欄の打ちかけの式は捨てる
-                                  if (splitCalc?.target === target) setSplitCalc(null)
-                                  updatePart(i, { [field]: Number(v || 0) })
-                                }}
-                                onFocus={() => openKeypadFor(target)}
-                                onClick={() => openKeypadFor(target)}
-                              />
-                            )
-                          })}
-                        </div>
-                      ))}
-                      <p
-                        className={`split-remaining${splitValidation && !splitValidation.ok ? ' is-off' : ''}`}
-                        aria-live="polite"
-                      >
-                        内訳の合計 {yen(splitTotal(splitParts))} / 支払い {yen(amountNum || 0)}
-                        {/* 目隠し (機能169) 中は、残りの金額も伏せる。
-                            すぐ上の合計だけ伏せて残額が見えていては意味がない */}
-                        {splitValidation?.message
-                          ? ` — ${maskAmountsIn(splitValidation.message)}`
-                          : ' — そろっています'}
-                      </p>
-                      <div className="split-actions">
-                        <button
-                          type="button"
-                          className="btn-ghost"
-                          disabled={splitParts.length >= MAX_SPLIT_PARTS}
-                          onClick={() =>
-                            setSplitParts([
-                              ...splitParts,
-                              { category: null, amount: 0, partnerAmount: 0 },
-                            ])
-                          }
-                        >
-                          内訳を足す
-                        </button>
-                        <button type="button" className="btn-ghost" onClick={() => closeSplit()}>
-                          分割をやめる
-                        </button>
-                      </div>
-                    </div>
+                    <SplitEditor
+                      parts={splitParts}
+                      categories={categories}
+                      notice={splitNotice}
+                      validation={splitValidation}
+                      amount={amountNum}
+                      keypadEnabled={keypad.enabled}
+                      inputOf={(target) => calcOf(target).input}
+                      onCategory={(i, c) => updatePart(i, { category: c })}
+                      onInput={(i, field, raw) => {
+                        // 手で打ち直したら、その欄の打ちかけの式は捨てる
+                        if (splitCalc?.target === `split:${i}:${field}`) setSplitCalc(null)
+                        updatePart(i, { [field]: Number(raw || 0) })
+                      }}
+                      onOpenKeypad={openKeypadFor}
+                      onRemove={(i) => {
+                        releaseSplitTargets()
+                        setSplitParts(splitParts.filter((_, j) => j !== i))
+                      }}
+                      onAdd={() => setSplitParts([...splitParts, { category: null, amount: 0, partnerAmount: 0 }])}
+                      onClose={closeSplit}
+                    />
                   )}
                 </div>
               )}
@@ -1733,40 +969,14 @@ export default function TransactionForm({
         </div>
       )}
 
-      {/* 旅行モードがオンのときだけ、保存ボタンのすぐ上に「何が付くか」を出す。
-          ここに置くのは、押す直前に必ず目に入る最後の場所だから。
-          同じ行が「この1件だけ外す」の操作も兼ねる — 旅行中でもコンビニで
-          自分用のものを買うことはあり、そのために毎回モードを切る運用は続かない。
-          オフのときは何も描かないので、入力の手数は1タップも増えない */}
+      {/* オフのときは何も描かないので、入力の手数は1タップも増えない */}
       {tripRowVisible && tripMode !== null && (
-        <div
-          className={`trip-tag-row${tripTags.length === 0 ? ' is-off' : ''}`}
-          aria-live="polite"
-        >
-          <span className="trip-tag-row-text">
-            {tripTags.length > 0 ? (
-              <>
-                この記録に <strong>{tripTagsText(tripMode)}</strong> が自動で付きます
-              </>
-            ) : (
-              <>
-                この記録には <strong>{tripTagsText(tripMode)}</strong> を付けません
-              </>
-            )}
-          </span>
-          <button
-            type="button"
-            className="trip-tag-row-btn"
-            aria-pressed={tripTags.length === 0}
-            onClick={() => setTripTagSkipped(!tripTagSkipped)}
-          >
-            {tripTags.length > 0 ? 'この1件だけ外す' : 'やっぱり付ける'}
-          </button>
-        </div>
+        <TripTagRow mode={tripMode} tags={tripTags} onToggleSkip={() => setTripTagSkipped(!tripTagSkipped)} />
       )}
 
       {error && <p className="error-text">{error}</p>}
 
+      {/* 灰色になるだけでは、初めての人は何が足りないのか分からない */}
       {saveBlockedReason && !busy && (
         <p className="save-blocked" aria-live="polite">
           {saveBlockedReason}
