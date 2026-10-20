@@ -56,7 +56,8 @@ import RowActionMenu from './RowActionMenu'
 import BulkCategorySheet from './BulkCategorySheet'
 import BulkTagSheet from './BulkTagSheet'
 import ChangeLogSheet from './ChangeLogSheet'
-import { IconHistory, IconRefresh, IconUndo } from './historyIcons'
+import { IconHistory, IconRefresh } from './historyIcons'
+import UndoDeleteBar from './UndoDeleteBar'
 import '../calendar.css'
 import '../history.css'
 
@@ -676,14 +677,7 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
 
       {/* ---------- 削除直後の「元に戻す」 (機能159) ---------- */}
       {!selectMode && undoTxs && (
-        <div ref={barRef} className="hist-bottom-bar hist-undo-bar" role="status">
-          <span className="hist-bar-text">
-            {undoTxs.length === 1 ? '1件を削除しました' : `${undoTxs.length}件を削除しました`}
-          </span>
-          <button className="hist-bar-undo" onClick={() => void store.undoDelete()}>
-            <IconUndo /> 元に戻す
-          </button>
-        </div>
+        <UndoDeleteBar barRef={barRef} count={undoTxs.length} onUndo={() => void store.undoDelete()} />
       )}
 
       {showPicker && (

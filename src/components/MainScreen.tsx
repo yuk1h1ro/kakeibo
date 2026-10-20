@@ -24,6 +24,7 @@ import TransactionForm, { type DatePrefill } from './TransactionForm'
 import SettingsSheet from './SettingsSheet'
 import QuarantineSheet from './QuarantineSheet'
 import TemplateSaveSheet from './TemplateSaveSheet'
+import UndoDeleteBar from './UndoDeleteBar'
 import { IconCalendar, IconChart, IconGear, IconHeart, IconLogout, IconPen } from './icons'
 import { IconAssets } from './assetIcons'
 import { IconEye, IconEyeOff } from './maskIcons'
@@ -285,6 +286,13 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
         )}
         {activeTab === 'assets' && <AssetsTab supabase={supabase} />}
       </main>
+      {/* 削除直後の「元に戻す」(機能159)。履歴タブは自分で出す(一覧の下に
+          バーの高さぶんの余白を空けるため)。それ以外のタブ — たとえば彼女タブ
+          から開いた編集シートで消したとき — はここで出す。これが無かったころは、
+          確認も取り消しも無いまま消え、彼女にも削除の通知が飛んでいた */}
+      {activeTab !== 'history' && store.undoableDeletes && (
+        <UndoDeleteBar count={store.undoableDeletes.length} onUndo={() => void store.undoDelete()} />
+      )}
       <nav className="tab-bar">
         {tabs.map((t) => (
           <button
