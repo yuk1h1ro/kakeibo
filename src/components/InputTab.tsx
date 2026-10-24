@@ -21,6 +21,7 @@ import { balanceWording, partnerBalance, shouldWarnLowBalance } from '../lib/par
 import { useLowBalanceThreshold } from '../lib/lowBalanceSettings'
 import type { Transaction } from '../lib/types'
 import { withCategory } from '../lib/txActions'
+import { entryKey, frequentEntries, frequentLabel, type FrequentEntry } from '../lib/frequentEntries'
 import type { TransactionInput, useTransactions } from '../hooks/useTransactions'
 import '../ledger.css'
 
@@ -76,6 +77,39 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
     }
     return out
   }, [store.transactions])
+
+  // よく使う記録 (frequentEntries.ts)。同じ内容・同じ金額で何度も入れているものを、
+  // 回数の多い順に。テンプレートと同じものは上のテンプレートに任せて出さない
+  const frequent = useMemo(() => {
+    const templateKeys = new Set(
+      templates.map((t) =>
+        entryKey({
+          category: t.category,
+          store: t.store.trim(),
+          memo: t.memo.trim(),
+          amount: t.amount,
+          partnerAmount: t.partnerAmount > 0 ? t.partnerAmount : 0,
+        })
+      )
+    )
+    return frequentEntries(store.transactions, todayISO(), templateKeys)
+  }, [store.transactions, templates])
+
+  const applyFrequent = (e: FrequentEntry) => {
+    setPrefill((prev) => ({
+      nonce: (prev?.nonce ?? 0) + 1,
+      amount: e.amount,
+      category: e.category,
+      memo: e.memo,
+      store: e.store,
+      partner_amount: e.partnerAmount,
+    }))
+    // 中身はもう全部入っているので、あとは保存するだけ。保存ボタンはフォームの
+    // いちばん下にあるので、そこまで運ぶ(日付も同じ画面に見えるので取り違えに気付ける)
+    requestAnimationFrame(() =>
+      formCardRef.current?.querySelector('.save-row')?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+    )
+  }
 
   const handlePartnerImpactChange = useCallback((n: number) => setPendingPartner(n), [])
 
@@ -184,6 +218,25 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
                 <CategoryVisualBadge visual={resolveCategoryVisual(t.category)} size={28} />
                 <span className="recent-label">{templateLabel(t)}</span>
                 <span className="recent-amount">{yen(t.amount)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* よく使う記録。入力欄の真上に置く — 毎日の定番(電車の区間など)は
+          ここを1回押して「記録する」だけで済ませたいので、スクロールの先に置かない。
+          押すとカテゴリ・お店・メモ・金額・彼女の負担分が入る(日付はそのまま) */}
+      {frequent.length > 0 && (
+        <div className="card">
+          <h2>よく使う記録</h2>
+          <div className="recent-chips">
+            {frequent.map((e) => (
+              <button key={e.key} type="button" className="recent-chip frequent-chip" onClick={() => applyFrequent(e)}>
+                <CategoryVisualBadge visual={resolveCategoryVisual(e.category)} size={28} />
+                <span className="recent-label">{frequentLabel(e, categoryLabel)}</span>
+                <span className="recent-count">{e.count}回</span>
+                <span className="recent-amount">{yen(e.amount)}</span>
               </button>
             ))}
           </div>
