@@ -4,7 +4,7 @@
 import type { SVGProps } from 'react'
 
 /**
- * 線画アイコンの土台。maskIcons / historyIcons / assetIcons からも使う
+ * 線画アイコンの土台。maskIcons / historyIcons からも使う
  * (以前は同じ svg を各ファイルに写していた)。
  * 既定は 22px だが、width/height は後ろの {...rest} で上書きできる。
  */

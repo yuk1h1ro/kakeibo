@@ -33,6 +33,9 @@ const stored = {
   // 凍結したレシート読み取りが置いたまま端末に残っている鍵
   'kakeibo.geminiApiKey': 'AIza...',
   'kakeibo.geminiModel': 'models/gemini-2.0-flash',
+  // 外した資産タブの残高キャッシュ
+  'kakeibo.assets': '[]',
+  'kakeibo.assetBalances': '[]',
   'kakeibo.discordWebhook': 'https://discord.com/api/webhooks/x',
   'kakeibo.savedFilters': '[]',
   'kakeibo.supabaseUrl': 'https://x.supabase.co',
@@ -181,6 +184,13 @@ describe('clearRetiredKeys', () => {
     expect(clearRetiredKeys(storage).sort()).toEqual([...RETIRED_KEYS].sort())
     expect(storage.getItem('kakeibo.geminiApiKey')).toBeNull()
     expect(storage.getItem('kakeibo.geminiModel')).toBeNull()
+  })
+
+  it('外した資産タブの残高キャッシュも消す', () => {
+    const storage = fakeStorage(stored)
+    clearRetiredKeys(storage)
+    expect(storage.getItem('kakeibo.assets')).toBeNull()
+    expect(storage.getItem('kakeibo.assetBalances')).toBeNull()
   })
 
   it('他の kakeibo.* は1つも巻き込まない(接続設定・目隠し・未同期の記録)', () => {

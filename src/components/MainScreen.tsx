@@ -9,7 +9,6 @@ import { initStoreCategories } from '../lib/storeCategories'
 import { generateDueTransactions, initRecurringRules } from '../lib/recurringRules'
 import { initTransactionTemplates, isTemplatesUnavailable } from '../lib/transactionTemplates'
 import { initSatisfaction } from '../lib/satisfaction'
-import { initAssets, isAssetsTabVisible, useAssetsStore } from '../lib/assets'
 import { initDiscordWebhook } from '../lib/discordWebhook'
 import { todayISO } from '../lib/format'
 import { withSatisfaction } from '../lib/txActions'
@@ -19,20 +18,18 @@ import InputTab from './InputTab'
 import HistoryTab, { type StorePrefill } from './HistoryTab'
 import ReportTab from './ReportTab'
 import PartnerTab from './PartnerTab'
-import AssetsTab from './AssetsTab'
 import TransactionForm, { type DatePrefill } from './TransactionForm'
 import SettingsSheet from './SettingsSheet'
 import QuarantineSheet from './QuarantineSheet'
 import TemplateSaveSheet from './TemplateSaveSheet'
 import UndoDeleteBar from './UndoDeleteBar'
 import { IconCalendar, IconChart, IconGear, IconHeart, IconLogout, IconPen } from './icons'
-import { IconAssets } from './assetIcons'
 import { IconEye, IconEyeOff } from './maskIcons'
 import useBodyScrollLock from '../hooks/useBodyScrollLock'
 import '../offline.css'
 import '../settings.css'
 
-type Tab = 'input' | 'history' | 'report' | 'partner' | 'assets'
+type Tab = 'input' | 'history' | 'report' | 'partner'
 
 /**
  * エラーの「原因」と「次の行動」を出す (機能161)。
@@ -68,9 +65,8 @@ const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
   { id: 'partner', label: '彼女', icon: <IconHeart /> },
 ]
 
-// 資産タブ (機能101) は既存4タブの位置を動かさないよう末尾に足す。
-// migration-assets.sql 未実行のときは配列ごと出さない
-const ASSETS_TAB = { id: 'assets' as const, label: '資産', icon: <IconAssets /> }
+// 資産タブ (機能101) は使っていなかったので外した(2026-10)。Supabase の
+// assets / asset_balances テーブルとその中身はそのまま残してある(画面から読まないだけ)
 
 export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
   const store = useTransactions(supabase)
@@ -105,8 +101,6 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
     void initTransactionTemplates(supabase)
     // 感情スタンプの列があるか(migration-satisfaction.sql の実行有無)も同じ扱い
     void initSatisfaction(supabase)
-    // 資産・純資産 (機能101)。テーブルが無ければ資産タブを出さないだけ
-    void initAssets(supabase)
     // Discord の Webhook URL。他の端末で設定・解除した内容をここで取り込み、
     // この端末にしか無かった URL はここでサーバーへ引き上げる。
     // テーブルが無い/通信できないときはキャッシュに触らないので、
@@ -192,11 +186,6 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
   // ここで購読しておけば1回の再描画で画面じゅうの金額が伏字に切り替わる。
   const masked = useAmountMasked()
 
-  // 資産タブの有無 (機能101)。テーブルが無いと分かった時点で選択中でも入力タブへ戻す
-  const assetsStore = useAssetsStore()
-  const assetsVisible = isAssetsTabVisible(assetsStore)
-  const tabs = assetsVisible ? [...TABS, ASSETS_TAB] : TABS
-  const activeTab: Tab = tab === 'assets' && !assetsVisible ? 'input' : tab
 
   return (
     <>
@@ -269,10 +258,10 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
             <ErrorGuide guide={guide} onOpenSettings={() => setShowSettings(true)} />
           </div>
         )}
-        {activeTab === 'input' && (
+        {tab === 'input' && (
           <InputTab store={store} supabase={supabase} datePrefill={datePrefill} />
         )}
-        {activeTab === 'history' && (
+        {tab === 'history' && (
           <HistoryTab
             store={store}
             onEdit={setEditing}
@@ -280,7 +269,7 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
             storePrefill={storePrefill}
           />
         )}
-        {activeTab === 'report' && (
+        {tab === 'report' && (
           <ReportTab
             transactions={store.transactions}
             onSetSatisfaction={setSatisfaction}
@@ -291,23 +280,22 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
             onPickStore={showStoreHistory}
           />
         )}
-        {activeTab === 'partner' && (
+        {tab === 'partner' && (
           <PartnerTab store={store} supabase={supabase} onEdit={setEditing} />
         )}
-        {activeTab === 'assets' && <AssetsTab supabase={supabase} />}
       </main>
       {/* 削除直後の「元に戻す」(機能159)。履歴タブは自分で出す(一覧の下に
           バーの高さぶんの余白を空けるため)。それ以外のタブ — たとえば彼女タブ
           から開いた編集シートで消したとき — はここで出す。これが無かったころは、
           確認も取り消しも無いまま消え、彼女にも削除の通知が飛んでいた */}
-      {activeTab !== 'history' && store.undoableDeletes && (
+      {tab !== 'history' && store.undoableDeletes && (
         <UndoDeleteBar count={store.undoableDeletes.length} onUndo={() => void store.undoDelete()} />
       )}
       <nav className="tab-bar">
-        {tabs.map((t) => (
+        {TABS.map((t) => (
           <button
             key={t.id}
-            className={activeTab === t.id ? 'active' : ''}
+            className={tab === t.id ? 'active' : ''}
             onClick={() => setTab(t.id)}
           >
             <span className="tab-icon">{t.icon}</span>

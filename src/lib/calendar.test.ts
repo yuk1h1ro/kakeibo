@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { WEEKDAY_LABELS, dayOfWeek, daysBetween, daysInMonth, monthEndISO, shiftMonth } from './calendar'
 
-// 統合前は report / netWorth / historyFilter / recurrence / reportYear / calendar が
+// 統合前は report / (資産タブを外す前の netWorth) / historyFilter / recurrence / reportYear / calendar が
 // それぞれ月末日を出していた。各実装が持っていた境界(うるう年・28/29/30/31日・年またぎ)を
 // ここで固定しておき、共通化のあとにずれたら落ちるようにする。
 

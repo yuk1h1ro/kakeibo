@@ -1,7 +1,7 @@
 // 日付の基礎計算と、カレンダー表示用の純粋関数。
 // すべてローカルタイムで処理し、toISOString は使わない(TZずれ防止)。
 //
-// 月末日・曜日・月キーのずらしは report / netWorth / recurrence / historyFilter などに
+// 月末日・曜日・月キーのずらしは report / (資産タブを外す前の netWorth) / recurrence / historyFilter などに
 // 同じ式が散らばっていたので、ここ1箇所に集めた。同じ数字が別々の式から出てくると、
 // 片方だけ直したときに取り違えても気づけず、ずれるのが家計の数字になるため。
 // 循環 import を避けるため、このファイルからは他の lib を import しない。

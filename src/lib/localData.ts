@@ -179,7 +179,8 @@ export function clearSupabaseSession(storage: Storage = localStorage): string[] 
 // 使っているのは本人の iPhone と PC の2台なので、両方で一度起動したことが
 // 分かっていれば、この節(RETIRED_KEYS と clearRetiredKeys、呼び出し元の
 // main.tsx の1行、対応するテスト)をまとめて消してよい。
-// 判断できないときも、消し忘れの害は「毎回 removeItem が2回空振りする」だけ。
+// 判断できないときも、消し忘れの害は「毎回 removeItem が空振りする」だけ。
+// (2026-10 追記)資産タブを外したときの残高キャッシュ2つも同じ扱いで足した。
 //
 // ---- 起動のたびに走っても害がないこと ----
 // やるのは removeItem だけで、無いキーに対しては何も起きない(冪等)。
@@ -188,7 +189,14 @@ export function clearSupabaseSession(storage: Storage = localStorage): string[] 
 // ============================================================
 
 /** もう使わない機能が置いたままにしている、名指しで消すキー */
-export const RETIRED_KEYS: readonly string[] = ['kakeibo.geminiApiKey', 'kakeibo.geminiModel']
+export const RETIRED_KEYS: readonly string[] = [
+  'kakeibo.geminiApiKey',
+  'kakeibo.geminiModel',
+  // 資産タブ (2026-10 に外した) の残高のキャッシュ。口座ごとの残高なので、
+  // 鍵と同じく端末に残しておく理由が無い(本体は Supabase に残っている)
+  'kakeibo.assets',
+  'kakeibo.assetBalances',
+]
 
 /**
  * 役目を終えたキーだけを消す。消したキーを返す。(起動のたびに呼んでよい)
