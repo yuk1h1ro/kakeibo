@@ -97,6 +97,8 @@ export default function ReportTab({
   const [rankExpanded, setRankExpanded] = useState(false)
   const [storeExpanded, setStoreExpanded] = useState(false)
   const [metric, setMetric] = useState<Metric>('average')
+  // その他の分析(曜日・時間帯・タグ・気分など)を開いているか。既定は畳む
+  const [moreOpen, setMoreOpen] = useState(false)
   // スワイプ・月送りの向き。CSS のスライドイン方向に使う(reduced motion 時は CSS 側で無効)
   const [navDir, setNavDir] = useState<'prev' | 'next'>('next')
   // 感情スタンプ (機能219 + 143)
@@ -369,17 +371,6 @@ export default function ReportTab({
                 <PaceCard transactions={transactions} month={month} today={today} />
               )}
 
-              {/* 088 をレポートに通す(日常 / 非日常)。
-                  「旅行を除いた普段の支出はいくらか」は内訳より先に知りたい数字なので、
-                  カテゴリ別の前に置く。tags 列が無い環境では出さない */}
-              {taggingAvailable && (
-                <EverydayCard
-                  transactions={transactions}
-                  range={range}
-                  periodLabel={periodLabel}
-                />
-              )}
-
               <div className="card">
                 <h2>カテゴリ別支出</h2>
                 <CategoryBars
@@ -490,140 +481,176 @@ export default function ReportTab({
                 )}
               </div>
 
-              {/* 088: タグ別の集計と、タグの中のカテゴリ内訳・回ごとの集計。
-                  カテゴリ / お店 と並ぶ「もう1つの切り口」なので、ランキングの直後に置く */}
-              {taggingAvailable && (
-                <TagBreakdownCard
-                  transactions={transactions}
-                  range={range}
-                  periodLabel={periodLabel}
-                  onPickRange={pickRange}
-                  onBulkUpdate={onBulkUpdate}
-                />
-              )}
-
-              {/* 117: 曜日別・時間帯別 */}
-              <div className="card">
-                <h2>曜日別の支出</h2>
-                <div className="seg seg-sm" role="group" aria-label="曜日別・時間帯別の表示単位">
-                  <button
-                    className={metric === 'average' ? 'active' : ''}
-                    aria-pressed={metric === 'average'}
-                    onClick={() => setMetric('average')}
-                  >
-                    1日あたり平均
-                  </button>
-                  <button
-                    className={metric === 'total' ? 'active' : ''}
-                    aria-pressed={metric === 'total'}
-                    onClick={() => setMetric('total')}
-                  >
-                    合計
-                  </button>
-                </div>
-                <VerticalBars ariaLabel="曜日別の支出" data={emphasizeMax(weekdayData)} />
-              </div>
-
-              <div className="card">
-                <h2>時間帯別の支出</h2>
-                {/* 取引は日付しか持たないため、ここだけは「入力した時刻」の代用であることを明記する */}
-                <p className="caveat">
-                  記録した時刻(アプリに入力した時刻)をもとにした目安です。支出した時刻そのものではありません。
-                  {stats.hours.unknownCount > 0 &&
-                    `記録時刻が分からない${stats.hours.unknownCount}件は除いています。`}
-                </p>
-                <VerticalBars ariaLabel="時間帯別の支出(記録時刻ベース)" data={emphasizeMax(hourData)} />
-                <p className="axis-note">横軸は時刻(日本時間・4時間ごと)</p>
-              </div>
-
+              {/* 月ごとの移り変わり。いま見ている月までの6ヶ月 */}
               {mode === 'month' && (
                 <div className="card">
                   <h2>月次推移(直近6ヶ月)</h2>
                   <MonthlyTrend data={trendData} />
                 </div>
               )}
-
-              {/* 129: 粒度切替。期間の選び方に関わらず同じ見方ができるよう両モードで出す */}
-              <GranularityCard transactions={transactions} anchor={bucketAnchor} />
-
-              {/* 113: ヒートマップ。月のカレンダーの形なので月表示のときだけ */}
-              {mode === 'month' && <HeatmapCard transactions={transactions} month={month} />}
-
-              {/* 123: 年のまとめ(既定は畳んである) */}
-              {mode === 'month' && (
-                <YearSummaryCard transactions={transactions} month={month} today={today} />
-              )}
             </>
           )}
 
-          {/* 122 + 081: どちらも選択中の期間に依存しない(登録内容と履歴全体を見る)ので、
-              期間に記録が無いときも出す */}
-          <FixedCostCard />
-          <RecurringSuggestCard transactions={transactions} today={today} />
+          {/* その他の分析。ふだん見るのは上の「合計・ペース・カテゴリ・お店・ランキング・推移」
+              なので、それ以外はここに畳む(消してはいない。開けば今までどおり見られる)。
+              カードが十数枚並んでいて、見たいものを探すのにスクロールが長すぎたため */}
+          <div className="detail-block report-more">
+            <button
+              type="button"
+              className="detail-toggle"
+              aria-expanded={moreOpen}
+              onClick={() => setMoreOpen(!moreOpen)}
+            >
+              <span className="detail-toggle-label">その他の分析</span>
+              <span className="detail-toggle-summary">曜日・時間帯・タグ・気分・固定費 など</span>
+              <span className="detail-toggle-caret" aria-hidden="true">
+                {moreOpen ? '▲' : '▼'}
+              </span>
+            </button>
+          </div>
 
-          {/* おごり・値引き (favors.ts)。ここに出るのは払っていないお金なので、
-              支出のカードと並べず、振り返りの並びに置く。
-              この期間に1件も無ければカード自体が描かれない */}
-          {favorAvailable && (
-            <FavorCard transactions={transactions} range={range} periodLabel={periodLabel} />
-          )}
+          {moreOpen && (
+            <>
+              {!stats.isEmpty && (
+                <>
+                  {/* 088 をレポートに通す(日常 / 非日常)。
+                      「旅行を除いた普段の支出はいくらか」。tags 列が無い環境では出さない */}
+                  {taggingAvailable && (
+                    <EverydayCard
+                      transactions={transactions}
+                      range={range}
+                      periodLabel={periodLabel}
+                    />
+                  )}
 
-          {/* 219 + 143: 感情スタンプの振り返り。既存のカードには手を触れず末尾に足す。
-              曜日は date から正確に出せるが、時間帯は出さない
-              (created_at は「記録した時刻」で、支出した時刻ではないため) */}
-          {satisfactionAvailable &&
-            (stats.satisfaction.stampedCount > 0 || sortTargets.length > 0) && (
-              <div className="card sat-card">
-                <h2>気分の振り返り</h2>
-                {stats.satisfaction.regretCount > 0 ? (
-                  <>
-                    <p className="sat-lead">
-                      {periodLabel}の後悔支出{' '}
-                      <span className="sat-strong">
-                        {stats.satisfaction.regretCount}件・{yen(stats.satisfaction.regretTotal)}
-                      </span>
+                  {/* 088: タグ別の集計と、タグの中のカテゴリ内訳・回ごとの集計 */}
+                  {taggingAvailable && (
+                    <TagBreakdownCard
+                      transactions={transactions}
+                      range={range}
+                      periodLabel={periodLabel}
+                      onPickRange={pickRange}
+                      onBulkUpdate={onBulkUpdate}
+                    />
+                  )}
+
+                  {/* 117: 曜日別・時間帯別 */}
+                  <div className="card">
+                    <h2>曜日別の支出</h2>
+                    <div className="seg seg-sm" role="group" aria-label="曜日別・時間帯別の表示単位">
+                      <button
+                        className={metric === 'average' ? 'active' : ''}
+                        aria-pressed={metric === 'average'}
+                        onClick={() => setMetric('average')}
+                      >
+                        1日あたり平均
+                      </button>
+                      <button
+                        className={metric === 'total' ? 'active' : ''}
+                        aria-pressed={metric === 'total'}
+                        onClick={() => setMetric('total')}
+                      >
+                        合計
+                      </button>
+                    </div>
+                    <VerticalBars ariaLabel="曜日別の支出" data={emphasizeMax(weekdayData)} />
+                  </div>
+
+                  <div className="card">
+                    <h2>時間帯別の支出</h2>
+                    {/* 取引は日付しか持たないため、ここだけは「入力した時刻」の代用であることを明記する */}
+                    <p className="caveat">
+                      記録した時刻(アプリに入力した時刻)をもとにした目安です。支出した時刻そのものではありません。
+                      {stats.hours.unknownCount > 0 &&
+                        `記録時刻が分からない${stats.hours.unknownCount}件は除いています。`}
                     </p>
-                    {stats.satisfaction.worstWeekday && (
-                      <p className="sat-sub">
-                        後悔が多いのは{' '}
-                        <span className="sat-strong">
-                          {stats.satisfaction.worstWeekday.label}曜日
-                        </span>
-                        ({stats.satisfaction.worstWeekday.count}件・
-                        {yen(stats.satisfaction.worstWeekday.total)})
-                      </p>
+                    <VerticalBars ariaLabel="時間帯別の支出(記録時刻ベース)" data={emphasizeMax(hourData)} />
+                    <p className="axis-note">横軸は時刻(日本時間・4時間ごと)</p>
+                  </div>
+
+                  {/* 129: 粒度切替。期間の選び方に関わらず同じ見方ができるよう両モードで出す */}
+                  <GranularityCard transactions={transactions} anchor={bucketAnchor} />
+
+                  {/* 113: ヒートマップ。月のカレンダーの形なので月表示のときだけ */}
+                  {mode === 'month' && <HeatmapCard transactions={transactions} month={month} />}
+
+                  {/* 123: 年のまとめ(既定は畳んである) */}
+                  {mode === 'month' && (
+                    <YearSummaryCard transactions={transactions} month={month} today={today} />
+                  )}
+                </>
+              )}
+
+              {/* 122 + 081: どちらも選択中の期間に依存しない(登録内容と履歴全体を見る)ので、
+                  期間に記録が無いときも出す */}
+              <FixedCostCard />
+              <RecurringSuggestCard transactions={transactions} today={today} />
+
+              {/* おごり・値引き (favors.ts)。ここに出るのは払っていないお金なので、
+                  支出のカードと並べず、振り返りの並びに置く。
+                  この期間に1件も無ければカード自体が描かれない */}
+              {favorAvailable && (
+                <FavorCard transactions={transactions} range={range} periodLabel={periodLabel} />
+              )}
+
+              {/* 219 + 143: 感情スタンプの振り返り。既存のカードには手を触れず末尾に足す。
+                  曜日は date から正確に出せるが、時間帯は出さない
+                  (created_at は「記録した時刻」で、支出した時刻ではないため) */}
+              {satisfactionAvailable &&
+                (stats.satisfaction.stampedCount > 0 || sortTargets.length > 0) && (
+                  <div className="card sat-card">
+                    <h2>気分の振り返り</h2>
+                    {stats.satisfaction.regretCount > 0 ? (
+                      <>
+                        <p className="sat-lead">
+                          {periodLabel}の後悔支出{' '}
+                          <span className="sat-strong">
+                            {stats.satisfaction.regretCount}件・{yen(stats.satisfaction.regretTotal)}
+                          </span>
+                        </p>
+                        {stats.satisfaction.worstWeekday && (
+                          <p className="sat-sub">
+                            後悔が多いのは{' '}
+                            <span className="sat-strong">
+                              {stats.satisfaction.worstWeekday.label}曜日
+                            </span>
+                            ({stats.satisfaction.worstWeekday.count}件・
+                            {yen(stats.satisfaction.worstWeekday.total)})
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="sat-lead">{periodLabel}に「後悔」は付いていません</p>
                     )}
-                  </>
-                ) : (
-                  <p className="sat-lead">{periodLabel}に「後悔」は付いていません</p>
-                )}
 
-                {stats.satisfaction.stampedCount > 0 && (
-                  <ul className="sat-counts">
-                    {SATISFACTION_OPTIONS.map((o) => (
-                      <li key={o.value} className="sat-count">
-                        <span className="sat-count-emoji" aria-hidden="true">
-                          {o.emoji}
-                        </span>
-                        <span className="sat-count-label">{o.label}</span>
-                        <span className="sat-count-value">
-                          {stats.satisfaction.counts[o.value]}件
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                    {stats.satisfaction.stampedCount > 0 && (
+                      <ul className="sat-counts">
+                        {SATISFACTION_OPTIONS.map((o) => (
+                          <li key={o.value} className="sat-count">
+                            <span className="sat-count-emoji" aria-hidden="true">
+                              {o.emoji}
+                            </span>
+                            <span className="sat-count-label">{o.label}</span>
+                            <span className="sat-count-value">
+                              {stats.satisfaction.counts[o.value]}件
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
 
-                {sortTargets.length > 0 && (
-                  <button className="btn-ghost sat-sort-btn" onClick={() => setShowSortSheet(true)}>
-                    まだ気分が付いていない{sortTargets.length}件を仕分ける
-                  </button>
+                    {sortTargets.length > 0 && (
+                      <button className="btn-ghost sat-sort-btn" onClick={() => setShowSortSheet(true)}>
+                        まだ気分が付いていない{sortTargets.length}件を仕分ける
+                      </button>
+                    )}
+                    <p className="caveat">
+                      曜日は記録の日付から出しています。支出した時刻は持っていないため、時間帯は出していません。
+                    </p>
+                  </div>
                 )}
-                <p className="caveat">
-                  曜日は記録の日付から出しています。支出した時刻は持っていないため、時間帯は出していません。
-                </p>
-              </div>
-            )}
+            </>
+          )}
         </div>
       </div>
 

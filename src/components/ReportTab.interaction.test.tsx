@@ -143,3 +143,27 @@ describe('レポートの集計と、飛んだ先の絞り込みのキー', () =
     expect(picked).toEqual(['オカモトセルフ'])
   })
 })
+
+// ============================================================
+// ふだん見るカード(合計・ペース・カテゴリ・お店・ランキング・推移)だけを並べ、
+// それ以外は「その他の分析」に畳む。消してはいないので、開けば今までどおり見られる。
+// ============================================================
+describe('その他の分析', () => {
+  it('ふだん見るカードは最初から出ていて、それ以外は畳まれている', () => {
+    setup()
+    for (const h of ['カテゴリ別支出', 'お店別支出', '支出上位ランキング', '月次推移(直近6ヶ月)']) {
+      expect(screen.getByRole('heading', { name: h })).toBeTruthy()
+    }
+    expect(screen.queryByRole('heading', { name: '曜日別の支出' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: '時間帯別の支出' })).toBeNull()
+    expect(screen.getByRole('button', { name: /その他の分析/ }).getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('開けば、畳んでいたカードが今までどおり見られる', async () => {
+    const { user } = setup()
+    await user.click(screen.getByRole('button', { name: /その他の分析/ }))
+    expect(screen.getByRole('button', { name: /その他の分析/ }).getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('heading', { name: '曜日別の支出' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: '時間帯別の支出' })).toBeTruthy()
+  })
+})
