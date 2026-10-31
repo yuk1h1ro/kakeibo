@@ -52,6 +52,7 @@ import type { TransactionInput } from '../hooks/useTransactions'
 import '../ledger.css'
 import { describeUnknownError } from '../lib/errorGuidance'
 import { isOnlineNow } from '../lib/serverErrors'
+import { revealAboveKeypad } from '../lib/keypadReveal'
 import { keypadTargetLabel, parseSplitTarget, type AmountTarget } from './txform/amountTarget'
 import { useCalcField } from './txform/useCalcField'
 import { useKeypadDock } from './txform/useKeypadDock'
@@ -643,7 +644,14 @@ export default function TransactionForm({
    */
   const focusField = (target: AmountTarget, ref: { current: HTMLInputElement | null }) => {
     openKeypadFor(target)
-    requestAnimationFrame(() => ref.current?.focus({ preventScroll: true }))
+    requestAnimationFrame(() => {
+      const el = ref.current
+      if (!el) return
+      el.focus({ preventScroll: true })
+      // テンキーを開いたときの「欄を見せる」は、この欄が描かれる前に走るので
+      // 支払い金額のほうを見せてしまう。描かれたこの欄を、改めてテンキーの上へ出す
+      revealAboveKeypad(el)
+    })
   }
 
   /** 彼女の負担の入れ方を選ぶ */
@@ -955,7 +963,9 @@ export default function TransactionForm({
       {isExpense && (satisfactionAvailable || favorAvailable) && (
         <div className="field about-expense">
           <span className="about-expense-title">この支出について(任意)</span>
-          {satisfactionAvailable && <SatisfactionField value={satisfaction} onChange={setSatisfaction} />}
+          {satisfactionAvailable && (
+            <SatisfactionField value={satisfaction} onChange={setSatisfaction} showLabel={false} />
+          )}
           {favorAvailable && (
             <FavorField
               kind={favorKind}

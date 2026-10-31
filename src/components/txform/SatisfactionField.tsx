@@ -5,13 +5,16 @@ import type { Satisfaction } from '../../lib/types'
 export default function SatisfactionField({
   value,
   onChange,
+  showLabel = true,
 }: {
   value: Satisfaction | null
   onChange: (value: Satisfaction | null) => void
+  /** 見出しを出すか。「この支出について」の中では、その見出しがあるので出さない */
+  showLabel?: boolean
 }) {
   return (
     <div className="field">
-      <span>この支出の気分(任意)</span>
+      {showLabel && <span>この支出の気分(任意)</span>}
       <div className="stamp-row" role="group" aria-label="この支出の気分">
         {SATISFACTION_OPTIONS.map((o) => (
           <button

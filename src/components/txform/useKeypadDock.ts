@@ -93,7 +93,11 @@ export function useKeypadDock() {
   useEffect(() => {
     if (!open) return
     const active = document.activeElement
-    const field = active instanceof HTMLInputElement ? active : amountRef.current
+    // 欄にフォーカスが無いまま開いた(チップを押した)ときは、支払い金額のときだけ
+    // ここで見せる。「金額…」「おごり」のように押した場で欄が開くときは、その欄が
+    // 描かれてから呼ぶ側が見せる — ここで支払い金額を見せに行くと、2つのスクロールが
+    // 重なって、開いた欄がテンキーの下に残る
+    const field = active instanceof HTMLInputElement ? active : target === 'amount' ? amountRef.current : null
     if (!field) return
     const frame = requestAnimationFrame(() =>
       revealAboveKeypad(field, target === 'amount' ? (amountFollowRef.current ?? dateLeadRef.current) : null)
