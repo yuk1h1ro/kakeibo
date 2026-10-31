@@ -260,6 +260,8 @@ export default function InputTab({ store, supabase, datePrefill }: Props) {
           prefill={prefill}
           datePrefill={datePrefill}
           onPartnerImpactChange={handlePartnerImpactChange}
+          // 「彼女とのお金」のすぐ下に、この1件のあとの残高まで出すため
+          partnerBalance={balance}
           // タグの候補は過去の記録から出す (機能088)
           knownTransactions={store.transactions}
           onSubmit={async (input) => {

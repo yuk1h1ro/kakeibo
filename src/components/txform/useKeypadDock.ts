@@ -19,6 +19,9 @@ export function useKeypadDock() {
   const partnerRef = useRef<HTMLInputElement | null>(null)
   // 支払い金額のすぐ下の「この記録は 昨日 で保存されます」
   const dateLeadRef = useRef<HTMLParagraphElement | null>(null)
+  // 支払い金額の次に押すもの(彼女の負担のチップ)。金額を打ち終えたとき、
+  // これがテンキーの下に隠れていると、続きを探してスクロールすることになる
+  const amountFollowRef = useRef<HTMLDivElement | null>(null)
 
   // テンキーの高さぶんの余白を本文に持たせる(保存ボタンがパッドの下に隠れないように)
   useEffect(() => {
@@ -62,6 +65,9 @@ export function useKeypadDock() {
         el.closest('.keypad-dock') !== null ||
         el.closest('.save-continue') !== null ||
         el.closest('.store-chip') !== null ||
+        // 押すとその場で別の金額欄へテンキーを向け直すチップ(「金額…」「分けて…」
+        // 「おごり」など)。お店のチップと同じ理由で、開けたタップで閉じない
+        el.closest('[data-keeps-keypad]') !== null ||
         el.closest('.percent-block') !== null)
     const onDocumentClick = (e: MouseEvent) => {
       if (keepsOpen(e.target) || keepsOpen(pointerOriginRef.current)) return
@@ -82,14 +88,15 @@ export function useKeypadDock() {
 
   // テンキーを開いた・別の欄へ向け直したら、その欄をテンキーより上に見せる
   // (keypadReveal.ts)。支払い金額のときは、すぐ下の「この記録は 昨日 で
-  // 保存されます」まで見せる — 日付の取り違えに気付ける最後の場所なので
+  // 保存されます」まで見せる — 日付の取り違えに気付ける最後の場所なので。
+  // 次に押す「彼女の負担」の段があれば、そこまで見せる(日付の一行はその上にある)
   useEffect(() => {
     if (!open) return
     const active = document.activeElement
     const field = active instanceof HTMLInputElement ? active : amountRef.current
     if (!field) return
     const frame = requestAnimationFrame(() =>
-      revealAboveKeypad(field, target === 'amount' ? dateLeadRef.current : null)
+      revealAboveKeypad(field, target === 'amount' ? (amountFollowRef.current ?? dateLeadRef.current) : null)
     )
     return () => cancelAnimationFrame(frame)
   }, [open, target])
@@ -103,6 +110,7 @@ export function useKeypadDock() {
     amountRef,
     partnerRef,
     dateLeadRef,
+    amountFollowRef,
     /** タップされた金額欄に向けて開く。無効な端末では何もしない */
     openFor(next: AmountTarget) {
       if (!enabled) return

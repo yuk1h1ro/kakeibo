@@ -16,12 +16,13 @@ import {
 import AmountKeypad from './AmountKeypad'
 import AmountCalcBar from './AmountCalcBar'
 import AmountTextInput from './AmountTextInput'
-import { SATISFACTION_OPTIONS, useSatisfactionAvailable } from '../lib/satisfaction'
-import { buildFavor, favorColumns, favorOf, favorWhoText, treatFromOptions, type FavorKind } from '../lib/favors'
+import { useSatisfactionAvailable } from '../lib/satisfaction'
+import { buildFavor, favorColumns, favorOf, treatFromOptions, type FavorKind } from '../lib/favors'
 import { matchStoreSuggestions, useStoreCategories } from '../lib/storeCategories'
 import { buildStoreIndex, guessStoreCategory, isSameStore, storeOptionsFor } from '../lib/storePicker'
 import type { Satisfaction, Transaction, TransactionType } from '../lib/types'
 import { partnerPaid, satisfactionOf, tagsOf } from '../lib/types'
+import { partnerImpact as impactOf } from '../lib/partnerBalance'
 import { useTxFeature } from '../lib/txExtensions'
 import { parseTagInput } from '../lib/tags'
 import { mergeTripTags, tripAutoTags, useTripMode } from '../lib/tripMode'
@@ -37,11 +38,15 @@ import {
 import {
   draftPartnerImpact,
   initialPayer,
+  initialShareMode,
   isPartnerPaidValid,
   partnerPaidAmount,
+  partnerShareAmount,
   saveBlockedReason as blockedReasonOf,
+  settlementPreview,
   type DraftState,
   type Payer,
+  type ShareMode,
 } from '../lib/transactionDraft'
 import type { TransactionInput } from '../hooks/useTransactions'
 import '../ledger.css'
@@ -54,8 +59,7 @@ import StepLabel from './txform/StepLabel'
 import CategoryStep from './txform/CategoryStep'
 import StoreStep from './txform/StoreStep'
 import AdjustSignField from './txform/AdjustSignField'
-import PartnerShareField from './txform/PartnerShareField'
-import PayerField from './txform/PayerField'
+import PartnerMoneyField, { type CalcActions } from './txform/PartnerMoneyField'
 import DateStep from './txform/DateStep'
 import SatisfactionField from './txform/SatisfactionField'
 import FavorField from './txform/FavorField'
@@ -104,6 +108,11 @@ interface Props {
   onSubmitSplit?: (inputs: TransactionInput[]) => Promise<void>
   /** 任意: タグの候補を出すための既存の記録 (機能088) */
   knownTransactions?: readonly Transaction[]
+  /**
+   * 任意: いまの預かり残高。渡すと「彼女とのお金」の下に、この1件のあとの残高まで出す。
+   * 編集シートでは渡さない(この修正で動く差だけを出す)
+   */
+  partnerBalance?: number
 }
 
 /** 金額欄の見出し。種別ごとに何の金額を打つのかを明示する */
@@ -145,6 +154,7 @@ export default function TransactionForm({
   onPartnerImpactChange,
   onSubmitSplit,
   knownTransactions,
+  partnerBalance,
 }: Props) {
   const type = fixedType ?? initial?.type ?? 'expense'
   const isExpense = type === 'expense'
@@ -165,8 +175,12 @@ export default function TransactionForm({
   const autoDateRef = useRef<string | null>(initial ? null : date)
   const [memo, setMemo] = useState(initial?.memo ?? '')
   const [store, setStore] = useState(initial?.store ?? '')
-  const [withPartner, setWithPartner] = useState((initial?.partner_amount ?? 0) > 0)
-  const partnerField = useCalcField(initial && initial.partner_amount > 0 ? String(initial.partner_amount) : '')
+  // 彼女の負担の入れ方 (なし / 半分 / 全部 / 金額…)。「半分」「全部」は入れ方として覚えるので、
+  // 支払い金額を直せば負担も一緒に追いつく。金額を打つのは「金額…」のときだけ
+  const initialShare: ShareMode =
+    initial && initial.type === 'expense' ? initialShareMode(initial.amount, initial.partner_amount) : 'none'
+  const [shareMode, setShareMode] = useState<ShareMode>(initialShare)
+  const partnerField = useCalcField(initial && initialShare === 'custom' ? String(initial.partner_amount) : '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -177,9 +191,8 @@ export default function TransactionForm({
   // 機能018: 支払った人。既定は「自分が全額」= これまでの前提なので、
   // 何も触らなければ入力の手数はまったく増えない
   const [payer, setPayer] = useState<Payer>(() => initialPayer(initial))
-  const [partnerPaidInput, setPartnerPaidInput] = useState(
-    initial && partnerPaid(initial) > 0 ? String(partnerPaid(initial)) : ''
-  )
+  // 「分けて…」のときの彼女が払った額。支払い金額と同じテンキー・電卓で打つ
+  const partnerPaidField = useCalcField(initial && partnerPaid(initial) > 0 ? String(partnerPaid(initial)) : '')
 
   // 機能088: タグ
   const [tags, setTags] = useState<string[]>(() => (initial ? tagsOf(initial) : []))
@@ -192,10 +205,12 @@ export default function TransactionForm({
   const [favorKind, setFavorKind] = useState<FavorKind | null>(() =>
     initial ? (favorOf(initial)?.kind ?? null) : null
   )
-  const [favorAmountInput, setFavorAmountInput] = useState(() => {
-    const f = initial ? favorOf(initial) : null
-    return f ? String(f.amount) : ''
-  })
+  const favorField = useCalcField(
+    (() => {
+      const f = initial ? favorOf(initial) : null
+      return f ? String(f.amount) : ''
+    })()
+  )
   const [favorFrom, setFavorFrom] = useState(() => (initial ? (favorOf(initial)?.from ?? '') : ''))
 
   // ---- 旅行モード (tripMode.ts) ----
@@ -232,11 +247,12 @@ export default function TransactionForm({
   const satisfactionAvailable = useSatisfactionAvailable()
   const [satisfaction, setSatisfaction] = useState<Satisfaction | null>(initial ? satisfactionOf(initial) : null)
 
-  // 気分・タグ・分割だけを畳む。
-  // 画面の並び(カテゴリ→お店→金額→メモ/彼女の分→日付→保存)は、そのまま
+  // タグ・分割だけを畳む。
+  // 画面の並び(カテゴリ→お店→金額→彼女とのお金→メモ→日付→保存)は、そのまま
   // 指を上から下へ動かす順番なので、主線には折りたたみを一切置かない。
-  // この3つは「毎回は触らないが、触るときは記録の中身が変わる」ものなので、
-  // 主線の最後(日付)の下・保存の直前にまとめて畳んで置く。
+  // 気分とおごりは1タップで済むので「この支出について」として常に出す
+  // (以前は一緒に畳んでいて、開かれることがほとんど無かった)。
+  // タグ(文字入力)と分割(内訳の編集)だけは重いので、保存の直前に畳んで置く。
   // 編集時は「今入っている内容を確かめる」画面なので最初から開く
   const [optionsOpen, setOptionsOpen] = useState(initial !== undefined)
 
@@ -248,6 +264,9 @@ export default function TransactionForm({
   const keypad = useKeypadDock()
   // プログラムからフォーカスするとき、onFocus 経由でテンキーが開くのを抑える印
   const silentFocusRef = useRef(false)
+  // 「分けて…」「おごり」で開く欄(開いたときにフォーカスを移す)
+  const partnerPaidRef = useRef<HTMLInputElement | null>(null)
+  const favorRef = useRef<HTMLInputElement | null>(null)
 
   // 店名からのカテゴリ自動選択(機能067+075)
   const learned = useStoreCategories()
@@ -370,6 +389,8 @@ export default function TransactionForm({
   useEffect(() => {
     amountField.clearPending()
     partnerField.clearPending()
+    partnerPaidField.clearPending()
+    favorField.clearPending()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial])
 
@@ -406,8 +427,10 @@ export default function TransactionForm({
     amountField.setInput(prefill.amount > 0 ? String(prefill.amount) : '')
     setMemo(prefill.memo)
     setStore(prefill.store)
-    setWithPartner(prefill.partner_amount > 0)
-    partnerField.setInput(prefill.partner_amount > 0 ? String(prefill.partner_amount) : '')
+    // 負担は入れ方として読み戻す(半分なら「半分」。金額を直せば追いつく)
+    const share = initialShareMode(prefill.amount, prefill.partner_amount)
+    setShareMode(share)
+    partnerField.setInput(share === 'custom' ? String(prefill.partner_amount) : '')
     // カテゴリ無しで店名だけ入ってくる場合も、手入力と同じ経路でカテゴリを補う
     setCategory(prefill.category)
     if (prefill.category === null && prefill.store !== '') {
@@ -429,13 +452,14 @@ export default function TransactionForm({
 
   // ＝ の押し忘れに備え、保留中の計算を評価した値を「確定した金額」として扱う
   const amountNum = Number(amountField.resolved)
-  // 彼女の負担分も、＝ の押し忘れは保留中の計算を評価した値で扱う。
+  // 彼女の負担。「金額…」で打つ欄も、＝ の押し忘れは保留中の計算を評価した値で扱う。
   // 保存される額・残高の見込み・「支払い金額を超えていないか」の判定が
   // すべてこの1つの値を見るので、どこか1か所だけ式のまま、ということが起きない
-  const partnerNum = withPartner ? Number(partnerField.resolved || 0) : 0
+  const withPartner = isExpense && shareMode !== 'none'
+  const partnerNum = isExpense ? partnerShareAmount(shareMode, amountNum, partnerField.resolved) : 0
 
   // 機能018: 彼女が実際に払った額
-  const partnerPaidNum = partnerPaidAmount(type, payer, amountNum, partnerPaidInput)
+  const partnerPaidNum = partnerPaidAmount(type, payer, amountNum, partnerPaidField.resolved)
 
   // 機能096: 分割中か。編集シート(onSubmitSplit 無し)では分割しない
   const splitting = splitParts !== null
@@ -448,7 +472,7 @@ export default function TransactionForm({
    * (splitNotice。黙って捨てない)。
    */
   const favor =
-    isExpense && favorAvailable && !splitting ? buildFavor(favorKind, Number(favorAmountInput || 0), favorFrom) : null
+    isExpense && favorAvailable && !splitting ? buildFavor(favorKind, Number(favorField.resolved || 0), favorFrom) : null
 
   const splitValidation = splitting ? validateSplit(splitParts, amountNum) : null
 
@@ -514,7 +538,7 @@ export default function TransactionForm({
     amountField.setDirect('')
     setMemo('')
     setStore('')
-    setWithPartner(false)
+    setShareMode('none')
     partnerField.setDirect('')
     // 彼女の負担分の欄は閉じるので、パッドは支払い金額へ戻す
     keypad.setTarget('amount')
@@ -522,11 +546,11 @@ export default function TransactionForm({
     setAutoRivals([])
     setSatisfaction(null)
     setPayer('me')
-    setPartnerPaidInput('')
+    partnerPaidField.setDirect('')
     setTags([])
     setTagDraft('')
     setFavorKind(null)
-    setFavorAmountInput('')
+    favorField.setDirect('')
     setFavorFrom('')
     releaseSplitTargets()
     setSplitParts(null)
@@ -543,6 +567,16 @@ export default function TransactionForm({
   // 欄ごとに「入力中の文字列」と「保留中の式」を持ち、ここで取り替えるだけ。
   // 行き先は必ず呼び出し側が名指しする — 省略できるようにすると、
   // onClick にそのまま渡したときにイベントが行き先として紛れ込む
+  /** 分割の内訳以外の金額欄。行き先ごとに電卓つきの欄を1つずつ持つ(内訳は calcOf / applyTo が先に扱う) */
+  const fieldOf = (target: AmountTarget) =>
+    target === 'partner'
+      ? partnerField
+      : target === 'partnerPaid'
+        ? partnerPaidField
+        : target === 'favor'
+          ? favorField
+          : amountField
+
   const calcOf = (target: AmountTarget): CalcState => {
     const split = parseSplitTarget(target)
     if (split) {
@@ -552,7 +586,7 @@ export default function TransactionForm({
       const value = part[split.field]
       return { input: value !== 0 ? String(value) : '', pendingValue: null, pendingOp: null }
     }
-    return target === 'partner' ? partnerField.state : amountField.state
+    return fieldOf(target).state
   }
 
   const applyTo = (target: AmountTarget, next: CalcState) => {
@@ -564,7 +598,7 @@ export default function TransactionForm({
       updatePart(split.index, { [split.field]: Number(resolveForSubmit(next).input || 0) })
       return
     }
-    ;(target === 'partner' ? partnerField : amountField).apply(next)
+    fieldOf(target).apply(next)
   }
 
   const runOperator = (target: AmountTarget, op: CalcOp) => applyTo(target, pressOperator(calcOf(target), op))
@@ -587,6 +621,74 @@ export default function TransactionForm({
     onPartnerImpactChange?.(partnerImpact)
   }, [partnerImpact, onPartnerImpactChange])
 
+  // 「彼女とのお金」のすぐ下に出す、押す前の結果。直すときは、この修正で動く差だけ
+  const preview = settlementPreview({
+    impact: partnerImpact,
+    balance: partnerBalance,
+    originalImpact: initial ? impactOf(initial) : undefined,
+  })
+
+  /** 電卓の操作(「金額…」「分けて…」「おごり」の欄が OS キーボードのときに使う) */
+  const calcActions: CalcActions = {
+    operator: runOperator,
+    equals: runEquals,
+    percent: runPercent,
+    apply: applyTo,
+  }
+
+  /**
+   * 開いたばかりの欄へテンキーを向け、フォーカスを移す。
+   * 欄はこの押下で描かれるので、描かれたあと(次の描画)に移す。
+   * テンキーが無効な端末では OS のキーボードがそのまま出る
+   */
+  const focusField = (target: AmountTarget, ref: { current: HTMLInputElement | null }) => {
+    openKeypadFor(target)
+    requestAnimationFrame(() => ref.current?.focus({ preventScroll: true }))
+  }
+
+  /** 彼女の負担の入れ方を選ぶ */
+  const chooseShare = (mode: ShareMode) => {
+    if (mode === 'custom') {
+      // 「半分」などから移ったときは、その額を打ち直しの出発点にする
+      if (shareMode !== 'custom') partnerField.setDirect(partnerNum > 0 ? String(partnerNum) : '')
+      setShareMode('custom')
+      focusField('partner', keypad.partnerRef)
+      return
+    }
+    // 欄が消えるので、打ちかけの式とパッドの行き先も片付ける
+    // (消えた欄に向いたままのパッドで打つと、見えない所に数字が入る)
+    partnerField.clearPending()
+    if (keypad.target === 'partner') keypad.release()
+    setShareMode(mode)
+  }
+
+  /** 払った人を選ぶ */
+  const choosePayer = (next: Payer) => {
+    setPayer(next)
+    if (next === 'both') {
+      focusField('partnerPaid', partnerPaidRef)
+      return
+    }
+    partnerPaidField.clearPending()
+    if (keypad.target === 'partnerPaid') keypad.release()
+  }
+
+  /** おごり・割引を選ぶ / 外す */
+  const chooseFavor = (kind: FavorKind | null) => {
+    if (kind === null) {
+      // 外したときに額と相手も消すのは、選び直したときに
+      // 前の相手の名前が残っていると事実が入れ替わるため
+      setFavorKind(null)
+      favorField.setDirect('')
+      setFavorFrom('')
+      if (keypad.target === 'favor') keypad.release()
+      return
+    }
+    setFavorKind(kind)
+    if (kind === 'discount') setFavorFrom('')
+    focusField('favor', favorRef)
+  }
+
   const dateChips = [
     { label: '今日', value: daysAgoISO(0) },
     { label: '昨日', value: daysAgoISO(1) },
@@ -598,15 +700,8 @@ export default function TransactionForm({
   const dateShortLabel = dateChips.find((c) => c.value === date)?.label ?? formatDate(date)
   const dateIsToday = date === daysAgoISO(0)
 
-  // 畳んでいる「気分・タグ・分割」の中身を、開かなくても分かるようにする1行
-  const optionSummary = [
-    satisfaction !== null ? (SATISFACTION_OPTIONS.find((o) => o.value === satisfaction)?.label ?? '') : '',
-    // おごりは畳んだままでも必ず見えるようにする。相手の名前が入っている記録を
-    // 「気分もタグも付いていない普通の1件」に見せてしまうと、書いた意味が薄れる
-    favor === null ? '' : favorWhoText(favor),
-    tags.length > 0 ? tags.map((t) => `#${t}`).join(' ') : '',
-    splitting ? '分割中' : '',
-  ]
+  // 畳んでいる「タグ・分割」の中身を、開かなくても分かるようにする1行
+  const optionSummary = [tags.length > 0 ? tags.map((t) => `#${t}`).join(' ') : '', splitting ? '分割中' : '']
     .filter((s) => s !== '')
     .join('・')
 
@@ -621,8 +716,9 @@ export default function TransactionForm({
     // await のあとに focus してもキーボードが出ない
     if (continueAfter && !initial) focusAmount()
     // 保留中の計算があれば評価してから保存する(＝の押し忘れ対策)。画面にも結果を反映
-    if (amountField.state.pendingOp !== null) amountField.setDirect(amountField.resolved)
-    if (partnerField.state.pendingOp !== null) partnerField.setDirect(partnerField.resolved)
+    for (const f of [amountField, partnerField, partnerPaidField, favorField]) {
+      if (f.state.pendingOp !== null) f.setDirect(f.resolved)
+    }
     setBusy(true)
     setError(null)
     try {
@@ -807,68 +903,89 @@ export default function TransactionForm({
         </p>
       )}
 
-      {/* 4. メモ / 彼女の分。ここまでで1件の中身が決まる */}
+      {/* 4. 彼女とのお金。「彼女の負担」と「払った人」を同じ形の2行で聞き、
+          預かり残高がどう動くかをすぐ下に出す (PartnerMoneyField)。
+          金額のすぐ下に置くのは、金額を打ち終えた指でそのまま押せるようにするため
+          (テンキーを開いたときも、この段までテンキーの上に見せる)。
+          分割中は出さない (機能096)。分割では内訳ごとの負担分だけが保存されるので、
+          ここを残すと「入れたのに効かない欄」になる。開いたときに値を内訳へ引き継ぎ、
+          引き継いだことは split-notice に出している(黙って捨てない)。
+          「分割をやめる」を押せば、入れた値のまま戻る */}
+      {isExpense && !splitting && (
+        <PartnerMoneyField
+          stepNo={stepNo(4)}
+          rowRef={keypad.amountFollowRef}
+          shareMode={shareMode}
+          onShareMode={chooseShare}
+          shareAmount={partnerNum}
+          customField={partnerField}
+          customRef={keypad.partnerRef}
+          payerAvailable={settlementAvailable}
+          payer={payer}
+          onPayer={choosePayer}
+          paidField={partnerPaidField}
+          paidRef={partnerPaidRef}
+          partnerPaidValid={partnerPaidValid}
+          keypadEnabled={keypad.enabled}
+          onOpenKeypad={openKeypadFor}
+          calc={calcActions}
+          preview={preview}
+        />
+      )}
+      {isExpense && splitting && (
+        <div className="field form-step">
+          <StepLabel no={stepNo(4)}>彼女とのお金</StepLabel>
+          <p className="muted">分割中は、下の内訳ごとに彼女の負担を入れます</p>
+        </div>
+      )}
+
+      {/* 5. メモ。調整だけは「なぜ直したか」が記録の本体なので、任意のメモではなく理由として聞く */}
       <label className="field form-step">
-        {/* 調整だけは「なぜ直したか」が記録の本体なので、任意のメモではなく理由として聞く */}
-        <StepLabel no={stepNo(4)}>
+        <StepLabel no={stepNo(5)}>
           {isAdjust ? '理由(あとで見返すために書いておくと安心です)' : 'メモ(任意)'}
         </StepLabel>
         <input type="text" placeholder={MEMO_PLACEHOLDER[type]} value={memo} onChange={(e) => setMemo(e.target.value)} />
       </label>
 
-      {/* 分割中は上段の「彼女の負担分」を出さない (機能096)。
-          分割では内訳ごとの負担分だけが保存されるので、上段の欄を残すと
-          「入れたのに効かない欄」になる。開いたときに値を内訳へ引き継ぎ、
-          引き継いだことは split-notice に出している(黙って捨てない)。
-          「分割をやめる」を押せば、入れた値のまま元の欄に戻る */}
-      {isExpense && !splitting && (
-        <PartnerShareField
-          withPartner={withPartner}
-          onToggle={() => {
-            // 外すと欄ごと消えるので、打ちかけの式とパッドの行き先も片付ける
-            // (消えた欄に向いたままのパッドで打つと、見えない所に数字が入る)
-            if (withPartner) {
-              partnerField.clearPending()
-              if (keypad.target === 'partner') keypad.release()
-            }
-            setWithPartner(!withPartner)
-          }}
-          payer={payer}
-          field={partnerField}
-          inputRef={keypad.partnerRef}
-          keypadEnabled={keypad.enabled}
-          keypadOpen={keypad.open}
-          onOpenKeypad={() => openKeypadFor('partner')}
-          onOperator={(op) => runOperator('partner', op)}
-          onEquals={() => runEquals('partner')}
-          onPercent={() => runPercent('partner')}
-          onApply={(next) => applyTo('partner', next)}
-          amount={amountNum}
-        />
+      <DateStep date={date} onDate={setDate} chips={dateChips} stepNo={stepNo(6)} />
+
+      {/* この支出について — 気分(219)・おごり(favors.ts)。どちらも1タップで済むので畳まない。
+          保存ボタンの直前に置くのは、指が必ず通る場所だから(気分は振り返りなので最後に聞く)。
+          既定はどちらも選ばれていないので、触らなければ手数は1タップも増えない */}
+      {isExpense && (satisfactionAvailable || favorAvailable) && (
+        <div className="field about-expense">
+          <span className="about-expense-title">この支出について(任意)</span>
+          {satisfactionAvailable && <SatisfactionField value={satisfaction} onChange={setSatisfaction} />}
+          {favorAvailable && (
+            <FavorField
+              kind={favorKind}
+              onKind={chooseFavor}
+              amountField={favorField}
+              amountRef={favorRef}
+              from={favorFrom}
+              onFrom={setFavorFrom}
+              // おごってくれた人の候補。過去の記録から、最近ご馳走になった順に出す
+              // (毎回打ち直させると「田中 / 田中さん」と揺れて、人ごとの集計が割れてしまう)
+              treatOptions={treatFromOptions(knownTransactions ?? [])}
+              favor={favor}
+              paidAmount={amountNum}
+              onPaidWasTotal={() => {
+                const favorAmount = Number(favorField.resolved || 0)
+                amountField.setDirect(String(amountNum - favorAmount))
+              }}
+              // 分割中は付けられない(浮いた額を内訳に割り振れないため。splits.ts)
+              disabled={splitting}
+              keypadEnabled={keypad.enabled}
+              onOpenKeypad={() => openKeypadFor('favor')}
+              calc={calcActions}
+            />
+          )}
+        </div>
       )}
 
-      {/* 機能018: 誰が払ったか。分割中は使わない(splits.ts の理由を参照) */}
-      {isExpense && settlementAvailable && !splitting && (
-        <PayerField
-          payer={payer}
-          onPayer={setPayer}
-          partnerPaidInput={partnerPaidInput}
-          onPartnerPaidInput={setPartnerPaidInput}
-          partnerPaid={partnerPaidNum}
-          partnerPaidValid={partnerPaidValid}
-          partnerAmount={partnerNum}
-          withPartner={withPartner}
-        />
-      )}
-
-      <DateStep date={date} onDate={setDate} chips={dateChips} stepNo={stepNo(5)} />
-
-      {/* 気分(219)・おごり(favors.ts)・タグ(088)・分割(096)。
-          毎回は触らないので主線には割り込ませず、日付の下・保存の直前に畳んで置く。
-          ここだけ折りたたみにしているのは、これらを常時出すと主線の5段が
-          画面2つ分に伸びて「上から下へ指を動かすだけ」で終わらなくなるため。
-          畳んだままでも中身は右側の要約に出る */}
-      {((isExpense && satisfactionAvailable) || taggingAvailable || (isExpense && favorAvailable)) && (
+      {/* タグ(088)・分割(096)。文字を打つ・内訳を組むという重い入力なので、
+          ここだけは畳んで保存の直前に置く。畳んだままでも中身は右側の要約に出る */}
+      {taggingAvailable && (
         <div className="detail-block">
           <button
             type="button"
@@ -876,17 +993,7 @@ export default function TransactionForm({
             aria-expanded={optionsOpen}
             onClick={() => setOptionsOpen(!optionsOpen)}
           >
-            <span className="detail-toggle-label">
-              {[
-                isExpense && satisfactionAvailable ? '気分' : '',
-                // おごりは見出しにも出す。畳まれていることが分からないと、
-                // 「ご馳走になった回をどこに書けばいいのか」が最後まで見つからない
-                isExpense && favorAvailable ? 'おごり' : '',
-                taggingAvailable ? `タグ${isExpense && onSubmitSplit ? '・分割' : ''}` : '',
-              ]
-                .filter((s) => s !== '')
-                .join('・')}
-            </span>
+            <span className="detail-toggle-label">{`＃タグ${isExpense && onSubmitSplit ? '・分割' : ''}`}</span>
             <span className="detail-toggle-summary">{optionSummary}</span>
             <span className="detail-toggle-caret" aria-hidden="true">
               {optionsOpen ? '▲' : '▼'}
@@ -895,27 +1002,6 @@ export default function TransactionForm({
 
           {optionsOpen && (
             <div className="form-col detail-body">
-              {isExpense && satisfactionAvailable && (
-                <SatisfactionField value={satisfaction} onChange={setSatisfaction} />
-              )}
-
-              {/* 分割中は出さない(浮いた額を内訳に割り振れないため。splits.ts) */}
-              {isExpense && favorAvailable && !splitting && (
-                <FavorField
-                  kind={favorKind}
-                  onKind={setFavorKind}
-                  amountInput={favorAmountInput}
-                  onAmountInput={setFavorAmountInput}
-                  from={favorFrom}
-                  onFrom={setFavorFrom}
-                  // おごってくれた人の候補。過去の記録から、最近ご馳走になった順に出す
-                  // (毎回打ち直させると「田中 / 田中さん」と揺れて、人ごとの集計が割れてしまう)
-                  treatOptions={treatFromOptions(knownTransactions ?? [])}
-                  favor={favor}
-                  paidAmount={amountNum}
-                />
-              )}
-
               {taggingAvailable && (
                 <TagField
                   tags={tags}

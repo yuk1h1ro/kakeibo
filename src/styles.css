@@ -276,7 +276,7 @@ textarea:focus {
 .btn-primary,
 .btn-ghost,
 .category-chip,
-.partner-toggle,
+.money-chip,
 .amount-clear,
 .calc-key,
 .date-chip,
@@ -291,7 +291,7 @@ textarea:focus {
 .btn-primary:active:not(:disabled),
 .btn-ghost:active:not(:disabled),
 .category-chip:active,
-.partner-toggle:active,
+.money-chip:active,
 .amount-clear:active,
 .calc-key:active,
 .date-chip:active,
@@ -309,7 +309,7 @@ textarea:focus {
   .btn-primary:active:not(:disabled),
   .btn-ghost:active:not(:disabled),
   .category-chip:active,
-  .partner-toggle:active,
+  .money-chip:active,
   .amount-clear:active,
   .calc-key:active,
   .date-chip:active,
@@ -716,38 +716,6 @@ textarea:focus {
 /* 選択中はアイコンの丸背景にアクセントのリングを重ねて明示 */
 .category-chip.selected .cat-icon {
   box-shadow: 0 0 0 2px var(--accent);
-}
-
-.partner-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px;
-  border-radius: var(--radius-btn);
-  border: 1px solid var(--baseline);
-  width: 100%;
-  font-size: 14px;
-  color: var(--text-primary);
-}
-
-.partner-toggle.on {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.partner-toggle.on .toggle-check {
-  color: var(--accent);
-  font-weight: 700;
-}
-
-.quick-row {
-  display: flex;
-  gap: 8px;
-}
-
-.quick-row .btn-ghost {
-  flex: 1;
-  min-width: 0;
 }
 
 /* ---------- スタットタイル ---------- */
@@ -1649,16 +1617,6 @@ body.keypad-open .modal-sheet {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
-}
-
-/* 「彼女が払った」のに「二人で使った」がオフのときの注意 */
-.payer-warn {
-  margin: 8px 0 0;
-  padding: 8px 10px;
-  border-radius: var(--radius-btn);
-  background: var(--warning-bg);
-  font-size: 13px;
-  line-height: 1.5;
 }
 
 /* 保存した手応え。押した位置から見えるよう、画面の下(タブバーの上)に浮かべる */

@@ -46,9 +46,9 @@ async function typeAmount(user: User, label: string, value: string) {
   await user.type(el, value)
 }
 
-/** 気分・タグ・分割の折りたたみを開く(主線には畳みが無いので、開くのはここだけ) */
+/** タグ・分割の折りたたみを開く(気分とおごりは畳まずに出ているので、開くのはここだけ) */
 async function openOptions(user: User) {
-  await user.click(button(/気分/))
+  await user.click(button(/＃タグ/))
 }
 
 function setup(props: Partial<Parameters<typeof TransactionForm>[0]> = {}) {
@@ -95,9 +95,9 @@ describe('入力フォームが保存する内容', () => {
     const { user, submitted } = setup()
     await user.click(button(/食費/))
     await typeAmount(user, '支払い金額(円)', '1000')
-    await user.click(button('二人で使った'))
+    await user.click(button('金額…'))
     await typeAmount(user, '彼女の負担分', '400')
-    await user.click(button('彼女が全額'))
+    await user.click(button('彼女'))
     await user.click(saveButton())
 
     expect(submitted[0]).toMatchObject({ amount: 1000, partner_amount: 400, partner_paid: 1000 })
@@ -107,7 +107,7 @@ describe('入力フォームが保存する内容', () => {
     const { user, submitted } = setup()
     await user.click(button(/食費/))
     await typeAmount(user, '支払い金額(円)', '3000')
-    await user.click(button('分けて払った'))
+    await user.click(button('分けて…'))
     await typeAmount(user, '彼女が払った額', '1200')
     await user.click(saveButton())
 
@@ -118,7 +118,7 @@ describe('入力フォームが保存する内容', () => {
     const { user, submitted } = setup()
     await user.click(button(/食費/))
     await typeAmount(user, '支払い金額(円)', '1000')
-    await user.click(button('分けて払った'))
+    await user.click(button('分けて…'))
     await typeAmount(user, '彼女が払った額', '5000')
 
     expect(saveButton().disabled).toBe(true)
@@ -130,7 +130,7 @@ describe('入力フォームが保存する内容', () => {
     const { user } = setup()
     await user.click(button(/食費/))
     await typeAmount(user, '支払い金額(円)', '1000')
-    await user.click(button('二人で使った'))
+    await user.click(button('金額…'))
     await typeAmount(user, '彼女の負担分', '3000')
 
     expect(saveButton().disabled).toBe(true)
@@ -167,7 +167,7 @@ describe('入力フォームが保存する内容', () => {
     const { user, submitted } = setup()
     await user.click(button(/食費/))
     await typeAmount(user, '支払い金額(円)', '1000')
-    await user.click(button('彼女が全額'))
+    await user.click(button('彼女'))
     await user.click(saveButton())
 
     // 「記録する」はカテゴリを残さない(残すのは「保存して続ける」だけ)
@@ -194,7 +194,7 @@ describe('入力フォームが保存する内容', () => {
 describe('おごり・値引き', () => {
   /** 開いている「詳細」の中で、おごり(または割引)を押す */
   async function pickFavor(user: User, name: RegExp) {
-    const kinds = within(screen.getByRole('group', { name: 'おごり・値引き' }))
+    const kinds = within(screen.getByRole('group', { name: 'おごり・割引' }))
     await user.click(kinds.getByRole('button', { name }))
   }
 
@@ -208,7 +208,7 @@ describe('おごり・値引き', () => {
     const { user, submitted } = setup()
     await user.click(button(/食費/))
     // 金額欄には何も打たない(自分は1円も払っていない)
-    await chooseFavor(user, /おごってもらった/)
+    await chooseFavor(user, /おごり/)
     await typeAmount(user, 'おごってもらった額(円)', '3200')
     await user.type(field('おごってくれた人'), '田中')
     expect(saveButton().disabled).toBe(false)
@@ -226,7 +226,7 @@ describe('おごり・値引き', () => {
 
   it('カテゴリを選ばないと、おごりでも保存できない(何をご馳走になったかを残すため)', async () => {
     const { user } = setup()
-    await chooseFavor(user, /おごってもらった/)
+    await chooseFavor(user, /おごり/)
     await typeAmount(user, 'おごってもらった額(円)', '3200')
     expect(saveButton().disabled).toBe(true)
   })
@@ -235,7 +235,7 @@ describe('おごり・値引き', () => {
     const { user, submitted } = setup()
     await user.click(button(/食費/))
     await typeAmount(user, '支払い金額(円)', '1000')
-    await chooseFavor(user, /おごってもらった/)
+    await chooseFavor(user, /おごり/)
     await typeAmount(user, 'おごってもらった額(円)', '2200')
     await user.click(saveButton())
 
@@ -247,7 +247,7 @@ describe('おごり・値引き', () => {
     const { user, submitted } = setup()
     await user.click(button(/食費/))
     await typeAmount(user, '支払い金額(円)', '2500')
-    await chooseFavor(user, /割引・ポイント/)
+    await chooseFavor(user, /割引/)
     await typeAmount(user, '安くなった額(円)', '500')
     expect(screen.queryByLabelText('おごってくれた人')).toBeNull()
     await user.click(saveButton())
@@ -264,19 +264,19 @@ describe('おごり・値引き', () => {
     const { user } = setup()
     await user.click(button(/食費/))
     // 種類だけ選んで額を入れない = おごりとして成立していない
-    await chooseFavor(user, /おごってもらった/)
+    await chooseFavor(user, /おごり/)
     expect(saveButton().disabled).toBe(true)
   })
 
   it('もう一度押すと外れ、外したら 0円 では保存できなくなる', async () => {
     const { user } = setup()
     await user.click(button(/食費/))
-    await chooseFavor(user, /おごってもらった/)
+    await chooseFavor(user, /おごり/)
     await typeAmount(user, 'おごってもらった額(円)', '3200')
     expect(saveButton().disabled).toBe(false)
 
     // 「詳細」は開いたまま、同じチップをもう一度押す
-    await pickFavor(user, /おごってもらった/)
+    await pickFavor(user, /おごり/)
     expect(saveButton().disabled).toBe(true)
   })
 
@@ -284,7 +284,7 @@ describe('おごり・値引き', () => {
     // 残ると、覚えのない「田中さんのおごり」が静かに増えていく
     const { user, submitted } = setup()
     await user.click(button(/食費/))
-    await chooseFavor(user, /おごってもらった/)
+    await chooseFavor(user, /おごり/)
     await typeAmount(user, 'おごってもらった額(円)', '3200')
     await user.type(field('おごってくれた人'), '田中')
     await user.click(saveButton())
@@ -310,6 +310,52 @@ describe('おごり・値引き', () => {
     await user.click(saveButton())
 
     expect(submitted[0]).toMatchObject({ favor_amount: 0, favor_kind: null, favor_from: '' })
+  })
+
+  it('気分とおごりは、何も開かずにそのまま押せる', async () => {
+    // 以前は「気分・おごり・タグ・分割」の折りたたみの中にあり、開かれることがほとんど無かった
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '1000')
+    const stamps = within(screen.getByRole('group', { name: 'この支出の気分' }))
+    await user.click(stamps.getByRole('button', { name: /満足/ }))
+    await pickFavor(user, /割引/)
+    await typeAmount(user, '安くなった額(円)', '200')
+    await user.click(saveButton())
+    expect(submitted[0]).toMatchObject({ satisfaction: 'good', favor_kind: 'discount', favor_amount: 200 })
+  })
+
+  it('支払い金額に会計の合計を打っていたら、1タップで自分の支払いに直せる', async () => {
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '3000')
+    await pickFavor(user, /おごり/)
+    await typeAmount(user, 'おごってもらった額(円)', '2000')
+    await user.click(button(/会計の合計だった/))
+    expect(field('支払い金額(円)').value).toBe('1,000')
+    await user.click(saveButton())
+    expect(submitted[0]).toMatchObject({ amount: 1000, favor_amount: 2000, favor_kind: 'treat' })
+  })
+
+  it('直しを押さなければ、支払い金額はそのまま(自分が出した額として保存する)', async () => {
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '3000')
+    await pickFavor(user, /おごり/)
+    await typeAmount(user, 'おごってもらった額(円)', '2000')
+    await user.click(saveButton())
+    expect(submitted[0]).toMatchObject({ amount: 3000, favor_amount: 2000 })
+  })
+
+  it('分割中はおごり・割引を押せない(浮いた額を内訳に割り振れないため)', async () => {
+    const { user } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '3000')
+    await openOptions(user)
+    await user.click(button('カテゴリを分けて記録する'))
+    const kinds = within(screen.getByRole('group', { name: 'おごり・割引' }))
+    expect((kinds.getByRole('button', { name: /おごり/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText('分割中は、おごり・割引は付けられません')).toBeTruthy()
   })
 })
 
@@ -462,9 +508,9 @@ describe('分割を開いたときの引き継ぎ (機能096)', () => {
     const { user } = ctx
     await user.click(button(/食費/))
     await typeAmount(user, '支払い金額(円)', '3000')
-    await user.click(button('二人で使った'))
+    await user.click(button('金額…'))
     await typeAmount(user, '彼女の負担分', '1000')
-    await user.click(button('彼女が全額'))
+    await user.click(button('彼女'))
     await openOptions(user)
     await user.click(button('カテゴリを分けて記録する'))
     return ctx
@@ -571,12 +617,12 @@ describe('編集フォームが開いたときの初期値', () => {
 
   it('彼女が全額払った記録を開くと「彼女が全額」が選ばれている', () => {
     renderEdit(tx({ partner_paid: 2000 }))
-    expect(button('彼女が全額').getAttribute('aria-pressed')).toBe('true')
+    expect(button('彼女').getAttribute('aria-pressed')).toBe('true')
   })
 
   it('分けて払った記録を開くと「分けて払った」と、その額が入っている', () => {
     renderEdit(tx({ partner_paid: 1200 }))
-    expect(button('分けて払った').getAttribute('aria-pressed')).toBe('true')
+    expect(button('分けて…').getAttribute('aria-pressed')).toBe('true')
     expect(field('彼女が払った額').value).toBe('1,200')
   })
 
@@ -684,12 +730,12 @@ describe('支出の残高への影響額の通知 (機能018)', () => {
     )
     await user.click(button(/食費/))
     await typeAmount(user, '支払い金額(円)', '1000')
-    await user.click(button('二人で使った'))
+    await user.click(button('金額…'))
     await typeAmount(user, '彼女の負担分', '400')
     expect(impacts[impacts.length - 1]).toBe(-400)
 
     // 彼女が全額(¥1,000)払い、負担は ¥400 → 残高は +¥600 動く
-    await user.click(button('彼女が全額'))
+    await user.click(button('彼女'))
     expect(impacts[impacts.length - 1]).toBe(600)
   })
 })
@@ -831,7 +877,7 @@ describe('税込にする', () => {
     const { user, submitted } = setup()
     await user.click(button(/食費/))
     await typeAmount(user, amountLabel, '2200')
-    await user.click(button('二人で使った'))
+    await user.click(button('金額…'))
     await typeAmount(user, '彼女の負担分', '1000')
     await user.click(button('彼女の負担分を税込にする(10%)'))
     expect(field('彼女の負担分').value).toBe('1,100')
@@ -1001,7 +1047,7 @@ describe('彼女の負担分の電卓', () => {
   async function openPartner(user: User, amount = '3000') {
     await user.click(button(/食費/))
     await typeAmount(user, amountLabel, amount)
-    await user.click(button('二人で使った'))
+    await user.click(button('金額…'))
   }
 
   it('足し算で負担分を出せる(＝を押し忘れても確定してから保存する)', async () => {
@@ -1047,7 +1093,7 @@ describe('彼女の負担分の電卓', () => {
     await typeAmount(user, amountLabel, '2000')
     await user.click(button('足す'))
     await typeAmount(user, amountLabel, '1000')
-    await user.click(button('二人で使った'))
+    await user.click(button('金額…'))
     await typeAmount(user, partnerLabel, '500')
     await user.click(saveButton())
 
@@ -1116,17 +1162,30 @@ describe('彼女の負担分の電卓', () => {
       expect(field(partnerLabel).value).toBe('5')
     })
 
-    it('「二人で使った」を外したら、彼女の負担分に向いたパッドは閉じる', async () => {
+    it('負担を「なし」に戻したら、彼女の負担分に向いたパッドは閉じる', async () => {
       setKeypadPreference('on')
       const { user } = setup()
       await openPartner(user)
       await user.click(field(partnerLabel))
       expect(keypad()).not.toBeNull()
 
-      // オンの間は名前に ✓ が付く
-      await user.click(button(/二人で使った/))
+      await user.click(button('なし'))
       // 消えた欄に向いたまま打てると、見えない所に数字が入る
       expect(keypad()).toBeNull()
+    })
+
+    it('「金額…」を押すと、その場でパッドが負担の欄に向く(テンキーを開いたままでも)', async () => {
+      setKeypadPreference('on')
+      const { user } = setup()
+      await user.click(button(/食費/))
+      await user.click(field(amountLabel))
+      await user.click(padKey('5'))
+      await user.click(padKey('0'))
+      await user.click(padKey('0'))
+      await user.click(button('金額…'))
+      // 開けたのと同じタップでパッドが閉じない
+      expect(keypad()).not.toBeNull()
+      expect(within(keypad()!).getByText('彼女の負担分に入力中')).toBeTruthy()
     })
   })
 })
@@ -1155,7 +1214,7 @@ describe('分割の内訳の電卓', () => {
     const { user } = ctx
     await user.click(button(/食費/))
     await typeAmount(user, '支払い金額(円)', '3000')
-    await user.click(button('二人で使った'))
+    await user.click(button('金額…'))
     await typeAmount(user, '彼女の負担分', '1000')
     await openOptions(user)
     await user.click(button('カテゴリを分けて記録する'))
@@ -1341,7 +1400,7 @@ describe('保存できない理由', () => {
     const { user } = setup()
     await user.click(button(/食費/))
     await typeAmount(user, '支払い金額(円)', '1280')
-    await user.click(button('二人で使った'))
+    await user.click(button('金額…'))
     await typeAmount(user, '彼女の負担分', '2000')
     expect(screen.getByText('彼女の負担分が支払い金額を超えています')).toBeTruthy()
   })
@@ -1357,29 +1416,110 @@ describe('保存できない理由', () => {
 })
 
 // ============================================================
-// 「彼女が払った」のに「二人で使った」がオフ
+// 彼女とのお金 — 「彼女の負担」と「払った人」を2行で選び、結果をすぐ下に出す
 //
-// 別々のスイッチなので、片方だけ押すと意図と逆に残高が動く。
-// 押せなくはしない(自分ひとりの買い物を彼女が立て替えた、も正しい使い方)。
+// 以前は「二人で使った」のスイッチと「支払った人」が別々の場所にあり、
+// 「彼女が全額」だけ押す回を黄色い警告で補っていた。その警告は正しい立て替え
+// (自分の物を彼女が払った)でも出ていた。いまは選んだ場所で結果が読める。
 // ============================================================
-describe('支払った人と「二人で使った」の組み合わせ', () => {
-  it('「彼女が全額」だけで「二人で使った」がオフなら、総額が残高に足されることを知らせる', async () => {
-    const { user } = setup()
+describe('彼女とのお金', () => {
+  it('「半分」「全部」は支払い金額に追いつく(金額を直せば負担も変わる)', async () => {
+    // 以前の「半分」は押した時点の額を写すだけで、4,800→5,800 に直しても 2,400 のままだった
+    const { user, submitted } = setup()
     await user.click(button(/食費/))
-    await typeAmount(user, '支払い金額(円)', '6000')
-    await user.click(button('彼女が全額'))
-    expect(screen.getByText(/まるごと預かり残高に足されます/)).toBeTruthy()
-    // 保存は止めない
-    expect(saveButton().disabled).toBe(false)
+    await typeAmount(user, '支払い金額(円)', '4800')
+    await user.click(button('半分'))
+    await typeAmount(user, '支払い金額(円)', '5800')
+    await user.click(saveButton())
+    expect(submitted[0]).toMatchObject({ amount: 5800, partner_amount: 2900, partner_paid: 0 })
   })
 
-  it('「二人で使った」をオンにすれば、注意は消える', async () => {
-    const { user } = setup()
+  it('「全部」は彼女の物(負担 = 支払い金額)', async () => {
+    const { user, submitted } = setup()
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '1280')
+    await user.click(button('全部'))
+    await user.click(saveButton())
+    expect(submitted[0]).toMatchObject({ amount: 1280, partner_amount: 1280 })
+  })
+
+  it('彼女が立て替えた自分の物(負担なし・彼女が払った)も、警告なしでそのまま記録できる', async () => {
+    const { user, submitted } = setup({ partnerBalance: 21700 })
+    await user.click(button(/食費/))
+    await typeAmount(user, '支払い金額(円)', '1280')
+    await user.click(button('彼女'))
+    // 結果はその場に出る(残高に足される)
+    expect(screen.getByText('預かり残高 +¥1,280(預かり中 ¥21,700 → ¥22,980)')).toBeTruthy()
+    expect(screen.queryByText(/まるごと預かり残高に足されます/)).toBeNull()
+    await user.click(saveButton())
+    expect(submitted[0]).toMatchObject({ amount: 1280, partner_amount: 0, partner_paid: 1280 })
+  })
+
+  it('選ぶたびに、預かり残高がどう動くかがその場で変わる', async () => {
+    const { user } = setup({ partnerBalance: 21700 })
     await user.click(button(/食費/))
     await typeAmount(user, '支払い金額(円)', '6000')
-    await user.click(button('彼女が全額'))
-    await user.click(button('二人で使った'))
-    expect(screen.queryByText(/まるごと預かり残高に足されます/)).toBeNull()
+    expect(screen.getByText('預かり残高は変わりません')).toBeTruthy()
+    await user.click(button('半分'))
+    expect(screen.getByText('預かり残高 -¥3,000(預かり中 ¥21,700 → ¥18,700)')).toBeTruthy()
+    await user.click(button('彼女'))
+    expect(screen.getByText('預かり残高 +¥3,000(預かり中 ¥21,700 → ¥24,700)')).toBeTruthy()
+  })
+
+  it('編集シートでは、この修正で動く差だけを出す', async () => {
+    const user = userEvent.setup()
+    render(
+      <TransactionForm
+        initial={{
+          id: 't1',
+          date: '2026-08-03',
+          type: 'expense',
+          amount: 4800,
+          category: 'food',
+          memo: '',
+          store: '',
+          partner_amount: 2400,
+          partner_paid: 0,
+          created_at: '2026-08-03T01:00:00.000Z',
+        }}
+        submitLabel="更新する"
+        onSubmit={async () => {}}
+      />
+    )
+    // 半分の記録は「半分」として開く
+    expect(button('半分').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByText('この修正では預かり残高は変わりません')).toBeTruthy()
+    await typeAmount(user, '支払い金額(円)', '5800')
+    expect(screen.getByText('この修正で預かり残高 -¥500')).toBeTruthy()
+  })
+
+  it('半分から1円ずれた負担は「金額」のまま開く(開いて保存しただけで書き換えない)', async () => {
+    const submitted: TransactionInput[] = []
+    const user = userEvent.setup()
+    render(
+      <TransactionForm
+        initial={{
+          id: 't1',
+          date: '2026-08-03',
+          type: 'expense',
+          amount: 1001,
+          category: 'food',
+          memo: '',
+          store: '',
+          partner_amount: 500,
+          partner_paid: 0,
+          created_at: '2026-08-03T01:00:00.000Z',
+        }}
+        submitLabel="更新する"
+        onSubmit={async (input) => {
+          submitted.push(input)
+        }}
+      />
+    )
+    expect(button('金額…').getAttribute('aria-pressed')).toBe('true')
+    expect(field('彼女の負担分').value).toBe('500')
+    await user.click(button('更新する'))
+    expect(submitted[0].partner_amount).toBe(500)
   })
 })
 
@@ -1422,7 +1562,7 @@ describe('保存できるかの判定と理由が食い違わない', () => {
     const { user } = setup()
     await user.click(button(/食費/))
     await typeAmount(user, '支払い金額(円)', '1000')
-    await user.click(button('二人で使った'))
+    await user.click(button('金額…'))
     await typeAmount(user, '彼女の負担分', '100')
     await user.click(button('彼女の負担分から引く'))
     await typeAmount(user, '彼女の負担分', '300')
@@ -1432,16 +1572,13 @@ describe('保存できるかの判定と理由が食い違わない', () => {
     expect(screen.getByText(/彼女の負担分がマイナスになっています/)).toBeTruthy()
   })
 
-  it('畳んだ欄の要約でも「田中さんさん」にしない', async () => {
+  it('おごりの説明でも「田中さんさん」にしない', async () => {
     const { user } = setup()
     await user.click(button(/食費/))
-    await openOptions(user)
-    await user.click(button(/おごってもらった/))
+    await user.click(button(/おごり/))
     await typeAmount(user, 'おごってもらった額(円)', '3200')
     await user.type(field('おごってくれた人'), '田中さん')
-    // 畳むと、要約に「田中さんのおごり」と出る
-    await user.click(button(/気分/))
-    expect(document.body.textContent).toContain('田中さんのおごり')
+    expect(document.body.textContent).toContain('田中さん')
     expect(document.body.textContent).not.toContain('さんさん')
   })
 })

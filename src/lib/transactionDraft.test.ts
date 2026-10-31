@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   draftPartnerImpact,
+  initialShareMode,
+  partnerShareAmount,
+  settlementPreview,
   initialPayer,
   isPartnerPaidValid,
   partnerPaidAmount,
@@ -162,5 +165,64 @@ describe('draftPartnerImpact', () => {
     expect(impact({ type: 'partner_refund', amount: 2000 })).toBe(-2000)
     expect(impact({ type: 'partner_adjust', amount: 300, adjustSign: -1 })).toBe(-300)
     expect(impact({ type: 'partner_deposit', amount: NaN })).toBe(0)
+  })
+})
+
+describe('initialShareMode', () => {
+  it('負担が無ければ「なし」、全額なら「全部」', () => {
+    expect(initialShareMode(4800, 0)).toBe('none')
+    expect(initialShareMode(4800, 4800)).toBe('all')
+  })
+
+  it('「半分」と読むのは、今の半分ボタンが出す額とぴったり同じときだけ', () => {
+    expect(initialShareMode(4800, 2400)).toBe('half')
+    expect(initialShareMode(1001, 501)).toBe('half')
+    // 1円ずれた額まで「半分」と読むと、開いて保存しただけで書き換わる
+    expect(initialShareMode(1001, 500)).toBe('custom')
+    expect(initialShareMode(4800, 1200)).toBe('custom')
+  })
+})
+
+describe('partnerShareAmount', () => {
+  it('「半分」「全部」は金額に追いつく(金額を直せば負担も変わる)', () => {
+    expect(partnerShareAmount('half', 4800, '')).toBe(2400)
+    expect(partnerShareAmount('half', 5800, '')).toBe(2900)
+    expect(partnerShareAmount('half', 1001, '')).toBe(501)
+    expect(partnerShareAmount('all', 5800, '')).toBe(5800)
+  })
+
+  it('「なし」は 0、「金額」は打った値', () => {
+    expect(partnerShareAmount('none', 4800, '999')).toBe(0)
+    expect(partnerShareAmount('custom', 4800, '1200')).toBe(1200)
+    expect(partnerShareAmount('custom', 4800, '')).toBe(0)
+  })
+})
+
+describe('settlementPreview', () => {
+  it('新しく入れるときは、今の残高からこの1件のあとまでを出す', () => {
+    expect(settlementPreview({ impact: -2400, balance: 21700 }).text).toBe(
+      '預かり残高 -¥2,400(預かり中 ¥21,700 → ¥19,300)'
+    )
+    expect(settlementPreview({ impact: 3000, balance: 21700 }).text).toBe(
+      '預かり残高 +¥3,000(預かり中 ¥21,700 → ¥24,700)'
+    )
+  })
+
+  it('預かりを使い切る回は、残高カードと同じ言葉で向きが変わったことを出す', () => {
+    expect(settlementPreview({ impact: -2400, balance: 1000 }).text).toBe(
+      '預かり残高 -¥2,400(預かり中 ¥1,000 → 立て替え中(彼女への貸し) ¥1,400)'
+    )
+  })
+
+  it('動かないときはそう言う(既定の「自分が全額・負担なし」)', () => {
+    expect(settlementPreview({ impact: 0, balance: 21700 })).toEqual({
+      changed: false,
+      text: '預かり残高は変わりません',
+    })
+  })
+
+  it('直すときは、この修正で動く差だけを出す', () => {
+    expect(settlementPreview({ impact: -2900, originalImpact: -2400 }).text).toBe('この修正で預かり残高 -¥500')
+    expect(settlementPreview({ impact: -2400, originalImpact: -2400 }).changed).toBe(false)
   })
 })

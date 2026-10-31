@@ -5,7 +5,15 @@
 /** 分割の内訳で、電卓が打ち込める欄 (SplitPart の数値の列) */
 export type SplitField = 'amount' | 'partnerAmount'
 
-export type AmountTarget = 'amount' | 'partner' | `split:${number}:${SplitField}`
+// partnerPaid … 「分けて払った」ときの彼女が払った額
+// favor       … おごり・割引の額
+// (以前はこの2つだけ OS の数字キーボードで、00 キーも電卓も使えなかった)
+export type AmountTarget =
+  | 'amount'
+  | 'partner'
+  | 'partnerPaid'
+  | 'favor'
+  | `split:${number}:${SplitField}`
 
 export const splitTarget = (index: number, field: SplitField): AmountTarget => `split:${index}:${field}`
 
@@ -17,6 +25,8 @@ export function parseSplitTarget(target: AmountTarget): { index: number; field: 
 /** パッドの上に出す「どの欄に入力中か」。支払い金額のときは出さない */
 export function keypadTargetLabel(target: AmountTarget): string | undefined {
   if (target === 'partner') return '彼女の負担分'
+  if (target === 'partnerPaid') return '彼女が払った額'
+  if (target === 'favor') return 'おごり・割引の額'
   const split = parseSplitTarget(target)
   if (split) return `内訳 ${split.index + 1} の${split.field === 'amount' ? '金額' : '彼女の負担分'}`
   return undefined

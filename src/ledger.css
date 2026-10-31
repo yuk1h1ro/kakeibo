@@ -131,37 +131,106 @@
   line-height: 1.5;
 }
 
-/* ---------- 支払った人 (機能018) ---------- */
+/* ---------- 彼女とのお金 (機能018 + 彼女の負担) ---------- */
 
-.payer-row {
+/* 「彼女の負担」と「払った人」を同じ形の2行で並べ、結果をすぐ下に出す */
+.partner-money {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
 }
 
-.payer-chip {
-  flex: 1 1 auto;
-  min-width: 92px;
-  min-height: 44px;
-  padding: 8px 10px;
-  font-size: 15px;
+.money-line {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 見出しはチップの上に置く(横に並べると 320px 幅でチップが入りきらない) */
+.money-line-label {
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
+}
+
+.money-chips {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.money-chip {
+  min-width: 0;
+  min-height: 44px;
+  padding: 6px 4px;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--text-secondary);
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid var(--baseline);
   border-radius: var(--radius-btn);
   cursor: pointer;
 }
 
-.payer-chip.selected {
+.money-chip.selected {
   color: var(--accent);
   background: var(--accent-soft);
   border-color: var(--accent);
 }
 
-.payer-note {
-  margin-top: 6px;
+.money-sub {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.money-sub .muted {
+  margin-left: 4px;
+  font-size: 12px;
+}
+
+/* 押す前の結果。動かないときは控えめに、動くときはアクセントの線で目に入るようにする */
+.settle-preview {
+  margin: 2px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-btn);
+  background: var(--fill);
   font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.settle-preview.is-changed {
+  color: var(--text-primary);
+  font-weight: 600;
+  border-left: 3px solid var(--accent);
+}
+
+/* ---------- この支出について(気分・おごり) ---------- */
+
+.about-expense {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.about-expense-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.favor-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 「支払い金額は会計の合計だった」の1タップの直し。長い文なので折り返して読ませる */
+.favor-fix {
+  white-space: normal;
+  text-align: left;
   line-height: 1.5;
 }
 

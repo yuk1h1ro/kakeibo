@@ -16,6 +16,8 @@
 import type { Transaction, TransactionType } from './types'
 import { partnerPaid } from './types'
 import { settlementImpact } from './partnerSettlement'
+import { balanceWording } from './partnerBalance'
+import { signedYen, yen } from './format'
 
 /**
  * 支払った人 (機能018)。
@@ -143,4 +145,86 @@ export function draftPartnerImpact(
   const paid = Number.isFinite(d.partnerPaid) ? d.partnerPaid : 0
   const impact = paid - owed
   return Number.isFinite(impact) ? impact : 0
+}
+
+// ---------- 彼女の負担の決め方 ----------
+
+/**
+ * 彼女の負担の入れ方。
+ *
+ * 以前は「二人で使った」のスイッチ + 金額欄 + 半分/全額 のボタンで入れていて、
+ * 「半分」はその時点の額を書き写すだけだった(あとで金額を 4,800→5,800 に
+ * 直しても 2,400 のまま)。「半分」「全部」を **入れ方として覚える** ので、
+ * 金額を直せば負担も一緒に追いつく。金額を打つのは「金額…」のときだけ。
+ */
+export type ShareMode = 'none' | 'half' | 'all' | 'custom'
+
+/**
+ * 保存済みの額から入れ方を読み戻す。(純粋関数)
+ * 編集シート・テンプレート・よく使う記録で使う。
+ *
+ * 「半分」と読むのは、今の「半分」が出す額(四捨五入)とぴったり同じときだけ。
+ * 1円ずれた額(1,001円の会計で 500円 と手で打った回など)まで「半分」と読むと、
+ * 開いて保存しただけで 501円 に書き換わってしまう。ずれていれば「金額」のまま残す。
+ */
+export function initialShareMode(amount: number, partnerAmount: number): ShareMode {
+  if (!(partnerAmount > 0)) return 'none'
+  if (partnerAmount === amount) return 'all'
+  if (partnerAmount === Math.round(amount / 2)) return 'half'
+  return 'custom'
+}
+
+/**
+ * 入れ方と支払い金額から、彼女の負担の額を出す。(純粋関数)
+ * 「半分」は四捨五入(これまでの「半分」ボタンと同じ)。
+ * 「金額…」は打った値をそのまま使う(数字になっていなければ 0)。
+ */
+export function partnerShareAmount(mode: ShareMode, amount: number, customInput: string): number {
+  switch (mode) {
+    case 'none':
+      return 0
+    case 'half':
+      return Number.isFinite(amount) ? Math.round(amount / 2) : 0
+    case 'all':
+      return Number.isFinite(amount) ? amount : 0
+    case 'custom':
+      return Number(customInput || 0)
+  }
+}
+
+// ---------- 押す前に見せる「預かり残高がどう動くか」 ----------
+
+/**
+ * 入力中の1件で、預かり残高がどう動くかの1行。(純粋関数)
+ *
+ * 「彼女の負担」と「払った人」は2つの値の組み合わせで残高が決まるので、
+ * 選んだその場で結果を見せる。以前は画面の一番上(入力中は画面の外)にしか
+ * 出ておらず、「…の差が反映されます」という説明だけでは増えるのか減るのかが
+ * 読めなかった。押し忘れを後から警告で補っていたのも、これで要らなくなる。
+ *
+ * - 新しく入れるとき … 今の残高から、この1件のあとの残高まで
+ * - 直すとき(originalImpact あり)… この修正で動く差だけ
+ *   (編集シートには残高が無く、差のほうが知りたいことでもある)
+ * 金額は目隠し (機能169) 中なら伏せる(yen / signedYen が伏せる)。
+ */
+export function settlementPreview(a: {
+  impact: number
+  balance?: number
+  originalImpact?: number
+}): { changed: boolean; text: string } {
+  if (a.originalImpact !== undefined) {
+    const delta = a.impact - a.originalImpact
+    return delta === 0
+      ? { changed: false, text: 'この修正では預かり残高は変わりません' }
+      : { changed: true, text: `この修正で預かり残高 ${signedYen(delta)}` }
+  }
+  if (a.impact === 0) return { changed: false, text: '預かり残高は変わりません' }
+  if (a.balance === undefined) return { changed: true, text: `預かり残高 ${signedYen(a.impact)}` }
+  const before = balanceWording(a.balance)
+  const after = balanceWording(a.balance + a.impact)
+  const afterText = after.title === before.title ? yen(after.magnitude) : `${after.title} ${yen(after.magnitude)}`
+  return {
+    changed: true,
+    text: `預かり残高 ${signedYen(a.impact)}(${before.title} ${yen(before.magnitude)} → ${afterText})`,
+  }
 }

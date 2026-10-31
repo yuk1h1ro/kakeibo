@@ -1,3 +1,4 @@
+import type { MutableRefObject } from 'react'
 import {
   FAVOR_OPTIONS,
   MAX_FAVOR_FROM_LENGTH,
@@ -5,93 +6,109 @@ import {
   type Favor,
   type FavorKind,
 } from '../../lib/favors'
-import { maskAmountsIn } from '../../lib/format'
+import { maskAmountsIn, yen } from '../../lib/format'
 import AmountTaxKeys from '../AmountTaxKeys'
 import AmountTextInput from '../AmountTextInput'
+import type { CalcActions } from './PartnerMoneyField'
+import type { CalcField } from './useCalcField'
+
+/** チップに出す短い名前。長い名前は 320px 幅で語の途中から折り返していた */
+const SHORT_LABEL: Record<FavorKind, string> = { treat: 'おごり', discount: '割引' }
 
 interface Props {
   kind: FavorKind | null
+  /** チップを押した。外したときの片付け(額・相手を消す)は呼ぶ側 */
   onKind: (kind: FavorKind | null) => void
-  /** 浮いた額(数字だけの文字列) */
-  amountInput: string
-  onAmountInput: (raw: string) => void
+  /** 浮いた額の欄(自前テンキーで打つ) */
+  amountField: CalcField
+  amountRef: MutableRefObject<HTMLInputElement | null>
   from: string
   onFrom: (name: string) => void
   /** おごってくれた人の候補(最近ご馳走になった順) */
   treatOptions: readonly string[]
   /** いまの入力から組み立てたおごり・値引き。額が無ければ null */
   favor: Favor | null
-  /** 支払い金額(「本来いくらだったか」の説明に使う) */
+  /** 支払い金額 */
   paidAmount: number
+  /** 「支払い金額は会計の合計だった」ときに、支払いを 合計 − 浮いた額 に直す */
+  onPaidWasTotal: () => void
+  /** 分割中は使えない(浮いた額を内訳に割り振れないため。splits.ts) */
+  disabled: boolean
+  keypadEnabled: boolean
+  onOpenKeypad: () => void
+  calc: CalcActions
 }
 
 /**
- * おごり・値引き (favors.ts)。
- * 「割引券で無料になった」「ご馳走になった」回を、支出を膨らませずに残す。
- * 既定は選ばれていない状態なので、開いても何も押さなければ従来どおり。
+ * おごり・割引 (favors.ts)。「この支出について」の中に、押すだけのチップとして常に出す。
+ *
+ * 以前は気分・タグ・分割と一緒に畳んだ中にあり、ほとんど開かれなかった。
+ * 選ぶまでは1行だけで、選ぶと額と相手の欄が開き、テンキーがその欄へ向く。
+ * 既定は選ばれていない状態なので、触らなければ従来どおりの記録になる。
  */
 export default function FavorField({
   kind,
   onKind,
-  amountInput,
-  onAmountInput,
+  amountField,
+  amountRef,
   from,
   onFrom,
   treatOptions,
   favor,
   paidAmount,
+  onPaidWasTotal,
+  disabled,
+  keypadEnabled,
+  onOpenKeypad,
+  calc,
 }: Props) {
   const option = FAVOR_OPTIONS.find((o) => o.kind === kind)
+  const favorAmount = Number(amountField.resolved || 0)
   return (
-    <div className="field favor-field">
-      <span>おごり・値引き(任意)</span>
-      <div className="favor-kinds" role="group" aria-label="おごり・値引き">
+    <div className="favor-field">
+      <div className="favor-kinds" role="group" aria-label="おごり・割引">
         {FAVOR_OPTIONS.map((o) => (
           <button
             key={o.kind}
             type="button"
             className={`favor-chip${kind === o.kind ? ' selected' : ''}`}
             aria-pressed={kind === o.kind}
-            onClick={() => {
-              // もう一度押すと「無し」に戻る(気分スタンプと同じ操作感)。
-              // 外したときに額と相手も消すのは、選び直したときに
-              // 前の相手の名前が残っていると事実が入れ替わるため
-              if (kind === o.kind) {
-                onKind(null)
-                onAmountInput('')
-                onFrom('')
-                return
-              }
-              onKind(o.kind)
-              if (o.kind === 'discount') onFrom('')
-            }}
+            disabled={disabled}
+            data-keeps-keypad=""
+            onClick={() => onKind(kind === o.kind ? null : o.kind)}
           >
             <span className="favor-chip-emoji" aria-hidden="true">
               {o.emoji}
             </span>
-            {o.label}
+            {SHORT_LABEL[o.kind]}
           </button>
         ))}
       </div>
+      {disabled && <p className="muted">分割中は、おごり・割引は付けられません</p>}
 
-      {kind !== null && (
+      {kind !== null && !disabled && (
         <>
           <div className="field">
             <span>{option?.amountLabel}</span>
             <AmountTextInput
+              inputRef={amountRef}
+              className="keypad-field"
               ariaLabel={option?.amountLabel ?? ''}
-              inputMode="numeric"
+              inputMode={keypadEnabled ? 'none' : 'numeric'}
               placeholder="0"
-              value={amountInput}
-              onChange={onAmountInput}
+              value={amountField.input}
+              onChange={amountField.setInput}
+              onFocus={onOpenKeypad}
+              onClick={onOpenKeypad}
             />
-            {/* 値引き額をそのまま打つ場所なので、
-                ここにも税込ボタンを置く(電卓はこの欄に無いので ％ は出ない) */}
-            <AmountTaxKeys
-              state={{ input: amountInput, pendingValue: null, pendingOp: null }}
-              onApply={(next) => onAmountInput(next.input)}
-              fieldLabel="おごり・値引き額"
-            />
+            {/* 値引き額をそのまま打つ場所なので、OS キーボードのときは税込ボタンも置く */}
+            {!keypadEnabled && (
+              <AmountTaxKeys
+                state={amountField.state}
+                onApply={(next) => calc.apply('favor', next)}
+                fieldLabel="おごり・値引き額"
+              />
+            )}
           </div>
 
           {/* おごってくれた人。**この欄がこの機能の本体**。
@@ -132,6 +149,16 @@ export default function FavorField({
             <p className="favor-notice" aria-live="polite">
               {maskAmountsIn(favorNoticeText(favor, paidAmount > 0 ? paidAmount : 0))}
             </p>
+          )}
+          {/* 支払い金額に「会計の合計(割引前の値段)」を打っていた回のための1タップの直し。
+              支払い金額は「自分が実際に出した額」なので、合計から浮いた額を引く。
+              押さなければ今のまま(支払い金額 = 自分が出した額)として保存する */}
+          {favor !== null && paidAmount > favorAmount && (
+            <button type="button" className="btn-ghost favor-fix" onClick={onPaidWasTotal}>
+              {kind === 'treat'
+                ? `支払い金額 ${yen(paidAmount)} は会計の合計だった → 自分の支払いを ${yen(paidAmount - favorAmount)} に直す`
+                : `支払い金額 ${yen(paidAmount)} は割引前の値段だった → ${yen(paidAmount - favorAmount)} に直す`}
+            </button>
           )}
           {favor === null && <p className="muted">金額を入れると、この記録に付きます(1円以上)</p>}
         </>

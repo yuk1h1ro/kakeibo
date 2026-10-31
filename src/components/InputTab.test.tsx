@@ -84,16 +84,18 @@ describe('入力タブの残高カード (機能011)', () => {
 describe('入力フォームの並び(上から下がそのまま操作の順番)', () => {
   const order = (html: string, needle: string): number => html.indexOf(needle)
 
-  it('カテゴリ → お店 → 金額 → メモ → 日付 → 保存 の順に並ぶ', () => {
+  it('カテゴリ → お店 → 金額 → 彼女とのお金 → メモ → 日付 → この支出について → 保存 の順に並ぶ', () => {
     const html = render([tx()])
     const form = html.slice(html.indexOf('支出を記録'))
     const steps = [
       'カテゴリ',
       'お店(任意)',
       '支払い金額(円)',
+      // 金額を打ち終えた指でそのまま押せるよう、金額のすぐ下
+      '彼女とのお金',
       'メモ(任意)',
-      '二人で使った',
       '日付',
+      'この支出について',
       '記録する',
     ].map((s) => order(form, s))
     expect(steps).toEqual([...steps].sort((a, b) => a - b))
@@ -103,7 +105,7 @@ describe('入力フォームの並び(上から下がそのまま操作の順番
   it('主線(カテゴリ〜日付)は畳まれていない — 「開く」操作が縦の流れに割り込まないこと', () => {
     const html = render([tx()])
     const form = html.slice(html.indexOf('支出を記録'))
-    // 折りたたみは気分・タグ・分割の1枠だけ
+    // 折りたたみはタグ・分割の1枠だけ(気分とおごりは畳まない)
     expect([...form.matchAll(/class="detail-toggle"/g)]).toHaveLength(1)
   })
 
