@@ -4,6 +4,8 @@
 // カレンダー(既存)に、検索145 / スワイプ146 / 長押し149 / 並べ替え150 /
 // 複数選択151 / 条件の保存152 / 引き下げて更新154 / 元に戻す159 /
 // 年月ジャンプ130 / 変更履歴163 を足したもの。
+// さらに「一覧｜カレンダー」の切り替え、月の帯を左右に払う月送り、
+// 未同期の記録の一覧を足している(下の「月の帯」の節)。
 //
 // ---- 操作の優先順位(同じリストの上で重なるので、ここで整理する) ----
 //   0. 複数選択モード中は、行のタップ = チェックの ON/OFF だけ。
@@ -12,9 +14,11 @@
 //   2. 横に十分動いたらスワイプ(左=削除・右=編集)。長押しは取り消す
 //   3. 動かさず押し続けたら長押しメニュー。指を離してもタップは発火しない
 //   4. どれでもなければタップ = 編集シート(これまでどおり)
-//   ※ カレンダーのセルは別の要素で、従来どおりタップだけ。行の操作とは重ならない
-//   ※ 引き下げて更新は「一番上で下に引いたとき」だけ。行のスワイプ(横)とは軸が違う
-//   判定は lib/rowGesture.ts / lib/pullRefresh.ts の純粋関数に集約している。
+//   ※ 月の帯(見出し・合計・カレンダー)の上で横に払うと月が変わる。
+//      帯は明細の行とは別の要素なので、行の左右スワイプ(削除・編集)とは重ならない
+//   ※ 引き下げて更新は「一番上で、横より縦に大きく下へ引いたとき」だけ。
+//      行や帯の横の指とは軸が違う(斜めの指は横の側に渡す: canStartPull)
+//   判定は lib/rowGesture.ts / lib/pullRefresh.ts / lib/swipe.ts の純粋関数に集約している。
 //
 // 削除は確認ダイアログを出さず、消したあとに出る「元に戻す」で取り消す(機能159)。
 // 取り消しもオフラインキュー経由なので、未同期のまま失われることはない。
@@ -34,21 +38,34 @@ import {
 } from '../lib/format'
 import { categoryLabel } from '../lib/categories'
 import type { useTransactions } from '../hooks/useTransactions'
+import { useSwipeNav } from '../hooks/useSwipeNav'
 import { WEEKDAY_LABELS, defaultSelectedDate, monthWeeks, shiftMonth } from '../lib/calendar'
 import {
   DEFAULT_FILTER,
   customRangeActive,
   describeRange,
+  effectivePeriod,
   filterTransactions,
   isFilterActive,
   type HistoryFilter,
+  type HistoryPeriod,
 } from '../lib/historyFilter'
+import { groupByDay, summarizeDays } from '../lib/historyGroups'
+import { setHistoryView, useHistoryView, type HistoryView } from '../lib/historyView'
+import { pendingRows } from '../lib/pendingRecords'
 import { categoryBulkTargets, duplicateInput, withCategory } from '../lib/txActions'
 import { bulkTagSuggestions } from '../lib/bulkTags'
 import { useSpecialTags } from '../lib/reportTagSettings'
-import { canStartPull, formatSyncedAt, pullOffset, shouldTriggerRefresh } from '../lib/pullRefresh'
+import {
+  canStartPull,
+  formatSyncedAt,
+  formatSyncedShort,
+  pullOffset,
+  shouldTriggerRefresh,
+} from '../lib/pullRefresh'
 import { useChangeLogAvailable } from '../lib/changeLog'
 import { splitPositions } from '../lib/splits'
+import { AXIS_LOCK_DISTANCE } from '../lib/rowGesture'
 import HistoryTxRow from './HistoryTxRow'
 import HistoryFilterBar from './HistoryFilterBar'
 import MonthPickerSheet from './MonthPickerSheet'
@@ -56,7 +73,9 @@ import RowActionMenu from './RowActionMenu'
 import BulkCategorySheet from './BulkCategorySheet'
 import BulkTagSheet from './BulkTagSheet'
 import ChangeLogSheet from './ChangeLogSheet'
-import { IconHistory, IconRefresh } from './historyIcons'
+import HistorySyncSheet from './HistorySyncSheet'
+import UnsyncedSheet from './UnsyncedSheet'
+import { IconRefresh } from './historyIcons'
 import UndoDeleteBar from './UndoDeleteBar'
 import '../calendar.css'
 import '../history.css'
@@ -81,13 +100,26 @@ interface Props {
   storePrefill?: StorePrefill
 }
 
-/** 検索結果を一度に描く上限 */
+/** 検索結果・月の一覧を一度に描く上限 */
 const RESULT_LIMIT = 200
 
-interface DaySummary {
-  own: number
-  deposit: number
-}
+/**
+ * 引き下げの候補を諦める横の移動量(px)。
+ * 一番上で横に払い始めた指は、途中で下へずれても引き下げに化けさせない。
+ * 行のスワイプが「横に動いた」と決める距離(rowGesture.ts の AXIS_LOCK_DISTANCE)と揃えている
+ */
+const PULL_GIVE_UP_DX = AXIS_LOCK_DISTANCE
+
+/** 未同期の行IDを持たない store(テストの差し替えなど)でも落ちないための空集合 */
+const NO_IDS: ReadonlySet<string> = new Set()
+
+/**
+ * 検索結果の見出しに出す「期間」のチップ。
+ * 絞り込みパネルの期間(すべて / この月 / 直近3ヶ月 / この年 / 指定)のうち、
+ * 探しものの途中で切り替えたくなる3つだけを、結果のすぐ上に出す。
+ * 「この年」「指定」はパネルの中に残す(ここに並べると5つになり、1行に収まらない)。
+ */
+const PERIOD_CHIPS: readonly HistoryPeriod[] = ['all', 'month', 'last3']
 
 export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }: Props) {
   const today = todayISO()
@@ -95,6 +127,8 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
   const [month, setMonth] = useState(currentMonth)
   const [selected, setSelected] = useState(today)
   const [filter, setFilter] = useState<HistoryFilter>(DEFAULT_FILTER)
+  // 一覧｜カレンダー(端末ごとに覚える。既定は一覧 — 理由は lib/historyView.ts)
+  const view = useHistoryView()
   const [selectMode, setSelectMode] = useState(false)
   const [pickedIds, setPickedIds] = useState<string[]>([])
   const [menuTx, setMenuTx] = useState<Transaction | null>(null)
@@ -106,9 +140,16 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
   const [tagApplied, setTagApplied] = useState(false)
   const [showPicker, setShowPicker] = useState(false)
   const [showLog, setShowLog] = useState(false)
+  const [showSync, setShowSync] = useState(false)
+  const [showUnsynced, setShowUnsynced] = useState(false)
   const [pull, setPull] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
   const [now, setNow] = useState(() => new Date())
+  // 月を送った向き。月の中身を差し替えるときのスライドの向きに使う。
+  // 開いた直後は null(最初の表示まで滑らせない)
+  const [navDir, setNavDir] = useState<'prev' | 'next' | null>(null)
+  // 今月より先へ払ったときの「これ以上は無い」の小さな跳ね返り
+  const [bouncing, setBouncing] = useState(false)
 
   // ---------- お店で絞り込む (長押しメニュー / レポートのお店別からの導線) ----------
   //
@@ -116,6 +157,8 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
   // 期間は既定の「すべて」のまま — 欲しいのは「そのお店の履歴」であって、
   // レポートで見ていた月のぶんではない。**そのぶんレポートの行の件数とは変わる**ので、
   // 何で絞っているか(お店・期間)は HistoryFilterBar が describeFilter で常に画面に出す。
+  // 結果の見出しには期間のチップ(すべて / M月だけ / 直近3ヶ月)も出るので、
+  // レポートと同じ月に揃えたいときは1回押せば済む。
   // 突き合わせは完全一致(types.ts の storeKey)。レポートのお店別と同じキーなので、
   // 同じ期間で見れば件数も一致する。
   const showStoreOnly = useCallback((storeName: string) => {
@@ -133,20 +176,38 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
   const canNext = month < currentMonth
   const searching = isFilterActive(filter)
 
-  // ---------- 月送りの見出しと、日付を指定した絞り込みの整理 ----------
+  // ---------- 月送りの見出しと、月に依らない絞り込みの整理 ----------
   //
   // 見出しの ← → は「表示中の月」を動かす。期間が この月 / 直近3ヶ月 / この年 の
   // ときは絞り込みの基準もこの月なので、押せば結果が動く(そのまま残す)。
-  // ところが **日付を指定して絞っている間** は、範囲が月に依らないので
-  // ← → を押しても何も変わらない — 押しても何も起きないボタンが残る。
-  // そこで、その間だけ月送りの行を「いま絞っている範囲」の表示に差し替える。
-  // 月そのもの(month)は動かさないので、絞り込みを解除すれば元の月のカレンダーに戻る。
+  // ところが次の2つの間は、範囲が月に依らないので ← → を押しても何も変わらない
+  // — 押しても何も起きないボタン(と、払っても何も起きない帯)が残る:
+  //   ・日付を指定して絞っている間(期間「指定」)
+  //   ・期間「すべて」で検索している間。以前は「2026年10月」と出したまま
+  //     全期間の結果(15件 ¥70,820)を並べていて、← を押すと見出しの月だけが変わった。
+  //     レポートのお店別から来たときもこれで、レポートの月の額(¥45,210)と
+  //     並べると「どちらが正しいのか」分からなくなっていた
+  // そこでその間だけ、月送りの行を「いま何の範囲を見ているか」の表示に差し替える。
+  // 月そのもの(month)は動かさないので、絞り込みを解除すれば元の月に戻る。
   const rangeActive = customRangeActive(filter)
+  const allPeriodSearch = searching && !rangeActive && effectivePeriod(filter) === 'all'
+  const monthNavigable = !rangeActive && !allPeriodSearch
+
+  // ---------- 複数選択から抜ける ----------
+  // 選択中に一覧の中身が入れ替わる操作(月・日・一覧｜カレンダーの切り替え)をしたら抜ける。
+  // 抜けないと、前の一覧で選んだ行が **画面から見えないまま選ばれ続け**、
+  // 「2件を選択中」のまま削除を押すと、見えていない記録が消えていた(実測)。
+  const exitSelect = () => {
+    setSelectMode(false)
+    setPickedIds([])
+  }
 
   // ---------- 月の移動 ----------
+  // ← → ・年月ピッカー・帯のスワイプは、すべてここを通る
 
   const jumpToMonth = useCallback(
     (next: string) => {
+      if (next !== month) setNavDir(next > month ? 'next' : 'prev')
       setMonth(next)
       setSelected(
         defaultSelectedDate(
@@ -155,11 +216,34 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
           today
         )
       )
+      setSelectMode(false)
+      setPickedIds([])
     },
-    [store.transactions, today]
+    [store.transactions, today, month]
   )
 
-  const changeMonth = (offset: number) => jumpToMonth(shiftMonth(month, offset))
+  const goMonth = (offset: number) => {
+    const next = shiftMonth(month, offset)
+    // 未来の月には進めない(既存の制約)。ボタンは押せなくしてあるので、
+    // ここに来るのは払ったときだけ。黙って何も起きないと「払い方が悪かった」と
+    // 思わせるので、帯を小さく跳ね返して「この先は無い」と伝える
+    if (next > currentMonth) {
+      setBouncing(true)
+      return
+    }
+    jumpToMonth(next)
+  }
+
+  const selectDay = (iso: string) => {
+    setSelected(iso)
+    if (selectMode) exitSelect()
+  }
+
+  const changeView = (next: HistoryView) => {
+    if (next === view) return
+    setHistoryView(next)
+    if (selectMode) exitSelect()
+  }
 
   // ---------- 集計(既存の見え方は変えない) ----------
 
@@ -168,20 +252,9 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
     [store.transactions, month]
   )
 
-  // 日ごとの集計: 自分の実質支出合計と預かり合計
-  const byDay = useMemo(() => {
-    const map = new Map<string, DaySummary>()
-    for (const t of monthTx) {
-      const entry = map.get(t.date) ?? { own: 0, deposit: 0 }
-      if (t.type === 'partner_deposit') {
-        entry.deposit += t.amount
-      } else {
-        entry.own += ownAmount(t)
-      }
-      map.set(t.date, entry)
-    }
-    return map
-  }, [monthTx])
+  // 日ごとの集計: 自分の実質支出合計と預かり合計。
+  // 一覧の日付見出しと同じ関数で数える(2つの見え方で同じ日の額が食い違わないように)
+  const byDay = useMemo(() => summarizeDays(monthTx), [monthTx])
 
   const expenseTotal = monthTx.reduce((sum, t) => sum + ownAmount(t), 0)
   const depositTotal = monthTx
@@ -192,6 +265,10 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
 
   const dayTx = monthTx.filter((t) => t.date === selected)
   const dayTotal = dayTx.reduce((sum, t) => sum + ownAmount(t), 0)
+
+  // 一覧: その月の記録を日付の見出しで区切って新しい順に(上限は検索結果と同じ)
+  const monthGroups = useMemo(() => groupByDay(monthTx, RESULT_LIMIT), [monthTx])
+  const monthRows = useMemo(() => monthGroups.groups.flatMap((g) => g.rows), [monthGroups])
 
   // 検索・絞り込みの結果(機能145 / 150 / 152)
   const results = useMemo(
@@ -208,7 +285,8 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
   const shownResults = results.length > RESULT_LIMIT ? results.slice(0, RESULT_LIMIT) : results
 
   // いま一覧に出ている行(選択モードの操作対象)
-  const visibleRows = searching ? shownResults : dayTx
+  const showCalendar = !searching && view === 'calendar'
+  const visibleRows = searching ? shownResults : view === 'list' ? monthRows : dayTx
 
   // 分割された会計の「何分の何番目か」(機能096)。
   // 行ごとに数えると記録数 × 行数の走査になるので、ここで1回だけ作って各行に配る
@@ -217,15 +295,14 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
   // ---------- 複数選択 (機能151) ----------
 
   const pickedSet = useMemo(() => new Set(pickedIds), [pickedIds])
+  // 操作の対象は「選んだ行のうち、いま一覧に出ているもの」だけ。
+  // 月・日・表示の切り替えでは選択ごと抜けるが(exitSelect)、絞り込みを変えたり、
+  // 同期で他の端末の削除が届いたりして **選んだ行が一覧から消える** 道は他にもある。
+  // 見えていない記録を件数に数えたり、まとめて消したりしないよう、ここで必ず絞る
   const pickedTxs = useMemo(
-    () => store.transactions.filter((t) => pickedSet.has(t.id)),
-    [store.transactions, pickedSet]
+    () => visibleRows.filter((t) => pickedSet.has(t.id)),
+    [visibleRows, pickedSet]
   )
-
-  const exitSelect = () => {
-    setSelectMode(false)
-    setPickedIds([])
-  }
 
   // ---------- 選んだ記録にまとめてタグを付ける / 外す ----------
   //
@@ -291,9 +368,32 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
     // 同じ内容で今日の日付。追加もオフラインキュー経由なので通信が無くても消えない
     void store.add(duplicateInput(t, today))
     // 複製した記録がすぐ見えるように、今日へ移動する
-    if (monthKey(today) !== month) setMonth(monthKey(today))
+    if (monthKey(today) !== month) {
+      setNavDir('next')
+      setMonth(monthKey(today))
+    }
     setSelected(today)
   }
+
+  // ---------- 未同期の記録 ----------
+  //
+  // 帯の「保留 N件」は件数しか言わないので、どれが送れていないのかを
+  // 一覧で見られるようにする(UnsyncedSheet)。数えるのは記録の単位(lib/pendingRecords.ts)。
+  const pendingIdSet = store.pendingIds ?? NO_IDS
+  const unsyncedRows = useMemo(
+    () => pendingRows(store.transactions, pendingIdSet),
+    [store.transactions, pendingIdSet]
+  )
+  const unsyncedDeletes = store.pendingDeleteCount ?? 0
+  const unsyncedCount = unsyncedRows.length + unsyncedDeletes
+  // 送っている最中は件数が残っていても出し始めない。
+  // 通信できるときに入れた記録は、積まれた次の瞬間に送り終わる。その一瞬に
+  // 帯へ「⚠ 未同期 1件」が出ては消えると、入れるたびに帯の高さが揺れる。
+  // いったん出たものは、送っている最中も出したままにする(出たり消えたりさせない)
+  const unsyncedShownRef = useRef(false)
+  const showUnsyncedChip =
+    unsyncedCount === 0 ? false : store.syncing ? unsyncedShownRef.current : true
+  unsyncedShownRef.current = showUnsyncedChip
 
   // ---------- 引き下げて更新 (機能154) ----------
 
@@ -371,6 +471,7 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
   useEffect(() => {
     const el = rootRef.current
     if (!el) return
+    let startX = 0
     let startY = 0
     let armed = false
 
@@ -384,6 +485,7 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
         armed = false
         return
       }
+      startX = e.touches[0].clientX
       startY = e.touches[0].clientY
       // 一番上にいるときだけ引き下げの候補にする(途中のスクロールを横取りしない)
       armed = window.scrollY <= 0 && !busyRef.current
@@ -391,11 +493,14 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
 
     const onMove = (e: TouchEvent) => {
       if (!armed || e.touches.length !== 1) return
+      const dx = e.touches[0].clientX - startX
       const dy = e.touches[0].clientY - startY
       if (!pullingRef.current) {
-        if (!canStartPull(window.scrollY, dy, busyRef.current)) {
-          // 上方向へ動いたらこの指では引き下げをあきらめる(通常のスクロールに戻す)
-          if (dy < 0) armed = false
+        if (!canStartPull(window.scrollY, dy, busyRef.current, dx)) {
+          // 上方向へ動いたらこの指では引き下げをあきらめる(通常のスクロールに戻す)。
+          // 横のほうが大きく動いた指も同じ — 月の帯を左右に払っている途中なので、
+          // そのあと少し下へずれても引き下げに化けさせない
+          if (dy < 0 || Math.abs(dx) > PULL_GIVE_UP_DX) armed = false
           return
         }
         pullingRef.current = true
@@ -433,9 +538,75 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
     }
   }, [doRefresh])
 
+  // ---------- 月の帯: 左右に払って月を送る ----------
+  //
+  // 月の見出し・合計・(カレンダー表示なら)カレンダーを1つの帯にまとめ、
+  // その上で横に払うと月が変わる(左へ払う = 次の月、右へ払う = 前の月。レポートと同じ)。
+  // 払える場所を **帯だけ** にしているのは:
+  //   ・明細の行は左右に払うと削除・編集になる(機能146)。同じ指に2つの意味を持たせない
+  //   ・タブ全体(hist-root)に付けると、シート(年月ピッカーなど)も DOM 上はその子なので、
+  //     シートの中で横に動かした指まで月送りになる
+  // 次の間は払っても何もしない(押しても何も起きない ← → を出していないのと同じ理由):
+  //   ・複数選択中(選んだ行が月ごと入れ替わって見えなくなる)
+  //   ・シートを開いている間
+  //   ・月に依らない範囲を見ている間(期間「指定」/ 全期間の検索)
+  //   ・引き下げ更新の最中・更新中(縦に引いた指が離れた瞬間に月まで変わらないように)
+  // 判定の閾値(56px・横:縦 > 2・800ms 以内)はレポートと同じ lib/swipe.ts のもの。
+  const bandRef = useRef<HTMLDivElement>(null)
+  const sheetOpen =
+    showPicker ||
+    menuTx !== null ||
+    bulkOpen ||
+    tagIds !== null ||
+    showLog ||
+    showSync ||
+    showUnsynced
+  useSwipeNav(bandRef, {
+    onSwipeRight: () => goMonth(-1),
+    onSwipeLeft: () => goMonth(1),
+    enabled: monthNavigable && !selectMode && !sheetOpen,
+    isBlocked: () => pullingRef.current || busyRef.current || pullRef.current > 0,
+  })
+
   // 「10:32 に更新」。オフライン・同期中・未同期の警告はヘッダーのバナーの役割なので、
-  // ここでは重ねて出さず「いつ取り込んだか」だけを出す(機能154)
+  // ここでは重ねて出さず「いつ取り込んだか」だけを出す(機能154)。
+  // 上部を詰めるため、もとの1行は検索欄の右端の小さなボタン(⟳ 10:32)に畳んだ。
+  // 長い言い方と「いま更新する」「変更履歴」は、そのボタンから開くシートにある
   const syncedText = formatSyncedAt(store.lastSyncedAt, now)
+  const syncedShort = formatSyncedShort(store.lastSyncedAt, now)
+
+  // 「10月」(今年)/「2025年10月」(去年以前)。一覧の見出しと期間のチップで使う
+  const monthLabel =
+    month.slice(0, 4) === currentMonth.slice(0, 4)
+      ? `${Number(month.slice(5, 7))}月`
+      : formatMonth(month)
+  const periodChipLabel = (p: HistoryPeriod) =>
+    p === 'all' ? 'すべて' : p === 'month' ? `${monthLabel}だけ` : '直近3ヶ月'
+  const shownPeriod = effectivePeriod(filter)
+
+  const slideClass = navDir ? ` slide-${navDir}` : ''
+
+  const selectButton = visibleRows.length > 0 && !selectMode && (
+    <button className="hist-head-btn" onClick={() => setSelectMode(true)}>
+      選択
+    </button>
+  )
+
+  const renderRow = (t: Transaction, showDate: boolean) => (
+    <HistoryTxRow
+      key={t.id}
+      tx={t}
+      showDate={showDate}
+      splitPos={splitPos.get(t.id)}
+      selectMode={selectMode}
+      picked={pickedSet.has(t.id)}
+      unsynced={pendingIdSet.has(t.id)}
+      onOpen={onEdit}
+      onLongPress={setMenuTx}
+      onSwipeDelete={(tx) => deleteTxs([tx])}
+      onTogglePick={togglePick}
+    />
+  )
 
   return (
     <div
@@ -456,176 +627,268 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
             ? '更新中…'
             : shouldTriggerRefresh(pull)
               ? '離すと更新します'
-              : '引き下げて更新'}
+              : `引き下げて更新${syncedText ? `(${syncedText})` : ''}`}
         </div>
 
-        <div className="hist-sync-line">
-          <span>{refreshing ? '更新中…' : (syncedText ?? '')}</span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            {logAvailable && (
-              <button className="hist-sync-btn" onClick={() => setShowLog(true)}>
-                <IconHistory /> 変更履歴
-              </button>
-            )}
+        {/* 検索・絞り込み・更新を1行に。タグの選択肢は実際に使われているものだけを出す (機能088) */}
+        <HistoryFilterBar
+          filter={filter}
+          onChange={setFilter}
+          transactions={store.transactions}
+          trailing={
             <button
-              className="hist-sync-btn"
-              onClick={() => void doRefresh()}
-              disabled={refreshing}
-              aria-label="いま更新する"
+              className="hist-sync-chip"
+              onClick={() => setShowSync(true)}
+              aria-haspopup="dialog"
+              aria-label={`更新と変更履歴(${refreshing ? '更新中' : (syncedText ?? 'まだ取り込めていません')})`}
             >
-              <IconRefresh />
+              <IconRefresh
+                width={18}
+                height={18}
+                className={refreshing ? 'is-spinning' : undefined}
+              />
+              {(refreshing || syncedShort) && (
+                <span className="hist-sync-chip-text">{refreshing ? '更新中' : syncedShort}</span>
+              )}
             </button>
-          </span>
-        </div>
+          }
+        />
 
-        {rangeActive ? (
-          <div className="month-nav hist-range-head" role="status">
-            <span className="hist-range-title">{describeRange(filter)} で絞り込み中</span>
+        {/* ---------- 月の帯 ----------
+            見出し + 合計と表示の切り替え + (カレンダー表示なら)カレンダー。
+            ここだけが左右の払いで月を送る。一覧表示ではカレンダーが無く背が低いので、
+            画面の上に貼り付けて(sticky)、スクロールしても何月の一覧かと合計が見える */}
+        <div ref={bandRef} className={`hist-band${showCalendar ? '' : ' is-sticky'}`}>
+          <div
+            className={`hist-band-inner${bouncing ? ' is-bouncing' : ''}`}
+            onAnimationEnd={(e) => {
+              if (e.animationName === 'hist-bounce-next') setBouncing(false)
+            }}
+          >
+            {rangeActive || allPeriodSearch ? (
+              <div className="month-nav hist-range-head" role="status">
+                <span className="hist-range-title">
+                  {rangeActive ? `${describeRange(filter)} で絞り込み中` : '全期間から検索中'}
+                </span>
+              </div>
+            ) : (
+              <div className="month-nav">
+                <button onClick={() => goMonth(-1)} aria-label="前の月">
+                  ←
+                </button>
+                {/* 見出しを押すと年月ピッカー(機能130)。矢印の連打をやめられる */}
+                <button
+                  className="hist-month-title"
+                  onClick={() => setShowPicker(true)}
+                  aria-haspopup="dialog"
+                >
+                  {formatMonth(month)}
+                  <span className="hist-caret">▼</span>
+                </button>
+                <button onClick={() => goMonth(1)} disabled={!canNext} aria-label="次の月">
+                  →
+                </button>
+              </div>
+            )}
+
+            {!searching && (
+              // 月ごとに作り直して、送った向きから滑り込ませる(レポートと同じ動き)
+              <div key={month} className={`hist-band-month${slideClass}`}>
+                <div className="hist-band-bar">
+                  {/* 合計は彼女の負担分を除いた「自分の分」。会計の総額の合計ではないことを
+                      見出しで言う(検索結果のときだけ注記が出ていて、ふだんは読めなかった)。
+                      もとは2段のカード(69px)だったのを、切り替えと同じ1行に詰めた */}
+                  <p className="hist-band-totals">
+                    <span className="hist-total">
+                      <span className="hist-total-label">支出(自分の分)</span>{' '}
+                      <span className="hist-total-value is-expense">{yen(expenseTotal)}</span>
+                    </span>
+                    <span className="hist-total">
+                      <span className="hist-total-label">預かり</span>{' '}
+                      <span className="hist-total-value is-income">{yen(depositTotal)}</span>
+                    </span>
+                  </p>
+                  <div className="seg hist-view-seg" role="group" aria-label="表示の切り替え">
+                    <button
+                      className={view === 'list' ? 'active' : ''}
+                      aria-pressed={view === 'list'}
+                      onClick={() => changeView('list')}
+                    >
+                      一覧
+                    </button>
+                    <button
+                      className={view === 'calendar' ? 'active' : ''}
+                      aria-pressed={view === 'calendar'}
+                      onClick={() => changeView('calendar')}
+                    >
+                      カレンダー
+                    </button>
+                  </div>
+                </div>
+
+                {view === 'calendar' && (
+                  <div className="card cal-card">
+                    <div className="cal-weekdays">
+                      {WEEKDAY_LABELS.map((w, i) => (
+                        <span
+                          key={w}
+                          className={i === 0 ? 'cal-sun' : i === 6 ? 'cal-sat' : undefined}
+                        >
+                          {w}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="cal-grid">
+                      {weeks.flat().map((cell, i) => {
+                        if (cell === null) {
+                          return <span key={`empty-${i}`} className="cal-cell cal-empty" />
+                        }
+                        const summary = byDay.get(cell.iso)
+                        const isToday = cell.iso === today
+                        const isSelected = cell.iso === selected
+                        // 目隠し (機能169) 中は伏字。金額そのものは出さないが、
+                        // 「その日に使ったかどうか」は伏字の有無で分かる(色や件数と同じ粒度)
+                        const amountText =
+                          summary && summary.own > 0
+                            ? maskCompact(summary.own.toLocaleString('ja-JP'))
+                            : null
+                        const cls = [
+                          'cal-cell',
+                          isToday ? 'cal-today' : '',
+                          isSelected ? 'cal-selected' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')
+                        return (
+                          <button
+                            key={cell.iso}
+                            className={cls}
+                            onClick={() => selectDay(cell.iso)}
+                            // タップは「その日の明細を見る」— 入力を始めるのは下の専用ボタン(機能053)
+                            aria-label={`${formatDate(cell.iso)}の明細を見る`}
+                            aria-pressed={isSelected}
+                          >
+                            <span className="cal-day">{cell.day}</span>
+                            {amountText !== null && (
+                              <span
+                                className={`cal-amount${amountText.length > 6 ? ' cal-amount-long' : ''}`}
+                              >
+                                {amountText}
+                              </span>
+                            )}
+                            {summary && summary.deposit > 0 && <span className="cal-dot" />}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {/* 日付タップの意味を明示する。入力を始めるのは下の専用ボタン(機能053)。
+                        月は左右に払っても送れることもここで言う(見た目からは分からないため) */}
+                    <p className="muted cal-tap-hint">日付をタップで明細・左右に払って月を移動</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="month-nav">
-            <button onClick={() => changeMonth(-1)} aria-label="前の月">
-              ←
-            </button>
-            {/* 見出しを押すと年月ピッカー(機能130)。矢印の連打をやめられる */}
+
+          {/* まだ送れていない記録があるときだけ。押すとその一覧(UnsyncedSheet) */}
+          {showUnsyncedChip && (
             <button
-              className="hist-month-title"
-              onClick={() => setShowPicker(true)}
+              className="hist-unsynced-chip"
+              onClick={() => setShowUnsynced(true)}
               aria-haspopup="dialog"
             >
-              {formatMonth(month)}
-              <span className="hist-caret">▼</span>
+              ⚠ 未同期 {unsyncedCount}件
+              <span className="hist-unsynced-chip-hint">中身を見る</span>
             </button>
-            <button onClick={() => changeMonth(1)} disabled={!canNext} aria-label="次の月">
-              →
-            </button>
-          </div>
-        )}
+          )}
+        </div>
 
-        {/* タグの選択肢は実際に使われているものだけを出す (機能088) */}
-        <HistoryFilterBar filter={filter} onChange={setFilter} transactions={store.transactions} />
-
-        {!searching && (
-          <>
-            <div className="card month-summary">
-              <div className="ms-item">
-                {/* 合計は彼女の負担分を除いた「自分の分」。会計の総額の合計ではないことを
-                    見出しで言う(検索結果のときだけ注記が出ていて、ふだんは読めなかった) */}
-                <span className="ms-label">支出(自分の分)</span>
-                <span className="ms-value ms-expense">{yen(expenseTotal)}</span>
-              </div>
-              <div className="ms-divider" />
-              <div className="ms-item">
-                <span className="ms-label">預かり</span>
-                <span className="ms-value ms-income">{yen(depositTotal)}</span>
-              </div>
+        {searching ? (
+          <div className="card">
+            <div className="hist-result-head">
+              <span>検索結果 {results.length}件</span>
+              <span className="hist-result-total">自分の分 {yen(resultTotal)}</span>
+              {selectButton}
+            </div>
+            {/* 期間をその場で切り替える。全期間の結果に「2026年10月」の見出しが付いていて
+                どの範囲の件数なのか読めなかったので、範囲は件数・合計のすぐ下で選ばせる */}
+            <div className="hist-chips hist-period-chips" role="group" aria-label="探す期間">
+              {PERIOD_CHIPS.map((p) => (
+                <button
+                  key={p}
+                  className={`hist-chip${shownPeriod === p ? ' is-on' : ''}`}
+                  aria-pressed={shownPeriod === p}
+                  onClick={() => setFilter({ ...filter, period: p })}
+                >
+                  {periodChipLabel(p)}
+                </button>
+              ))}
             </div>
 
-            <div className="card cal-card">
-              <div className="cal-weekdays">
-                {WEEKDAY_LABELS.map((w, i) => (
-                  <span key={w} className={i === 0 ? 'cal-sun' : i === 6 ? 'cal-sat' : undefined}>
-                    {w}
-                  </span>
-                ))}
-              </div>
-              <div className="cal-grid">
-                {weeks.flat().map((cell, i) => {
-                  if (cell === null) {
-                    return <span key={`empty-${i}`} className="cal-cell cal-empty" />
-                  }
-                  const summary = byDay.get(cell.iso)
-                  const isToday = cell.iso === today
-                  const isSelected = cell.iso === selected
-                  // 目隠し (機能169) 中は伏字。金額そのものは出さないが、
-                  // 「その日に使ったかどうか」は伏字の有無で分かる(色や件数と同じ粒度)
-                  const amountText =
-                    summary && summary.own > 0
-                      ? maskCompact(summary.own.toLocaleString('ja-JP'))
-                      : null
-                  const cls = [
-                    'cal-cell',
-                    isToday ? 'cal-today' : '',
-                    isSelected ? 'cal-selected' : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')
-                  return (
-                    <button
-                      key={cell.iso}
-                      className={cls}
-                      onClick={() => setSelected(cell.iso)}
-                      // タップは「その日の明細を見る」— 入力を始めるのは下の専用ボタン(機能053)
-                      aria-label={`${formatDate(cell.iso)}の明細を見る`}
-                      aria-pressed={isSelected}
-                    >
-                      <span className="cal-day">{cell.day}</span>
-                      {amountText !== null && (
-                        <span
-                          className={`cal-amount${amountText.length > 6 ? ' cal-amount-long' : ''}`}
-                        >
-                          {amountText}
-                        </span>
-                      )}
-                      {summary && summary.deposit > 0 && <span className="cal-dot" />}
-                    </button>
-                  )
-                })}
-              </div>
-              {/* 日付タップの意味を明示する。入力を始めるのは下の専用ボタン(機能053) */}
-              <p className="muted cal-tap-hint">日付をタップすると、その日の明細が下に出ます</p>
-            </div>
-          </>
-        )}
-
-        <div className="card">
-          <div className="hist-result-head">
-            <span>{searching ? `検索結果 ${results.length}件` : formatDate(selected)}</span>
-            <span className="hist-result-total">
-              自分の分 {yen(searching ? resultTotal : dayTotal)}
-            </span>
-            {visibleRows.length > 0 && !selectMode && (
-              <button className="hist-head-btn" onClick={() => setSelectMode(true)}>
-                選択
-              </button>
+            {visibleRows.length === 0 ? (
+              <p className="hist-empty">条件に合う記録は見つかりませんでした</p>
+            ) : (
+              visibleRows.map((t) => renderRow(t, true))
             )}
-          </div>
 
-          {visibleRows.length === 0 ? (
-            <p className="hist-empty">
-              {searching ? '条件に合う記録は見つかりませんでした' : 'この日の記録はありません'}
-            </p>
-          ) : (
-            visibleRows.map((t) => (
-              <HistoryTxRow
-                key={t.id}
-                tx={t}
-                showDate={searching}
-                splitPos={splitPos.get(t.id)}
-                selectMode={selectMode}
-                picked={pickedSet.has(t.id)}
-                unsynced={store.pendingIds?.has(t.id) ?? false}
-                onOpen={onEdit}
-                onLongPress={setMenuTx}
-                onSwipeDelete={(tx) => deleteTxs([tx])}
-                onTogglePick={togglePick}
-              />
-            ))
-          )}
-
-          {!searching && (
-            <button className="btn-ghost day-input-btn" onClick={() => onStartInput(selected)}>
-              ＋ {formatDate(selected)}で入力する
-            </button>
-          )}
-          {searching && (
             <p className="muted" style={{ marginTop: 10, lineHeight: 1.5 }}>
               合計は支出の実質負担分(彼女の負担分を除いた額)です
               {results.length > RESULT_LIMIT &&
                 `。多いため先頭${RESULT_LIMIT}件だけ表示しています(絞り込むとすべて見られます)`}
             </p>
-          )}
-        </div>
+          </div>
+        ) : view === 'list' ? (
+          // 一覧: その月の記録を日付の見出しで区切って新しい順に
+          <div key={`list-${month}`} className={`card hist-list-card${slideClass}`}>
+            <div className="hist-result-head">
+              <span>
+                {monthLabel}の記録 {monthTx.length}件
+              </span>
+              {selectButton}
+            </div>
+            {monthGroups.groups.length === 0 ? (
+              <p className="hist-empty">この月の記録はありません</p>
+            ) : (
+              monthGroups.groups.map((g) => (
+                <div key={g.date} className="hist-day-group">
+                  {/* 見出しの額はカレンダーのマスと同じ「自分の分」(lib/historyGroups.ts) */}
+                  <h3 className="hist-day-head">
+                    <span>
+                      {formatDate(g.date)}
+                      {g.date === today && <span className="hist-day-today">今日</span>}
+                    </span>
+                    {g.own > 0 && <span className="hist-day-total">{yen(g.own)}</span>}
+                  </h3>
+                  {g.rows.map((t) => renderRow(t, false))}
+                </div>
+              ))
+            )}
+            {monthGroups.shown < monthGroups.total && (
+              <p className="muted" style={{ marginTop: 10, lineHeight: 1.5 }}>
+                多いため新しいほうから{RESULT_LIMIT}件だけ表示しています(カレンダーで日を選ぶか、絞り込むとすべて見られます)
+              </p>
+            )}
+          </div>
+        ) : (
+          // カレンダー: 選んだ日の明細(これまでどおり)
+          <div key={`day-${month}`} className={`card hist-day-card${slideClass}`}>
+            <div className="hist-result-head">
+              <span>{formatDate(selected)}</span>
+              <span className="hist-result-total">自分の分 {yen(dayTotal)}</span>
+              {selectButton}
+            </div>
+
+            {visibleRows.length === 0 ? (
+              <p className="hist-empty">この日の記録はありません</p>
+            ) : (
+              visibleRows.map((t) => renderRow(t, false))
+            )}
+
+            <button className="btn-ghost day-input-btn" onClick={() => onStartInput(selected)}>
+              ＋ {formatDate(selected)}で入力する
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ---------- 複数選択中の操作バー (機能151) ----------
@@ -638,7 +901,7 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
       {selectMode && (
         <div ref={barRef} className="hist-bottom-bar hist-select-bar">
           <div className="hist-bar-line">
-            <span className="hist-bar-text">{pickedIds.length}件を選択中</span>
+            <span className="hist-bar-text">{pickedTxs.length}件を選択中</span>
             <button className="hist-bar-ghost" onClick={pickAllVisible}>
               全部
             </button>
@@ -649,24 +912,24 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
           <div className="hist-bar-line">
             <button
               className="hist-bar-undo"
-              disabled={pickedIds.length === 0}
+              disabled={pickedTxs.length === 0}
               onClick={() => setBulkOpen(true)}
             >
               カテゴリ
             </button>
             <button
               className="hist-bar-undo"
-              disabled={pickedIds.length === 0}
+              disabled={pickedTxs.length === 0}
               onClick={() => {
                 setTagApplied(false)
-                setTagIds(pickedIds)
+                setTagIds(pickedTxs.map((t) => t.id))
               }}
             >
               タグ
             </button>
             <button
               className="hist-bar-danger hist-bar-apart"
-              disabled={pickedIds.length === 0}
+              disabled={pickedTxs.length === 0}
               onClick={() => {
                 deleteTxs(pickedTxs)
                 exitSelect()
@@ -740,6 +1003,36 @@ export default function HistoryTab({ store, onEdit, onStartInput, storePrefill }
       )}
 
       {showLog && <ChangeLogSheet onClose={() => setShowLog(false)} />}
+
+      {showSync && (
+        <HistorySyncSheet
+          syncedText={syncedText}
+          refreshing={refreshing}
+          logAvailable={logAvailable}
+          unsyncedCount={unsyncedCount}
+          onRefresh={() => void doRefresh()}
+          onShowLog={() => {
+            setShowSync(false)
+            setShowLog(true)
+          }}
+          onShowUnsynced={() => {
+            setShowSync(false)
+            setShowUnsynced(true)
+          }}
+          onClose={() => setShowSync(false)}
+        />
+      )}
+
+      {showUnsynced && (
+        <UnsyncedSheet
+          rows={unsyncedRows}
+          deleteCount={unsyncedDeletes}
+          isOnline={store.isOnline ?? true}
+          syncing={store.syncing ?? false}
+          onSendNow={() => store.syncNow()}
+          onClose={() => setShowUnsynced(false)}
+        />
+      )}
     </div>
   )
 }

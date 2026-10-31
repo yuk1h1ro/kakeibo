@@ -58,6 +58,7 @@ import {
   saveTxCache,
 } from '../lib/txSnapshot'
 import { useUndoableDeletes } from './useUndoableDeletes'
+import { pendingDeleteCount as countPendingDeletes } from '../lib/pendingRecords'
 import { categoryLabel } from '../lib/categories'
 import { todayISO } from '../lib/format'
 import {
@@ -637,6 +638,17 @@ export function useTransactions(supabase: SupabaseClient) {
     () => new Set(pendingOps.filter((op) => op.kind !== 'delete').map((op) => op.id)) as ReadonlySet<string>,
     [pendingOps]
   )
+  // まだ送れていない削除の件数(記録の単位)。履歴の「未同期」シートで
+  // 「削除 N件」とだけ出す — 消した記録はもう画面に行が無いので、中身は出せない。
+  // 数え方(元に戻した記録は数えない等)は lib/pendingRecords.ts
+  // 削除が積まれていない(ふだんの)ときは、全記録のIDを集める手間をかけない
+  const pendingDeleteCount = useMemo(
+    () =>
+      pendingOps.some((op) => op.kind === 'delete')
+        ? countPendingDeletes(pendingOps, new Set(transactions.map((t) => t.id)))
+        : 0,
+    [pendingOps, transactions]
+  )
 
   // 変更履歴の「変更前」を引くための参照を最新に保つ
   useEffect(() => {
@@ -679,6 +691,7 @@ export function useTransactions(supabase: SupabaseClient) {
     pendingCount: pendingOps.length,
     // まだサーバーに送れていない記録の行ID(履歴の行に「未同期」の印を付ける)
     pendingIds,
+    pendingDeleteCount,
     isOnline,
     syncing,
     lastSyncedAt,

@@ -1,53 +1,6 @@
 /* ---------- 履歴タブ: 月間カレンダー ----------
    デザイントークン(styles.css の :root)のみを参照する。ライト/ダーク両対応。 */
 
-/* 月サマリーバー: 支出 / 預かり を横並びで表示 */
-.month-summary {
-  display: flex;
-  align-items: stretch;
-  padding: 12px 16px;
-}
-
-.month-summary .ms-item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.month-summary .ms-divider {
-  width: 1px;
-  background: var(--gridline);
-  margin: 2px 16px;
-  flex-shrink: 0;
-}
-
-.month-summary .ms-label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--text-muted);
-}
-
-.month-summary .ms-value {
-  font-size: 22px;
-  font-weight: 700;
-  line-height: 1.2;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.month-summary .ms-value.ms-expense {
-  color: var(--expense);
-}
-
-.month-summary .ms-value.ms-income {
-  color: var(--income);
-}
-
 .cal-card {
   padding: 12px 8px 8px;
 }
@@ -88,7 +41,9 @@
   align-items: center;
   justify-content: flex-start;
   gap: 1px;
-  min-height: 48px;
+  /* 48 → 44px。6週ある月で 24px 縮み、そのぶん下の明細が上がる。
+     44px はタップ領域の下限なので、ここより小さくはしない */
+  min-height: 44px;
   min-width: 0;
   padding: 4px 1px 4px;
   border-radius: 9px;
@@ -164,7 +119,7 @@
 
 /* セルのタップは「見る」— 入力を始めるのは日別カードの専用ボタン */
 .cal-tap-hint {
-  margin-top: 10px;
+  margin-top: 8px;
   text-align: center;
   line-height: 1.5;
 }

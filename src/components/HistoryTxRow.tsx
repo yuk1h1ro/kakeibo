@@ -165,6 +165,16 @@ export default function HistoryTxRow({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
+      // 長押しでメニューを開いた指を離すと、ブラウザはその場所へ click を送ってくる。
+      // メニュー(下から出るシート)が指の位置まで届いていないと、その click は
+      // シートの背景 = 「押すと閉じる」場所に落ち、**開いた瞬間に閉じる**。
+      // カレンダーの下に選んだ日の明細だけが並んでいた頃は、行が画面の下のほう
+      // (シートの裏)にあって表に出なかったが、一覧表示で行が画面の上半分に並ぶと
+      // 上のほうの行は長押ししても何も開かないように見えた(実測)。
+      // 長押しが成立した指の touchend だけ既定の動作を止めて、この click を出させない
+      onTouchEnd={(e) => {
+        if (phaseRef.current === 'longpress' && e.cancelable) e.preventDefault()
+      }}
       // 長押し中に iOS の選択メニュー・右クリックメニューを出さない
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -197,6 +207,21 @@ export default function HistoryTxRow({
       </div>
     </div>
   )
+}
+
+/**
+ * 行の右端に出す金額。支出は「自分の分」、それ以外は残高への影響額。
+ * 履歴の行と「未同期」のシートで同じ書き方にするため、ここに1つだけ置く
+ * (シートで別の額を出すと、どの行のことか突き合わせられなくなる)。
+ */
+export function txAmountText(tx: Transaction): string {
+  if (tx.type === 'expense') {
+    // 全額おごり・割引券で無料の回は自分の支出が 0円。
+    // 「-¥0」と書くと出ていったお金があるように読めるので、符号を付けない
+    return ownAmount(tx) === 0 ? yen(0) : `-${yen(ownAmount(tx))}`
+  }
+  const impact = partnerImpact(tx)
+  return impact > 0 ? `+${yen(impact)}` : `-${yen(-impact)}`
 }
 
 function RowBody({
@@ -285,15 +310,7 @@ function RowBody({
         )}
       </span>
       <span className={`tx-amount ${!isExpense && impact > 0 ? 'positive' : ''}`}>
-        {/* 全額おごり・割引券で無料の回は自分の支出が 0円。
-            「-¥0」と書くと出ていったお金があるように読めるので、符号を付けない */}
-        {isExpense
-          ? ownAmount(tx) === 0
-            ? yen(0)
-            : `-${yen(ownAmount(tx))}`
-          : impact > 0
-            ? `+${yen(impact)}`
-            : `-${yen(-impact)}`}
+        {txAmountText(tx)}
       </span>
     </button>
   )

@@ -38,36 +38,48 @@
   overflow: hidden;
 }
 
-.hist-sync-line {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 12px;
-  color: var(--text-muted);
-  padding: 0 2px;
-}
-
-.hist-sync-line .hist-sync-btn {
+/* 最終同期の時刻 + 更新と変更履歴の入口(機能154/163)。
+   もとは最上段の1行(44px)だったものを、検索欄の右端のこのボタンに畳んだ。
+   時刻だけは常に見せる(「いつのデータか」が分からないと表示を信じられない)。 */
+.hist-sync-chip {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
+  flex-shrink: 0;
   min-width: 44px;
   min-height: 44px;
-  justify-content: center;
-  padding: 0 10px;
-  font-size: 13px;
-  color: var(--accent);
+  padding: 0 8px;
   border-radius: var(--radius-btn);
-}
-
-.hist-sync-line .hist-sync-btn:disabled {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
   color: var(--text-muted);
 }
 
-.hist-sync-line .hist-sync-btn:active {
+.hist-sync-chip svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.hist-sync-chip:active {
   background: var(--fill);
+}
+
+/* 更新中はアイコンを回す(動きを減らす設定では止める: 下の reduced-motion) */
+.hist-sync-chip .is-spinning {
+  animation: hist-spin 0.9s linear infinite;
+}
+
+@keyframes hist-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.hist-sync-tip {
+  margin: -2px 2px 4px;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 /* 一覧の見出しに置く「選択」(機能151の入口) */
@@ -197,16 +209,56 @@
 
 /* ---------- 検索・並べ替え・絞り込み (機能145/150/152) ---------- */
 
+/* 検索欄・絞り込みの入口・更新の入口を1行に並べる。
+   以前は検索欄の下に「絞り込み・並べ替え ▼」の行があり、カード全体で 130px あった
+   (開いた瞬間に明細が1行も見えない原因の1つ)。いまは 44px の1行だけ */
+.hist-search {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .hist-search-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .hist-search-row input {
   flex: 1;
+  min-width: 0;
   /* iOS でフォーカス時に拡大されないよう16px(グローバル指定と同じ) */
   font-size: 16px;
+}
+
+/* 検索欄と ✕。✕ は欄の中の右端に重ねる(横に並べると欄がさらに狭くなる) */
+.hist-search-field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.hist-search-field input {
+  width: 100%;
+}
+
+.hist-search-field.has-clear input {
+  padding-right: 44px;
+}
+
+/* type="search" にブラウザが出す ✕ は隠す。自前の ✕(44px)を欄の中に重ねたので、
+   残すと同じ ✕ が2つ並ぶ(Chrome で実測。押せる大きさも自前のほうが大きい) */
+.hist-search-field input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
+.hist-search-field .hist-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
 }
 
 .hist-search-clear {
@@ -217,22 +269,57 @@
   font-size: 16px;
 }
 
-.hist-filter-toggle {
-  display: flex;
+/* 絞り込みの入口。何か絞っている間はアクセント色で「効いている」ことを見せる */
+.hist-filter-btn {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
+  justify-content: center;
+  gap: 4px;
+  flex-shrink: 0;
+  min-width: 44px;
   min-height: 44px;
-  margin-top: 8px;
+  padding: 0 10px;
+  border-radius: var(--radius-btn);
+  border: 1px solid var(--baseline);
+  background: var(--surface);
   font-size: 13px;
+  font-weight: 600;
   color: var(--text-secondary);
 }
 
-.hist-filter-toggle .hist-filter-state {
+.hist-filter-btn.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.hist-filter-btn.is-open {
+  border-color: var(--accent);
+}
+
+/* 320px 幅では文字を隠してアイコンだけにする(読み上げ名は aria-label に残っている)。
+   隠さないと検索欄が 100px を切り、打った文字がほとんど見えなくなる */
+@media (max-width: 359px) {
+  .hist-filter-btn {
+    padding: 0;
+  }
+
+  .hist-filter-btn .hist-filter-btn-text {
+    display: none;
+  }
+}
+
+/* 何で絞っているか。絞っているときだけ出る(何も絞っていなければ場所を取らない) */
+.hist-filter-state-line {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.hist-filter-state-line .hist-filter-state {
   color: var(--accent);
   font-weight: 600;
-  text-align: right;
   overflow-wrap: anywhere;
 }
 
@@ -240,9 +327,6 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-top: 10px;
-  padding-top: 12px;
-  border-top: 1px solid var(--gridline);
 }
 
 .hist-field-label {
@@ -386,6 +470,259 @@
   font-weight: 600;
 }
 
+/* 検索結果の期間(すべて / M月だけ / 直近3ヶ月)。件数と合計のすぐ下に置く */
+.hist-period-chips {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--gridline);
+}
+
+/* ---------- 一覧表示: 日付の見出しで区切る ---------- */
+
+.hist-day-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 -4px;
+  padding: 12px 8px 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.hist-day-group:first-of-type .hist-day-head {
+  padding-top: 8px;
+}
+
+.hist-day-head .hist-day-total {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.hist-day-head .hist-day-today {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 10px;
+  line-height: 16px;
+  vertical-align: 1px;
+}
+
+/* 日の最後の行は下線を引かない(次の日の見出しが区切りになる) */
+.hist-day-group .hist-row:last-child {
+  border-bottom: none;
+}
+
+/* ---------- 月の帯: 見出し + 合計 + 表示の切り替え (+ カレンダー) ----------
+   ここだけが左右の払いで月を送る(HistoryTab の「月の帯」の節)。
+   touch-action: pan-y は useSwipeNav が要素に直接付ける(付け忘れるとタッチで払えない) */
+
+.hist-band {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 一覧表示ではカレンダーが無く背が低いので、画面の上に貼り付ける。
+   スクロールして日付の見出しを追っていっても、何月の一覧か・月の合計・
+   切り替えがいつも見える。下の行が透けないよう背景はページの色で塗り、
+   左右も .app-main の余白(16px)ぶん広げて、余白を流れる行の影まで隠す */
+.hist-band.is-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: 0 -16px;
+  padding: 2px 16px 8px;
+  background: var(--page);
+}
+
+.hist-band-inner,
+.hist-band-month {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 月を送った向きから中身を滑り込ませる。動きはレポートの月送り(styles.css の
+   report-slide-*)と同じものを使う — 同じ操作には同じ手応えを返す */
+.hist-band-month.slide-next,
+.hist-list-card.slide-next,
+.hist-day-card.slide-next {
+  animation: report-slide-next 0.18s ease-out;
+}
+
+.hist-band-month.slide-prev,
+.hist-list-card.slide-prev,
+.hist-day-card.slide-prev {
+  animation: report-slide-prev 0.18s ease-out;
+}
+
+/* 今月より先へ払ったとき。動かないことを黙って見せるのではなく、
+   帯を左へ 8px だけ引いて戻し「この先は無い」と伝える */
+.hist-band-inner.is-bouncing {
+  animation: hist-bounce-next 0.24s ease-out;
+}
+
+@keyframes hist-bounce-next {
+  40% {
+    transform: translateX(-8px);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+/* 合計(左)と 一覧｜カレンダー(右)。合計は幅が足りなければ2段に折り返す
+   (もとは2段のカードで 69px あった。いまは切り替えと同じ 50px の1行)。
+   合計の欄が 200px を切る幅(320px の端末)では、切り替えのほうを次の行へ送る。
+   送らないと「支出(自分の分) ¥163,080」が切り替えの下に潜り込んで重なっていた(実測) */
+.hist-band-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.hist-band-totals {
+  flex: 1 1 200px;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 12px;
+  row-gap: 0;
+  margin: 0;
+  padding: 0 2px;
+  line-height: 1.35;
+}
+
+/* 「見出し 金額」の組はなるべく1行に。それでも入りきらない幅では、
+   重ならないよう見出しと金額の間で折り返す(それぞれの中では折り返さない) */
+.hist-total {
+  min-width: 0;
+}
+
+.hist-total-label,
+.hist-total-value {
+  white-space: nowrap;
+}
+
+.hist-total-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.hist-total-value {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.hist-total-value.is-expense {
+  color: var(--expense);
+}
+
+.hist-total-value.is-income {
+  color: var(--income);
+}
+
+.seg.hist-view-seg {
+  flex-shrink: 0;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.seg.hist-view-seg button {
+  flex: none;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+/* まだ送れていない記録があるときだけ帯の下に出る。押すとその一覧 */
+.hist-unsynced-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--radius-btn);
+  border: 1px solid var(--expense-line);
+  background: var(--warning-bg);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.hist-unsynced-chip .hist-unsynced-chip-hint {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* ---------- 未同期の記録のシート ---------- */
+
+.hist-unsynced-lead {
+  line-height: 1.6;
+  margin-bottom: 8px;
+}
+
+.hist-unsynced-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.hist-unsynced-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--gridline);
+  font-size: 14px;
+}
+
+.hist-unsynced-date {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.hist-unsynced-title {
+  overflow-wrap: anywhere;
+}
+
+.hist-unsynced-amount {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.hist-unsynced-deletes,
+.hist-unsynced-left {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin: 4px 2px 8px;
+}
+
+.hist-unsynced-left {
+  color: var(--expense);
+  font-weight: 600;
+}
+
+.hist-unsynced-send {
+  margin-top: 8px;
+}
+
 .hist-empty {
   color: var(--text-muted);
   font-size: 13px;
@@ -521,6 +858,15 @@
 .hist-menu-sheet .hist-menu-item.is-danger {
   color: var(--expense);
   border-color: var(--expense-line);
+}
+
+.hist-menu-sheet .hist-menu-item.is-warn {
+  background: var(--warning-bg);
+}
+
+.hist-menu-sheet .hist-menu-item:disabled {
+  color: var(--text-muted);
+  cursor: default;
 }
 
 .hist-menu-sheet .hist-menu-target {
@@ -698,6 +1044,18 @@
   }
 
   .hist-undo-bar {
+    animation: none;
+  }
+
+  /* 月送りのスライド・端の跳ね返り・更新中の回転は止める(払う操作そのものは効く) */
+  .hist-band-month.slide-next,
+  .hist-band-month.slide-prev,
+  .hist-list-card.slide-next,
+  .hist-list-card.slide-prev,
+  .hist-day-card.slide-next,
+  .hist-day-card.slide-prev,
+  .hist-band-inner.is-bouncing,
+  .hist-sync-chip .is-spinning {
     animation: none;
   }
 }

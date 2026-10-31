@@ -23,6 +23,8 @@ import SettingsSheet from './SettingsSheet'
 import QuarantineSheet from './QuarantineSheet'
 import TemplateSaveSheet from './TemplateSaveSheet'
 import UndoDeleteBar from './UndoDeleteBar'
+import UnsyncedSheet from './UnsyncedSheet'
+import { pendingRows } from '../lib/pendingRecords'
 import { IconCalendar, IconChart, IconGear, IconHeart, IconLogout, IconPen } from './icons'
 import { IconEye, IconEyeOff } from './maskIcons'
 import useBodyScrollLock from '../hooks/useBodyScrollLock'
@@ -75,6 +77,8 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
   const [showSettings, setShowSettings] = useState(false)
   // 同期できずに隔離された記録の一覧 (設定からも、下のバナーからも開ける)
   const [showQuarantine, setShowQuarantine] = useState(false)
+  // まだ送れていない記録の一覧(オフラインの帯の「保留 N件」から開く。履歴タブの帯と同じもの)
+  const [showUnsynced, setShowUnsynced] = useState(false)
   const [templateFrom, setTemplateFrom] = useState<Transaction | null>(null)
   // 履歴カレンダーの「この日で入力する」で入力タブへ渡す日付(機能053)
   const [datePrefill, setDatePrefill] = useState<DatePrefill | undefined>(undefined)
@@ -224,7 +228,16 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
       {!store.isOnline ? (
         <div className="sync-banner offline">
           オフライン — 記録は保存され、通信回復時に自動同期されます
-          {store.pendingCount > 0 && `(保留 ${store.pendingCount}件)`}
+          {/* 件数だけでは「どれが」残っているのか分からないので、押すと中身の一覧を開く */}
+          {store.pendingCount > 0 && (
+            <button
+              type="button"
+              className="btn-ghost banner-link"
+              onClick={() => setShowUnsynced(true)}
+            >
+              (保留 {store.pendingCount}件)
+            </button>
+          )}
         </div>
       ) : store.pendingCount > 0 && store.syncing ? (
         <div className="sync-banner syncing">同期中… ({store.pendingCount}件)</div>
@@ -323,6 +336,16 @@ export default function MainScreen({ supabase }: { supabase: SupabaseClient }) {
           onRetry={(id) => void store.retryQuarantined(id)}
           onDiscard={(id) => store.discardQuarantined(id)}
           onClose={() => setShowQuarantine(false)}
+        />
+      )}
+      {showUnsynced && (
+        <UnsyncedSheet
+          rows={pendingRows(store.transactions, store.pendingIds)}
+          deleteCount={store.pendingDeleteCount}
+          isOnline={store.isOnline}
+          syncing={store.syncing}
+          onSendNow={store.syncNow}
+          onClose={() => setShowUnsynced(false)}
         />
       )}
       {editing && (

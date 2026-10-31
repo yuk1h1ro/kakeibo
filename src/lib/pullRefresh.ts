@@ -22,10 +22,18 @@ export const PULL_START_SLOP = 8
  * 引き下げを始めてよいか。(純粋関数)
  * 一番上にいない・すでに更新中・下向きでない、のいずれかなら始めない。
  * ページが一番上でないときに横取りすると、通常のスクロールを壊してしまう。
+ *
+ * **横より縦に大きく動いたときだけ** 始める(dy > |dx|)。
+ * 以前は縦の移動量しか見ておらず、一番上で「月の帯を左右に払う」つもりの指が
+ * わずかに下へずれただけで引き下げが始まっていた(実測: 横 150px・下 20px で
+ * 更新が走った)。履歴の月の帯は左右に払うと月が変わるので、斜めの指を
+ * どちらに渡すかはここで決める。横が勝っている指は引き下げに使わない。
+ * dx は省略させない — 省略できると、呼ぶ側が渡し忘れても黙って昔の判定に戻るため。
  */
-export function canStartPull(scrollTop: number, dy: number, busy: boolean): boolean {
+export function canStartPull(scrollTop: number, dy: number, busy: boolean, dx: number): boolean {
   if (busy) return false
   if (scrollTop > 0) return false
+  if (dy <= Math.abs(dx)) return false
   return dy > PULL_START_SLOP
 }
 
@@ -71,4 +79,31 @@ export function formatSyncedAt(iso: string | null, now: Date): string | null {
     d.getDate() === yesterday.getDate()
   if (isYesterday) return `昨日 ${time} に更新`
   return `${d.getMonth() + 1}月${d.getDate()}日 ${time} に更新`
+}
+
+/**
+ * 最終同期時刻の短い表示。(純粋関数)
+ *
+ * 履歴の上部を詰めるため、「10:32 に更新」の1行(44px)は検索欄の右端の
+ * 小さなボタンに畳んだ。そこには数文字しか入らないので、時刻だけを出す:
+ *   今日 → 「10:32」 / 昨日 → 「昨日」 / それより前 → 「8/1」
+ * 長い言い方(formatSyncedAt)はボタンを押した先のシートと読み上げ名に残す。
+ * 未取得(null)・壊れた値のときは null(ボタンはアイコンだけになる)。
+ */
+export function formatSyncedShort(iso: string | null, now: Date): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  if (sameDay) return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
+  const isYesterday =
+    d.getFullYear() === yesterday.getFullYear() &&
+    d.getMonth() === yesterday.getMonth() &&
+    d.getDate() === yesterday.getDate()
+  if (isYesterday) return '昨日'
+  return `${d.getMonth() + 1}/${d.getDate()}`
 }

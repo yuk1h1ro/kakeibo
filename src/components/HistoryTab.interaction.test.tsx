@@ -8,6 +8,7 @@ import { LONG_PRESS_MS } from '../lib/rowGesture'
 import { monthKey, todayISO } from '../lib/format'
 import { shiftMonth } from '../lib/calendar'
 import type { Transaction } from '../lib/types'
+import { clearHistoryView, setHistoryView } from '../lib/historyView'
 
 // ============================================================
 // 履歴タブを実際に操作して、**押した結果サーバーへ送られる内容** を確かめる。
@@ -23,6 +24,8 @@ import type { Transaction } from '../lib/types'
 // ============================================================
 
 afterEach(cleanup)
+// 一覧｜カレンダーの選択は端末に残る(localStorage)。テストごとに既定(一覧)へ戻す
+afterEach(() => clearHistoryView())
 
 // jsdom は window.scrollTo を実装していない。背面固定 (bodyScrollLock) が
 // シートを閉じるときに呼ぶだけなので、何もしない関数を置いておく
@@ -217,22 +220,37 @@ describe('長押しからの複製 (機能149)', () => {
   })
 })
 
+// 既定の見え方が「一覧」になったので、その日の合計は日付の見出し(.hist-day-total)に出る。
+// カレンダー表示では従来どおり選んだ日の見出し(.hist-result-total)。両方で同じ額になること
 describe('履歴の一覧に出る合計', () => {
+  const dayTotals = () =>
+    [
+      document.querySelector('.hist-day-total') as HTMLElement,
+      document.querySelector('.hist-result-total') as HTMLElement,
+    ].map((el) => el?.textContent ?? '')
+
   it('その日の合計は「自分の実質支出」で出す(彼女の負担分を含めない)', async () => {
     // ¥2,000 のうち彼女が ¥800 負担 → 自分の負担は ¥1,200。
     // ここで amount をそのまま足すと、明細の1行ずつと合計が食い違う
     setup([tx({ amount: 2000, partner_amount: 800 })])
-    const head = document.querySelector('.hist-result-total') as HTMLElement
-    expect(head.textContent).toContain('¥1,200')
+    expect(dayTotals()[0]).toContain('¥1,200')
+    cleanup()
+    setHistoryView('calendar')
+    setup([tx({ amount: 2000, partner_amount: 800 })])
+    expect(dayTotals()[1]).toContain('¥1,200')
   })
 
   it('預かりは支出の合計に混ざらない(残高の話であって支出ではない)', async () => {
-    setup([
+    const rows = () => [
       tx({ amount: 2000, partner_amount: 800 }),
       tx({ id: 'd1', type: 'partner_deposit', amount: 30000, category: null, store: '' }),
-    ])
-    const head = document.querySelector('.hist-result-total') as HTMLElement
-    expect(head.textContent).toContain('¥1,200')
+    ]
+    setup(rows())
+    expect(dayTotals()[0]).toContain('¥1,200')
+    cleanup()
+    setHistoryView('calendar')
+    setup(rows())
+    expect(dayTotals()[1]).toContain('¥1,200')
   })
 })
 
@@ -269,9 +287,9 @@ describe('お店で絞り込む導線', () => {
     tx({ id: 'c', store: 'オカモトセルフ', date: OLD_DAY, created_at: `${OLD_DAY}T01:00:00.000Z` }),
   ]
 
-  /** 絞り込みバーに出ている「いま何で絞っているか」の説明文 */
+  /** 絞り込みバーに出ている「いま何で絞っているか」の説明文(絞っていなければ行ごと無い) */
   const filterState = () =>
-    (document.querySelector('.hist-filter-state') as HTMLElement).textContent
+    document.querySelector('.hist-filter-state')?.textContent ?? ''
 
   it('長押し →「このお店の履歴だけ見る」で、その店だけの一覧になる', async () => {
     setup(rows())
@@ -475,7 +493,7 @@ describe('日付を指定した絞り込み (期間「指定」)', () => {
   ]
 
   const filterState = () =>
-    (document.querySelector('.hist-filter-state') as HTMLElement).textContent
+    document.querySelector('.hist-filter-state')?.textContent ?? ''
 
   /** 絞り込みを開いて「指定」を選び、開始・終了を入れる */
   async function pickRange(

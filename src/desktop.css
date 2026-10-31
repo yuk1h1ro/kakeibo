@@ -238,15 +238,40 @@
   .app-main > .error-text,
   .app-main > .report-swipe,
   .app-main > .comment-unread-banner,
-  .hist-pullable > .month-nav,
-  .hist-pullable > .hist-sync-line,
+  .hist-pullable > .hist-search,
+  .hist-band .month-nav,
+  .hist-band .hist-band-bar,
+  .hist-band .hist-unsynced-chip,
   .hist-pullable > .hist-pull-indicator {
     column-span: all;
   }
 
+  /* 履歴の「月の帯」(見出し・合計・カレンダーを包む箱)は、狭い画面では
+     左右に払う場所 + 一覧表示で上に貼り付く入れ物だが、広い画面では段組みの邪魔になる
+     (帯ごと1つの段に入り、カレンダーと明細が横に並ばなくなる)。
+     そこで箱を作らず(display: contents)、中身をこれまでどおり段組みへ流す。
+     払う判定はイベントの伝わり方で決まるので、箱が無くても帯の中で払えば月は変わる。
+     貼り付け(sticky)も段組みの中では効かせない */
+  .hist-band,
+  .hist-band-inner,
+  .hist-band-month {
+    display: contents;
+  }
+
+  .hist-band .cal-card {
+    break-inside: avoid;
+    margin-bottom: 20px;
+  }
+
+  .hist-band .month-nav,
+  .hist-band .hist-band-bar,
+  .hist-band .hist-unsynced-chip {
+    margin-bottom: 20px;
+  }
+
   /* 月ナビは幅いっぱいだと矢印が両端に離れすぎるので、中央にまとめる */
   .app-main > .month-nav,
-  .hist-pullable > .month-nav {
+  .hist-band .month-nav {
     justify-content: center;
     gap: 24px;
   }

@@ -8,7 +8,7 @@
 //   確定後も 220ms だけ待ってから走らせる(1文字ごとの再計算を避ける)。
 // ============================================================
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { categoryLabel, useCategories } from '../lib/categories'
 import {
   DEFAULT_FILTER,
@@ -27,6 +27,7 @@ import {
 import { collectTags } from '../lib/tags'
 import type { Transaction } from '../lib/types'
 import '../ledger.css'
+import { IconFilter } from './historyIcons'
 import {
   addSavedFilter,
   findMatchingFilter,
@@ -41,9 +42,22 @@ interface Props {
   onChange: (next: HistoryFilter) => void
   /** タグの選択肢を出すための記録一覧 (機能088)。使われているタグだけを出す */
   transactions?: readonly Transaction[]
+  /**
+   * 検索欄と同じ行の右端に置くもの(履歴タブの「⟳ 10:32」)。
+   * 上部を詰めるために、もとは別の1行だった最終同期の表示をここへ畳んでいる
+   */
+  trailing?: ReactNode
 }
 
-export default function HistoryFilterBar({ filter, onChange, transactions }: Props) {
+// ---- 1行に畳んだ理由 ----
+// 以前は「検索欄」の下に「絞り込み・並べ替え ▼」の行があり、カード全体で 130px あった。
+// 履歴タブを開いた瞬間に明細が1行も見えない原因の1つだったので、
+// 検索欄・絞り込みの入口・(呼び出し側の)更新ボタンを1行に並べる。
+// 絞り込みの入口は幅が足りないので、つまみのアイコン + 短い「絞り込み」にした
+// (読み上げ名は従来どおり「絞り込み・並べ替え」。320px 幅では文字を隠してアイコンだけ)。
+// 何で絞っているか(describeFilter)は入口の中に入りきらないので、
+// **絞っているときだけ** 行の下に1行で出す。何も絞っていないときは場所を取らない。
+export default function HistoryFilterBar({ filter, onChange, transactions, trailing }: Props) {
   const categories = useCategories()
   // 実際に使われているタグだけを候補にする(空の選択肢を並べない)
   const tagOptions = collectTags(transactions ?? [], 40)
@@ -129,60 +143,72 @@ export default function HistoryFilterBar({ filter, onChange, transactions }: Pro
     setNaming(null)
   }
 
+  const stateText = matching ? matching.name : active ? describeFilter(filter, categoryLabel) : ''
+
   return (
-    <div className="card">
+    <div className="hist-search">
       <div className="hist-search-row">
-        <input
-          type="search"
-          inputMode="search"
-          enterKeyHint="search"
-          value={draft}
-          placeholder="店名・メモ・カテゴリで検索"
-          aria-label="記録を検索"
-          onChange={(e) => {
-            const value = e.target.value
-            setDraft(value)
-            // 変換中は確定させない(暴発防止)。確定は compositionend で行う
-            if (composingRef.current) return
-            commitQuery(value)
-          }}
-          onCompositionStart={() => {
-            composingRef.current = true
-          }}
-          onCompositionEnd={(e) => {
-            composingRef.current = false
-            const value = e.currentTarget.value
-            setDraft(value)
-            commitQuery(value)
-          }}
-        />
-        {draft !== '' && (
-          <button
-            className="hist-search-clear"
-            aria-label="検索語を消す"
-            onClick={() => {
-              setDraft('')
-              commitQuery('')
+        {/* ✕ は欄の中に重ねる(横に並べると、1行に詰めた欄がさらに 44px 狭くなる) */}
+        <span className={`hist-search-field${draft !== '' ? ' has-clear' : ''}`}>
+          <input
+            type="search"
+            inputMode="search"
+            enterKeyHint="search"
+            value={draft}
+            // 1行に並べたぶん欄が狭くなったので短くした(390px 幅で切れずに読める長さ)。
+            // 引けるのは店名・メモだけではなく、カテゴリ名・タグも今までどおり
+            placeholder="店名・メモで検索"
+            aria-label="記録を検索"
+            onChange={(e) => {
+              const value = e.target.value
+              setDraft(value)
+              // 変換中は確定させない(暴発防止)。確定は compositionend で行う
+              if (composingRef.current) return
+              commitQuery(value)
             }}
-          >
-            ✕
-          </button>
-        )}
+            onCompositionStart={() => {
+              composingRef.current = true
+            }}
+            onCompositionEnd={(e) => {
+              composingRef.current = false
+              const value = e.currentTarget.value
+              setDraft(value)
+              commitQuery(value)
+            }}
+          />
+          {draft !== '' && (
+            <button
+              className="hist-search-clear"
+              aria-label="検索語を消す"
+              onClick={() => {
+                setDraft('')
+                commitQuery('')
+              }}
+            >
+              ✕
+            </button>
+          )}
+        </span>
+        <button
+          className={`hist-filter-btn${active ? ' is-on' : ''}${open ? ' is-open' : ''}`}
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-label="絞り込み・並べ替え"
+        >
+          <IconFilter />
+          <span className="hist-filter-btn-text">絞り込み</span>
+        </button>
+        {trailing}
       </div>
 
-      <button
-        className="hist-filter-toggle"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        <span>絞り込み・並べ替え {open ? '▲' : '▼'}</span>
-        <span className="hist-filter-state">
-          {matching ? matching.name : active ? describeFilter(filter, categoryLabel) : ''}
-        </span>
-      </button>
+      {stateText !== '' && (
+        <p className="hist-filter-state-line">
+          <span className="hist-filter-state">{stateText}</span>
+        </p>
+      )}
 
       {open && (
-        <div className="hist-filter-body">
+        <div className="card hist-filter-body">
           <div>
             {/* 並べ替えの基準を明示する(支払い総額ではなく自分の実質支出) */}
             <span className="hist-field-label">並べ替え(金額は自分の実質支出で比べます)</span>
